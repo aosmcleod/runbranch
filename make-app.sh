@@ -39,6 +39,12 @@ for spec in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x \
 done
 
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+
+# Also keep a PNG: `display dialog` can wear a custom icon, and without one
+# every prompt shows the generic script icon, which reads as an error rather
+# than as this app asking a question. frankly-launcher.sh looks for it here.
+sips -z 512 512 "$BASE" --out "$APP/Contents/Resources/AppIcon.png" >/dev/null
+
 rm -rf "$(dirname "$ICONSET")"
 echo "    icon built"
 
@@ -66,6 +72,17 @@ PLIST
 # ever moves; the error below says exactly that.
 cat > "$APP/Contents/MacOS/FranklyLauncher" <<LAUNCHER
 #!/bin/bash
+#
+# An app launched from the Dock inherits launchd's PATH -- /usr/bin:/bin:
+# /usr/sbin:/sbin -- not the one your shell builds. Under it docker
+# (/usr/local/bin), pnpm and gh (/opt/homebrew/bin) and node (fnm) are all
+# invisible, and the launcher reports them missing while they sit right there.
+#
+# So run the launcher through a LOGIN + INTERACTIVE zsh: -l reads the login
+# files and -i reads ~/.zshrc, which is where fnm's shell hook lives. PATH then
+# matches your terminal exactly. Only environment variables cross into the
+# script's own bash process, so shell functions defined in ~/.zshrc (the git
+# wrapper, for one) cannot alter how the launcher behaves.
 SCRIPT="$SCRIPT"
 if [ ! -x "\$SCRIPT" ]; then
   osascript -e 'display alert "Frankly Launcher" message "The launcher script is missing from:
@@ -75,7 +92,13 @@ $SCRIPT
 The repo has moved or been deleted. Re-run make-app.sh from wherever it lives now." as critical buttons {"OK"}'
   exit 1
 fi
-exec "\$SCRIPT"
+if [ -x /bin/zsh ]; then
+  # zsh -c sets \$0 from the first operand, so the script path and every
+  # argument are passed as real positional parameters -- no quoting of the
+  # path into a command string, and arguments survive.
+  exec /bin/zsh -lic 'exec "\$0" "\$@"' "\$SCRIPT" "\$@" </dev/null
+fi
+exec "\$SCRIPT" "\$@"
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/FranklyLauncher"
 

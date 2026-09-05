@@ -91,6 +91,17 @@ warn() { printf '    %swarn%s %s\n' "$C_YEL" "$C_OFF" "$*"; }
 # spliced in with (ASCII character 10) by the caller that needs one.
 as_quote() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
+# Dialogs raised by `osascript` wear a generic script icon unless told
+# otherwise, which makes them look like something went wrong rather than like
+# this app asking a question. make-app.sh drops a PNG next to the .icns for
+# exactly this. Absent (running straight from the repo with no bundle built),
+# every dialog still works -- it just wears the default icon.
+ICON_PNG="$(dirname "$SELF")/Frankly Launcher.app/Contents/Resources/AppIcon.png"
+icon_clause() {
+  [ -f "$ICON_PNG" ] || return 0
+  printf ' with icon (POSIX file "%s")' "$(as_quote "$ICON_PNG")"
+}
+
 # A modal alert, for real failures.
 gui_alert() {
   osascript >/dev/null 2>&1 \
@@ -152,25 +163,33 @@ ask() {
   def='Yes'; [ "$default_no" = 1 ] && def='No'
   out=$(osascript 2>/dev/null \
     -e 'tell me to activate' \
-    -e "button returned of (display dialog \"$(as_quote "$question")\" buttons {\"No\", \"Yes\"} default button \"$def\" with title \"$(as_quote "$APP_NAME")\")")
+    -e "button returned of (display dialog \"$(as_quote "$question")\" buttons {\"No\", \"Yes\"} default button \"$def\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))")
   [ "$out" = "Yes" ]
 }
 
-# The native picker. Prints the chosen line(s), one per line; returns 1 on
-# cancel. $2 is "single" or "multiple"; remaining args are the items.
+# The native list picker. Prints the chosen line(s), one per line; returns 1 on
+# cancel. $2 is "single" or "multiple", $3 is the confirm button's label, and
+# the remaining args are the rows.
+#
+# Single-select preselects the first row, so the common case -- start the
+# branch you demoed last -- is Return with nothing else touched.
 choose() {
-  local prompt="$1" mode="$2"; shift 2
-  local list='' item multi='false' out
+  local prompt="$1" mode="$2" oklabel="$3"; shift 3
+  local list='' item multi='false' preselect='' out
   for item in "$@"; do
     list="$list\"$(as_quote "$item")\", "
   done
   list="${list%, }"
   [ -z "$list" ] && return 1
-  [ "$mode" = multiple ] && multi='true'
+  if [ "$mode" = multiple ]; then
+    multi='true'
+  else
+    preselect=' default items {item 1 of theList}'
+  fi
   out=$(osascript 2>/dev/null \
     -e 'tell me to activate' \
     -e "set theList to {$list}" \
-    -e "set theChoice to choose from list theList with title \"$(as_quote "$APP_NAME")\" with prompt \"$(as_quote "$prompt")\" OK button name \"Continue\" cancel button name \"Cancel\" multiple selections allowed $multi" \
+    -e "set theChoice to choose from list theList with title \"$(as_quote "$APP_NAME")\" with prompt \"$(as_quote "$prompt")\"$preselect OK button name \"$(as_quote "$oklabel")\" cancel button name \"Cancel\" multiple selections allowed $multi" \
     -e 'if theChoice is false then error number -128' \
     -e "set AppleScript's text item delimiters to (ASCII character 10)" \
     -e 'return theChoice as text')
@@ -179,18 +198,82 @@ choose() {
 }
 
 # ---------------------------------------------------------------------------
+# PATH hardening
+#
+# An app launched from the Dock inherits launchd's PATH -- /usr/bin:/bin:
+# /usr/sbin:/sbin -- and NOT the one your shell builds. Under it, docker
+# (/usr/local/bin), pnpm and gh (/opt/homebrew/bin) and node (fnm, whose bin
+# directory is generated per shell session and has no fixed location) are all
+# invisible. The launcher would then report them as "not installed" while they
+# sit right there, which is exactly the sort of unactionable error this tool
+# exists to avoid.
+#
+# There are two layers of defence. The .app wrapper runs this script through
+# `zsh -lic`, so your real shell environment is loaded and PATH matches your
+# terminal exactly. This function is the second layer: it makes the script work
+# when it is invoked from anywhere with a bare environment.
+# ---------------------------------------------------------------------------
+
+harden_path() {
+  local dir
+  for dir in \
+    /opt/homebrew/bin \
+    /opt/homebrew/sbin \
+    /usr/local/bin \
+    "$HOME/.local/bin" \
+    "$HOME/Library/pnpm" \
+    /Applications/Docker.app/Contents/Resources/bin
+  do
+    [ -d "$dir" ] || continue
+    case ":$PATH:" in
+      *":$dir:"*) ;;
+      *) PATH="$PATH:$dir" ;;
+    esac
+  done
+  export PATH
+
+  # node and corepack come from fnm, which mints a bin directory per shell
+  # session -- there is no stable path to add, so ask fnm where it put one.
+  if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env 2>/dev/null)" || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Host preflight
 # ---------------------------------------------------------------------------
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "\`$1\` is not on PATH." "$2"
+  command -v "$1" >/dev/null 2>&1 && return 0
+  die "\`$1\` is not on PATH.
+
+The launcher already looks in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin,
+~/Library/pnpm, Docker.app's bundled bin, and asks fnm for its node directory.
+So $1 is either genuinely missing, or installed somewhere unusual -- in which
+case running the launcher from your terminal will pick up your own PATH." "$2"
+}
+
+# Studio pins its Node version in .nvmrc and package.json engines. A lower one
+# on PATH fails deep inside a build, where the message names neither Node nor
+# the version, so check it here where the fix is one line.
+check_node_version() {
+  local want have
+  want=$(tr -dc '0-9' < "$STUDIO/.nvmrc" 2>/dev/null | head -c 3)
+  [ -n "$want" ] || return 0
+  have=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)
+  [ -n "$have" ] || return 0
+  [ "$have" -ge "$want" ] 2>/dev/null && { ok "node $have (Studio pins $want)"; return 0; }
+  die "Node $have is on PATH, but Studio pins Node $want in .nvmrc." \
+    "fnm install $want && fnm default $want"
 }
 
 preflight_host() {
+  harden_path
   require_cmd git    'xcode-select --install'
   require_cmd docker 'Install Docker Desktop: https://www.docker.com/products/docker-desktop/'
-  require_cmd node   'Install Node 24 (see .nvmrc): https://nodejs.org'
+  require_cmd node   'fnm install 24 && fnm default 24'
   require_cmd pnpm   'corepack enable'
+  check_node_version
 
   [ -d "$STUDIO/.git" ] || die \
     "No git repository at $STUDIO." \
@@ -760,8 +843,8 @@ print_status() {
 # double space, so notes must never contain one at the front.
 label_ref() { printf '%s' "${1%%"  "*}"; }
 
-FETCH_LABEL='↻  Refresh the list from origin (git fetch)'
-TYPE_LABEL='⌕  Type a branch name...'
+FETCH_LABEL='↻   Fetch from origin'
+TYPE_LABEL='⌕   Type a branch name...'
 
 # This repo carries 500+ remote branches. All of them in one `choose from list`
 # is not a picker, it is a haystack -- so remotes are capped and anything older
@@ -781,9 +864,9 @@ build_branch_items() {
     case " $seen " in *" $ref "*) continue ;; esac
     seen="$seen $ref"
     note='recent'
-    [ -d "$(worktree_path "$ref")" ] && note='recent, worktree ready'
-    [ "$ref" = "$cur" ] && note="$note, checked out in Studio"
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ($note)"
+    [ -d "$(worktree_path "$ref")" ] && note='recent, ready'
+    [ "$ref" = "$cur" ] && note="$note, open in Studio"
+    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  $note"
   done <<EOF
 $(recent_refs)
 EOF
@@ -794,9 +877,9 @@ EOF
     case " $seen " in *" $ref "*) continue ;; esac
     seen="$seen $ref"
     note='local'
-    [ -d "$(worktree_path "$ref")" ] && note='local, worktree ready'
-    [ "$ref" = "$cur" ] && note="$note, checked out in Studio"
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ($note)"
+    [ -d "$(worktree_path "$ref")" ] && note='ready'
+    [ "$ref" = "$cur" ] && note="$note, open in Studio"
+    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  $note"
   done <<EOF
 $(studio_git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads 2>/dev/null)
 EOF
@@ -813,7 +896,7 @@ EOF
     case " $seen " in *" ${ref#origin/} "*) continue ;; esac
     [ "$shown" -ge "$REMOTE_LIMIT" ] && break
     shown=$((shown + 1))
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  (remote)"
+    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  remote"
   done <<EOF
 $(studio_git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes/origin 2>/dev/null)
 EOF
@@ -850,7 +933,7 @@ pick_branch() {
   while :; do
     build_branch_items
     local picked
-    picked=$(choose "Which branch should the demo run?" single "${BRANCH_ITEMS[@]}") || return 1
+    picked=$(choose "Which branch?" single "Choose" "${BRANCH_ITEMS[@]}") || return 1
     if [ "$picked" = "$TYPE_LABEL" ]; then
       local typed resolved
       typed=$(gui_prompt "Branch name (local, or origin/<name>):") || return 1
@@ -879,18 +962,22 @@ If it only exists on the remote, refresh the list from origin first."
 }
 
 # Sets PICKED_TARGET to web|admin|both. The api is not optional -- web and
-# admin are useless without it, so it is never offered as a choice.
+# admin are useless without it -- so it is never offered as a choice.
+#
+# Three options is what buttons are for. A list would be the wrong control and
+# would look like a list of files rather than a question.
 pick_target() {
   PICKED_TARGET=''
-  local a='web  (customer app, port 3000, plus the api)'
-  local b='admin  (staff app, port 3002, plus the api)'
-  local c='both  (web + admin + api)'
   local picked
-  picked=$(choose "What should run? The api starts either way." single "$a" "$b" "$c") || return 1
+  picked=$(osascript 2>/dev/null \
+    -e 'tell me to activate' \
+    -e "button returned of (display dialog \"$(as_quote "$1")
+
+Web is the customer app, Admin is the staff app. The api starts either way.\" buttons {\"Web\", \"Admin\", \"Both\"} default button \"Web\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))") || return 1
   case "$picked" in
-    "$a") PICKED_TARGET=web ;;
-    "$b") PICKED_TARGET=admin ;;
-    "$c") PICKED_TARGET=both ;;
+    Web)   PICKED_TARGET=web ;;
+    Admin) PICKED_TARGET=admin ;;
+    Both)  PICKED_TARGET=both ;;
     *) return 1 ;;
   esac
 }
@@ -909,9 +996,9 @@ cleanup_worktrees() {
     case "$name" in meta|logs|.*) continue ;; esac
     size=$(du -sh "$dir" 2>/dev/null | awk '{print $1}')
     if [ "$dir" = "$running_wt" ]; then
-      items[${#items[@]}]="$name  ($size, RUNNING - stop the demo first)"
+      items[${#items[@]}]="$name  ·  $size, running - stop it first"
     else
-      items[${#items[@]}]="$name  ($size)"
+      items[${#items[@]}]="$name  ·  $size"
     fi
   done
 
@@ -921,7 +1008,7 @@ cleanup_worktrees() {
     return 0
   fi
 
-  picked=$(choose "Remove which worktrees? (each frees its own node_modules)" multiple "${items[@]}") || return 0
+  picked=$(choose "Remove which worktrees?" multiple "Remove" "${items[@]}") || return 0
 
   local line label path
   while IFS= read -r line; do
@@ -972,8 +1059,8 @@ run_in_terminal() {
 # ---------------------------------------------------------------------------
 
 start_flow() {
-  pick_branch  || return 0
-  pick_target  || return 0
+  pick_branch || return 0
+  pick_target "Run $PICKED_REF" || return 0
   remember_ref "$PICKED_REF"
   if [ "$HAVE_TTY" = 1 ]; then
     do_run "$PICKED_REF" "$PICKED_TARGET"
@@ -982,42 +1069,72 @@ start_flow() {
   fi
 }
 
+# How many throwaway worktrees exist, and what they cost. Sets WT_COUNT/WT_SIZE.
+worktree_stats() {
+  WT_COUNT=0
+  WT_SIZE=''
+  local dir
+  for dir in "$DEMO_ROOT"/*; do
+    [ -d "$dir" ] || continue
+    case "$(basename "$dir")" in meta|logs|.*) continue ;; esac
+    WT_COUNT=$((WT_COUNT + 1))
+  done
+  [ "$WT_COUNT" -gt 0 ] && WT_SIZE=$(du -sh "$DEMO_ROOT" 2>/dev/null | awk '{print $1}')
+}
+
+# "Offer to remove a worktree when done" -- so it is offered when the demo
+# stops, which is when it is actually relevant, rather than sitting in the way
+# as a permanent menu item every time you just want to start something.
+offer_cleanup() {
+  worktree_stats
+  [ "$WT_COUNT" -gt 0 ] || return 0
+  local noun='worktree'
+  [ "$WT_COUNT" -gt 1 ] && noun='worktrees'
+  ask "Demo stopped.
+
+$WT_COUNT demo $noun using $WT_SIZE. Remove any?" 1 || return 0
+  cleanup_worktrees
+}
+
+# The running demo, as one native dialog rather than a list of commands.
+# Three actions is what buttons are for, and Open is the default so Return
+# does the obvious thing.
 running_menu() {
-  local open_item stop_item switch_item logs_item clean_item picked
-  open_item="Open the demo in a browser"
-  stop_item="Stop the demo"
-  switch_item="Switch to another branch  (stops this one first)"
-  logs_item="Show the logs"
-  clean_item="Remove old worktrees"
-  picked=$(choose "$S_REF ($S_TARGET) has been running since $S_STARTED." single \
-    "$open_item" "$stop_item" "$switch_item" "$logs_item" "$clean_item") || return 0
+  local what urls='' picked
+  case "$S_TARGET" in
+    web)   what='Web' ;;
+    admin) what='Admin' ;;
+    both)  what='Web and Admin' ;;
+    *)     what="$S_TARGET" ;;
+  esac
+  alive "$S_WEB_PID"   && urls="localhost:$PORT_WEB"
+  alive "$S_ADMIN_PID" && urls="${urls:+$urls    }localhost:$PORT_ADMIN"
+
+  # Built here rather than inline so an absent url line leaves no blank row.
+  local body="$S_REF
+
+$what, running since ${S_STARTED#* }"
+  [ -n "$urls" ] && body="$body
+$urls"
+
+  picked=$(osascript 2>/dev/null \
+    -e 'tell me to activate' \
+    -e "button returned of (display dialog \"$(as_quote "$body")\" buttons {\"Stop\", \"Switch\", \"Open\"} default button \"Open\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))") || return 0
+
   case "$picked" in
-    "$open_item")
+    Open)
       alive "$S_WEB_PID"   && open "$URL_WEB"   >/dev/null 2>&1
       alive "$S_ADMIN_PID" && open "$URL_ADMIN" >/dev/null 2>&1
       ;;
-    "$stop_item")
-      stop_demo
-      gui_notify "$APP_NAME" "Demo stopped."
-      ;;
-    "$switch_item")
+    Switch)
       stop_demo quiet
-      gui_notify "$APP_NAME" "Previous demo stopped."
       start_flow
       ;;
-    "$logs_item") open "$LOG_DIR" >/dev/null 2>&1 ;;
-    "$clean_item") cleanup_worktrees ;;
-  esac
-}
-
-idle_menu() {
-  local start_item clean_item picked
-  start_item="Start a demo"
-  clean_item="Remove old worktrees"
-  picked=$(choose "Nothing is running." single "$start_item" "$clean_item") || return 0
-  case "$picked" in
-    "$start_item") start_flow ;;
-    "$clean_item") cleanup_worktrees ;;
+    Stop)
+      stop_demo quiet
+      gui_notify "$APP_NAME" "Demo stopped."
+      offer_cleanup
+      ;;
   esac
 }
 
@@ -1076,6 +1193,7 @@ USAGE
 }
 
 main() {
+  harden_path
   case "${1:-menu}" in
     run)
       [ $# -eq 3 ] || { usage; exit 2; }
@@ -1086,7 +1204,9 @@ main() {
     cleanup) preflight_host; cleanup_worktrees ;;
     menu|'')
       preflight_host
-      if demo_running; then running_menu; else idle_menu; fi
+      # Opening the app means "start a demo" -- there is no menu in the way.
+      # A demo already running is the one case where a choice is needed.
+      if demo_running; then running_menu; else start_flow; fi
       ;;
     -h|--help|help) usage ;;
     *) usage; exit 2 ;;

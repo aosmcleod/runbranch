@@ -72,19 +72,34 @@ The bundle does not contain a copy of the script — it calls
 `frankly-launcher.sh` where it sits in this repo, so edits take effect with no
 rebuild. If you ever move the repo, re-run `make-app.sh`.
 
+**Why the bundle runs the script through `zsh -lic`.** An app launched from the
+Dock inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — not the one
+your shell builds. Under that, `docker` (`/usr/local/bin`), `pnpm` and `gh`
+(`/opt/homebrew/bin`) and `node` (fnm, whose bin directory is minted per shell
+session and has no fixed location) are all invisible, and the launcher reports
+them as missing while they sit right there. Running through a login +
+interactive zsh loads your real environment, so `PATH` matches your terminal
+exactly. Only environment variables cross into the script's own bash process,
+so shell functions in `~/.zshrc` cannot change how the launcher behaves. The
+script also hardens its own `PATH` as a second layer, for when it is invoked
+from somewhere with a bare environment.
+
 ---
 
 ## Using it
 
-Click the Dock icon. You get native pickers:
+Clicking the Dock icon means *start a demo* — there is no menu in the way. You
+go straight to two questions:
 
 1. **Which branch.** Recently-demoed branches first, then local branches, then
-   the 25 most recently updated remote branches. Anything older is reachable
-   through *Type a branch name...*; *Refresh the list from origin* runs a
-   `git fetch` when you ask for one. The branch currently checked out in Studio
-   is marked, and so is any branch whose worktree is already built.
-2. **What to run.** `web` (port 3000), `admin` (port 3002), or both. The api
-   (port 4000) always starts — web and admin are useless without it.
+   the 25 most recently updated remote branches. The top row is preselected, so
+   restarting the branch you demoed last is just Return. The branch currently
+   open in Studio is marked, and so is any branch whose worktree is already
+   built. Anything older is reachable through *Type a branch name...*; *Fetch
+   from origin* refreshes the list when you ask it to.
+2. **What to run.** Buttons: **Web** (port 3000), **Admin** (port 3002), or
+   **Both**. The api (port 4000) always starts — web and admin are useless
+   without it.
 
 From there the launcher prepares the worktree, installs, brings up Postgres and
 Valkey, migrates if needed, starts the servers, and opens the browser once they
@@ -92,8 +107,13 @@ answer. Launched from the Dock, that phase runs in a Terminal window so you can
 watch it — the first install on a cold pnpm store takes a few minutes, and a
 silent spinner is how a launcher gets mistaken for a hung one.
 
-While a demo is running, clicking the icon offers: open in browser, stop,
-switch branch, show logs, remove old worktrees.
+**While a demo is running**, clicking the icon shows what is up — branch, what
+is running, since when, the URLs — with three buttons: **Open**, **Switch**
+(stops this demo and starts another), **Stop**.
+
+Removing worktrees is offered *after* you stop a demo, which is when it is
+actually relevant, rather than sitting in the way every time you want to start
+one. `./frankly-launcher.sh cleanup` reaches it directly at any time.
 
 ### From a shell
 
@@ -198,6 +218,7 @@ leaves alone.
 
 | Symptom | Fix |
 |---|---|
+| From the Dock: "`docker` is not on PATH" (or node / pnpm / gh) | The bundle is stale or was built before the `zsh -lic` fix. Re-run `./make-app.sh` |
 | `401` from `npm.pkg.github.com` during install | `gh auth refresh -h github.com -s read:packages`, then `node scripts/ensure-npmrc.mjs` in the worktree |
 | `ERR_PNPM_OUTDATED_LOCKFILE` | The branch's lockfile does not match its `package.json`. `cd <worktree> && pnpm install`, then re-run the launcher |
 | Blank or unstyled UI | HeroUI Pro installed as a stub. `npx heroui-pro login`, then delete the worktree and let it rebuild |

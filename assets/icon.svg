@@ -1,16 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="#1b2233"/>
-  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="none" stroke="#2e3950" stroke-width="8"/>
-  <!-- worktree: one trunk, branches peeling off to their own demo -->
-  <g stroke="#5c6b8a" stroke-width="34" stroke-linecap="round" fill="none">
-    <path d="M300 236 L300 788"/>
-    <path d="M300 420 C300 508, 420 508, 470 508"/>
-    <path d="M300 604 C300 692, 420 692, 470 692"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#46589C"/>
+      <stop offset="0.55" stop-color="#2A3457"/>
+      <stop offset="1" stop-color="#161B2A"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5BF0AE"/>
+      <stop offset="1" stop-color="#22B87A"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="512" rx="230" fill="url(#sheen)"/>
+
+  <!-- the worktree: a trunk that branches off to its own demo -->
+  <g stroke="#8FA0CB" stroke-opacity="0.9" stroke-width="54" fill="none"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M310 330 L310 694"/>
+    <path d="M310 512 L416 512"/>
   </g>
-  <circle cx="300" cy="236" r="58" fill="#5c6b8a"/>
-  <circle cx="300" cy="788" r="58" fill="#5c6b8a"/>
-  <circle cx="512" cy="692" r="52" fill="#5c6b8a"/>
-  <!-- the demo you actually launch -->
-  <circle cx="620" cy="508" r="150" fill="#3ddc97"/>
-  <path d="M584 440 L584 576 L692 508 Z" fill="#1b2233"/>
+  <circle cx="310" cy="330" r="58" fill="#8FA0CB"/>
+  <circle cx="310" cy="694" r="58" fill="#8FA0CB"/>
+
+  <!-- the demo you launch off it -->
+  <path d="M506 348 L506 676 L778 512 Z" fill="url(#play)"
+        stroke="url(#play)" stroke-width="72" stroke-linejoin="round"/>
 </svg>
