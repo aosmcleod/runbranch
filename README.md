@@ -72,7 +72,7 @@ The bundle does not contain a copy of the script — it calls
 `frankly-launcher.sh` where it sits in this repo, so edits take effect with no
 rebuild. If you ever move the repo, re-run `make-app.sh`.
 
-**Why the bundle runs the script through `zsh -lic`.** An app launched from the
+**Why the app runs the script through `zsh -lic`.** An app launched from the
 Dock inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — not the one
 your shell builds. Under that, `docker` (`/usr/local/bin`), `pnpm` and `gh`
 (`/opt/homebrew/bin`) and `node` (fnm, whose bin directory is minted per shell
@@ -88,39 +88,25 @@ from somewhere with a bare environment.
 
 ## Using it
 
-Clicking the Dock icon means *start a demo* — there is no menu in the way. You
-go straight to two questions:
+Clicking the Dock icon opens one window: a flat list of your **local** branches,
+newest first.
 
-1. **Which branch.** A real window (`picker.js`), because the stock list
-   picker cannot do sections, columns or checkboxes:
+Each row is the branch name with badges and its last-updated age:
 
-   - **Default** — `development`, always listed.
-   - **My branches** — anything whose tip you authored, newest first. Each row
-     shows the branch (ellipsed), a dim hint (`ready` when its worktree is
-     already built, `open in Studio`), and the last-updated age, right-aligned.
-   - **Include branches whose PR is merged** — off by default. Merged work is
-     the bulk of the noise.
-   - **Show everyone else's branches** — off by default; reveals a third
-     section with the most recent slice of everyone else's work.
+| badge | meaning |
+|---|---|
+| `default` | `development` — always listed, never filtered out |
+| `open` / `merged` / `closed` | its pull request, in GitHub's own status colours |
+| `me` / a first name | who authored the branch tip |
+| `ready` | its worktree is already built, so this one starts in seconds |
 
-   *Fetch* re-reads origin and re-renders. *Choose* starts the demo.
-2. **What to run.** Buttons: **Web** (port 3000), **Admin** (port 3002), or
-   **Both**. The api (port 4000) always starts — web and admin are useless
-   without it.
+Hidden by default, each behind a checkbox: branches whose PR is **merged**, and
+branches **older than a week**. On a repo where 359 of 400 PRs are merged, that
+is the difference between 7 rows and 636.
 
-From there the launcher prepares the worktree, installs, brings up Postgres and
-Valkey, migrates if needed, starts the servers, and opens the browser once they
-answer. Launched from the Dock, that phase runs in a Terminal window so you can
-watch it — the first install on a cold pnpm store takes a few minutes, and a
-silent spinner is how a launcher gets mistaken for a hung one.
-
-**While a demo is running**, clicking the icon shows what is up — branch, what
-is running, since when, the URLs — with three buttons: **Open**, **Switch**
-(stops this demo and starts another), **Stop**.
-
-Removing worktrees is offered *after* you stop a demo, which is when it is
-actually relevant, rather than sitting in the way every time you want to start
-one. `./frankly-launcher.sh cleanup` reaches it directly at any time.
+Pick a branch, pick Web / Admin / Both, press Start. The window then shows the
+run itself — worktree, install, infra, migrations, servers — line by line, and
+tells you plainly whether it worked.
 
 ### From a shell
 
@@ -256,15 +242,24 @@ leaves alone.
 ## Layout
 
 ```
-frankly-launcher.sh   the whole thing
-picker.js             the branch window (JXA + AppKit, run by osascript)
-make-app.sh           builds Frankly Launcher.app (sips + iconutil, both built into macOS)
-assets/icon.svg       icon source
-Frankly Launcher.app  the Dock bundle
+frankly-launcher.sh          the engine: git, docker, pnpm, servers. No UI of its own.
+app/FranklyLauncher.swift    the front end: branch picker + live run output
+make-app.sh                  builds Frankly Launcher.app (swiftc + sips + iconutil)
+assets/icon.svg              icon source
+Frankly Launcher.app         the Dock bundle
 ```
 
-If the window cannot run for any reason, the launcher falls back to the stock
-list picker rather than dead-ending.
+**Why a compiled front end.** The first version used `osascript` dialogs. That
+was wrong: `NSAlert` cannot be made to look like anything but `NSAlert` — it
+picks up desktop translucency, shows the interpreter's icon rather than the
+app's, and stacks buttons vertically past two. Worse, it cannot show progress,
+so starting a demo meant handing off to Terminal.app over Apple Events — a
+permission the bundle does not hold, which made a failed launch fail *silently*.
+The app runs the script as a subprocess and streams it into its own window, so
+there is nowhere for a failure to hide.
+
+The script keeps a plain terminal picker so `./frankly-launcher.sh` still works
+on its own — over ssh, or if the app will not build.
 
 State lives outside the repo, in `~/Development/work/.frankly-demo/`:
 `.state` (the running demo), `.recent` (branch MRU), `logs/`, `meta/`.

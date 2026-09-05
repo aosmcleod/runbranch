@@ -14,7 +14,10 @@
 #   ~/Development/work/Studio                    <- never modified
 #   ~/Development/work/.frankly-demo/<branch>/   <- throwaway worktree
 #
-# Bash + osascript only. No Node, no Homebrew packages, no Electron.
+# This script is the ENGINE. It has no UI of its own beyond a plain terminal
+# picker: the front end is "Frankly Launcher.app" (app/FranklyLauncher.swift),
+# which runs this as a subprocess and streams its output into a window. Every
+# message here is therefore written to be read by a person either way.
 #
 # Usage:
 #   frankly-launcher.sh                      interactive (native pickers)
@@ -24,8 +27,7 @@
 #   frankly-launcher.sh cleanup              remove throwaway worktrees
 #
 # Written for bash 3.2 (what macOS ships at /bin/bash): no associative arrays,
-# no mapfile, no ${var,,}, and no here-documents inside $( ) -- 3.2 mis-parses
-# those, which is why every osascript call below uses repeated -e arguments.
+# no mapfile, no ${var,,}, and no here-documents inside $( ).
 
 set -uo pipefail
 
@@ -87,114 +89,42 @@ info() { printf '        %s\n' "$*"; }
 dim()  { printf '        %s%s%s\n' "$C_DIM" "$*" "$C_OFF"; }
 warn() { printf '    %swarn%s %s\n' "$C_YEL" "$C_OFF" "$*"; }
 
-# AppleScript string escaping. AppleScript has no \n escape, so any newline is
-# spliced in with (ASCII character 10) by the caller that needs one.
-as_quote() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
-
-# Dialogs raised by `osascript` wear a generic script icon unless told
-# otherwise, which makes them look like something went wrong rather than like
-# this app asking a question. make-app.sh drops a PNG next to the .icns for
-# exactly this. Absent (running straight from the repo with no bundle built),
-# every dialog still works -- it just wears the default icon.
-ICON_PNG="$(dirname "$SELF")/Frankly Launcher.app/Contents/Resources/AppIcon.png"
-icon_clause() {
-  [ -f "$ICON_PNG" ] || return 0
-  printf ' with icon (POSIX file "%s")' "$(as_quote "$ICON_PNG")"
-}
-
-# A modal alert, for real failures.
-gui_alert() {
-  osascript >/dev/null 2>&1 \
-    -e 'tell me to activate' \
-    -e "display alert \"$(as_quote "$1")\" message \"$(as_quote "$2")\" as critical buttons {\"OK\"} default button \"OK\""
-}
-
-gui_notify() {
-  osascript >/dev/null 2>&1 \
-    -e "display notification \"$(as_quote "$2")\" with title \"$(as_quote "$1")\""
-}
-
 # Fail loudly. $1 is what went wrong, $2 (optional) is the command that fixes
-# it. Both reach the user whether they are looking at a terminal or the Dock.
+# it. Both go to the terminal -- and when the app is the caller, "the terminal"
+# is the pipe it is streaming into its own window, so the user sees this either
+# way. There are deliberately no dialogs left in this script: it is the engine,
+# and the app is the only thing that draws.
 die() {
   local msg="$1" fix="${2:-}"
-  if [ "$HAVE_TTY" = 1 ]; then
-    printf '\n%s%s FAILED %s %s\n' "$C_BLD" "$C_RED" "$C_OFF" "$msg" >&2
-    if [ -n "$fix" ]; then
-      printf '\n%sFix:%s\n\n    %s\n\n' "$C_BLD" "$C_OFF" "$fix" >&2
-    fi
-    hold_terminal_open
-  else
-    local body="$msg"
-    if [ -n "$fix" ]; then
-      body="$msg
-
-Fix:
-$fix"
-    fi
-    gui_alert "$APP_NAME" "$body"
+  printf '\n%s%s FAILED %s %s\n' "$C_BLD" "$C_RED" "$C_OFF" "$msg" >&2
+  if [ -n "$fix" ]; then
+    printf '\n%sFix:%s\n\n    %s\n\n' "$C_BLD" "$C_OFF" "$fix" >&2
   fi
   exit 1
 }
 
-# A Dock-launched Terminal window would otherwise vanish on failure, taking the
-# error message with it. Only pauses in that case; never in a normal shell.
-hold_terminal_open() {
-  if [ "${FRANKLY_IN_TERMINAL:-0}" = 1 ] && [ "$HAVE_TTY" = 1 ]; then
-    printf '%sPress return to close this window.%s ' "$C_DIM" "$C_OFF"
-    read -r _ || true
-  fi
-}
-
-# A yes/no question. Terminal prompt when there is a terminal, dialog when not.
+# A yes/no question. Interactively it prompts. Non-interactively -- which is
+# how the app runs it -- there is nobody to answer, so it takes the safe
+# default and SAYS SO rather than hanging on a read that never returns.
 ask() {
-  local question="$1" default_no="${2:-0}" reply hint def out
-  if [ "$HAVE_TTY" = 1 ]; then
-    hint='[Y/n]'; [ "$default_no" = 1 ] && hint='[y/N]'
-    printf '\n    %s %s ' "$question" "$hint"
-    read -r reply || reply=''
-    case "$reply" in
-      [yY]*) return 0 ;;
-      [nN]*) return 1 ;;
-      '')    [ "$default_no" = 1 ] && return 1 || return 0 ;;
-      *)     return 1 ;;
-    esac
+  local question="$1" default_no="${2:-0}" reply hint
+  if [ "$HAVE_TTY" != 1 ]; then
+    if [ "$default_no" = 1 ]; then
+      info "$question  -> no (nothing is listening; assuming the cautious answer)"
+      return 1
+    fi
+    info "$question  -> yes"
+    return 0
   fi
-  def='Yes'; [ "$default_no" = 1 ] && def='No'
-  out=$(osascript 2>/dev/null \
-    -e 'tell me to activate' \
-    -e "button returned of (display dialog \"$(as_quote "$question")\" buttons {\"No\", \"Yes\"} default button \"$def\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))")
-  [ "$out" = "Yes" ]
-}
-
-# The native list picker. Prints the chosen line(s), one per line; returns 1 on
-# cancel. $2 is "single" or "multiple", $3 is the confirm button's label, and
-# the remaining args are the rows.
-#
-# Single-select preselects the first row, so the common case -- start the
-# branch you demoed last -- is Return with nothing else touched.
-choose() {
-  local prompt="$1" mode="$2" oklabel="$3"; shift 3
-  local list='' item multi='false' preselect='' out
-  for item in "$@"; do
-    list="$list\"$(as_quote "$item")\", "
-  done
-  list="${list%, }"
-  [ -z "$list" ] && return 1
-  if [ "$mode" = multiple ]; then
-    multi='true'
-  else
-    preselect=' default items {item 1 of theList}'
-  fi
-  out=$(osascript 2>/dev/null \
-    -e 'tell me to activate' \
-    -e "set theList to {$list}" \
-    -e "set theChoice to choose from list theList with title \"$(as_quote "$APP_NAME")\" with prompt \"$(as_quote "$prompt")\"$preselect OK button name \"$(as_quote "$oklabel")\" cancel button name \"Cancel\" multiple selections allowed $multi" \
-    -e 'if theChoice is false then error number -128' \
-    -e "set AppleScript's text item delimiters to (ASCII character 10)" \
-    -e 'return theChoice as text')
-  [ -z "$out" ] && return 1
-  printf '%s\n' "$out"
+  hint='[Y/n]'; [ "$default_no" = 1 ] && hint='[y/N]'
+  printf '\n    %s %s ' "$question" "$hint"
+  read -r reply || reply=''
+  case "$reply" in
+    [yY]*) return 0 ;;
+    [nN]*) return 1 ;;
+    '')    [ "$default_no" = 1 ] && return 1 || return 0 ;;
+    *)     return 1 ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -753,7 +683,6 @@ start_demo() {
   [ -n "$admin_pid" ] && info "admin  $URL_ADMIN"
   info "api    $URL_API"
   [ -n "$opened" ] && open "$opened" >/dev/null 2>&1
-  gui_notify "$APP_NAME" "Demo running: $ref ($target)"
 }
 
 server_failed() {
@@ -838,35 +767,61 @@ print_status() {
 # ---------------------------------------------------------------------------
 # Branch data
 #
-# Deliberately NO network. An earlier draft asked `gh pr list` which PRs were
-# merged -- 1.7s on every launch. It turns out git already knows: this repo
-# merges PRs with merge commits (not squash), so a merged branch's commits are
-# reachable from origin/development and `git branch --merged` names it. Two
-# local git calls, no round trip, and the picker opens instantly.
+# Local branches only. The remote carries 636 of them and none of it is work
+# anyone here wants to demo.
 #
-# The tradeoff, and it is the honest one: "merged" is measured against the
-# origin/development you last fetched. A branch merged since your last fetch
-# still looks live. That is what the Fetch button is for.
+# Merged state has to come from GitHub. git alone is not enough: this repo
+# merges some PRs with merge commits and squashes others, and a squashed
+# branch's commits are rewritten, so `git branch --merged` never names it --
+# verified against docs/commit-name-the-ticket, merged on GitHub and invisible
+# to git. So the PR map is cached on disk, read instantly, and refreshed in the
+# background. Only the very first launch waits for the network.
 # ---------------------------------------------------------------------------
 
-# Every address Alec has authored commits under. A branch is "mine" when its
-# tip carries one of them.
 MY_EMAILS="${FRANKLY_MY_EMAILS:-alecmcleod@icloud.com alec.mcleod@functionpoint.com alec@mcleod.co}"
-
 DEFAULT_BRANCH="${FRANKLY_DEFAULT_BRANCH:-development}"
+PR_CACHE="$DEMO_ROOT/.prcache"
+PR_CACHE_TTL="${FRANKLY_PR_TTL:-900}"   # 15 minutes
 
-# The repo pushes branches faster than anyone reads them -- 636 remote, 428 of
-# them unmerged. "Everyone else" is an escape hatch, not a browser, so it shows
-# the most recent slice and says so.
-OTHER_LIMIT="${FRANKLY_OTHER_LIMIT:-80}"
+# branch <TAB> state, for every PR in the repo.
+refresh_pr_cache() {
+  command -v gh >/dev/null 2>&1 || return 1
+  local tmp="$PR_CACHE.$$"
+  mkdir -p "$DEMO_ROOT"
+  if gh -R "$(studio_git config --get remote.origin.url 2>/dev/null | sed -e 's#.*github.com[:/]##' -e 's#\.git$##')" \
+       pr list --state all --limit 300 --json headRefName,state \
+       --jq '.[] | [.headRefName, .state] | @tsv' >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv "$tmp" "$PR_CACHE"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 
-# Writes "ref|group|age|meta|merged" to $1. group is default|mine|other.
+# Instant when a cache exists; refreshes behind your back when it is stale.
+ensure_pr_cache() {
+  if [ ! -s "$PR_CACHE" ]; then
+    refresh_pr_cache || true
+    return
+  fi
+  local age now mtime
+  now=$(date +%s)
+  mtime=$(stat -f %m "$PR_CACHE" 2>/dev/null || echo 0)
+  age=$((now - mtime))
+  if [ "$age" -gt "$PR_CACHE_TTL" ]; then
+    ( refresh_pr_cache >/dev/null 2>&1 & ) >/dev/null 2>&1
+  fi
+}
+
+# Tab-separated, one local branch per line:
+#   ref  age  ts  owner  mine  pr  ready  isDefault  isCurrent
+# pr is MERGED / OPEN / CLOSED / NONE.
 collect_branch_data() {
   local out="$1" now ready_slugs dir current
   now=$(date +%s)
   current=$(studio_current_branch)
+  ensure_pr_cache
 
-  # Which branches already have a built worktree -- the fast ones to start.
   ready_slugs=' '
   for dir in "$DEMO_ROOT"/*; do
     [ -d "$dir" ] || continue
@@ -875,247 +830,105 @@ collect_branch_data() {
   done
 
   {
-    studio_git branch --merged "origin/$DEFAULT_BRANCH" --format='M|%(refname:short)' 2>/dev/null
-    studio_git branch -r --merged "origin/$DEFAULT_BRANCH" --format='M|%(refname:short)' 2>/dev/null
+    [ -s "$PR_CACHE" ] && sed 's/^/P\t/' "$PR_CACHE"
+    # %09 is a tab. git for-each-ref does NOT interpret \t -- it emits the two
+    # characters literally, which silently produces one giant field.
     studio_git for-each-ref --sort=-committerdate \
-      --format='L|%(refname:short)|%(authoremail)|%(committerdate:unix)' refs/heads 2>/dev/null
-    studio_git for-each-ref --sort=-committerdate \
-      --format='R|%(refname:short)|%(authoremail)|%(committerdate:unix)' refs/remotes/origin 2>/dev/null
-  } | awk -F'|' \
+      --format="B%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)" \
+      refs/heads 2>/dev/null
+  } | awk -F'\t' -v OFS='\t' \
         -v now="$now" -v emails="$MY_EMAILS" -v ready="$ready_slugs" \
-        -v current="$current" -v defbr="$DEFAULT_BRANCH" -v olimit="$OTHER_LIMIT" '
+        -v current="$current" -v defbr="$DEFAULT_BRANCH" '
     function age(ts,   d) {
       d = now - ts
-      if (d < 3600)   return int(d / 60) "m"
-      if (d < 86400)  return int(d / 3600) "h"
+      if (d < 3600)    return int(d / 60) "m"
+      if (d < 86400)   return int(d / 3600) "h"
       if (d < 2592000) return int(d / 86400) "d"
       return int(d / 2592000) "mo"
     }
-    function slug(r) { gsub(/^origin\//, "", r); gsub(/[^A-Za-z0-9._-]/, "-", r); return r }
+    function slug(r) { gsub(/[^A-Za-z0-9._-]/, "-", r); return r }
     function mine(email,   i, n, parts) {
       n = split(emails, parts, " ")
       for (i = 1; i <= n; i++) if (index(email, parts[i]) > 0) return 1
       return 0
     }
-    function emit(ref, group, ts,   meta, m) {
-      meta = ""
-      if (index(ready, " " slug(ref) " ") > 0) meta = "ready"
-      if (ref == current) meta = (meta == "" ? "open in Studio" : meta " · in Studio")
-      m = (ref in merged) ? 1 : 0
-      print ref "|" group "|" age(ts) "|" meta "|" m
-    }
-    $1 == "M" { merged[$2] = 1; next }
-    $1 == "L" {
-      seenlocal[$2] = 1
-      if ($2 == defbr) { emit($2, "default", $4); next }
-      emit($2, mine($3) ? "mine" : "other", $4)
-      next
-    }
-    $1 == "R" {
-      if ($2 == "origin" || $2 == "origin/HEAD") next
-      short = $2; sub(/^origin\//, "", short)
-      # A local branch already stands for its remote twin.
-      if (short == defbr || seenlocal[short]) next
-      if (mine($3)) { emit($2, "mine", $4); next }
-      if (others++ >= olimit) next
-      emit($2, "other", $4)
+    # "Matt Disalov" -> "Matt". Keeps the owner badge to one word.
+    function firstname(who,   p) { split(who, p, " "); return p[1] }
+    $1 == "P" { pr[$2] = $3; next }
+    $1 == "B" {
+      ref = $2; email = $3; ts = $4; who = $5
+      isMine = mine(email)
+      state = (ref in pr) ? pr[ref] : "NONE"
+      print ref, age(ts), ts, (isMine ? "me" : firstname(who)), isMine, state, \
+            (index(ready, " " slug(ref) " ") > 0 ? 1 : 0), \
+            (ref == defbr ? 1 : 0), (ref == current ? 1 : 0)
     }
   ' > "$out"
-
 }
 
 # ---------------------------------------------------------------------------
-# Branch picking
-# ---------------------------------------------------------------------------
-
-# Labels are "<ref>  <note>". The ref is recovered by cutting at the first
-# double space, so notes must never contain one at the front.
-label_ref() { printf '%s' "${1%%"  "*}"; }
-
-FETCH_LABEL='↻   Fetch from origin'
-TYPE_LABEL='⌕   Type a branch name...'
-
-# This repo carries 500+ remote branches. All of them in one `choose from list`
-# is not a picker, it is a haystack -- so remotes are capped and anything older
-# is reached through TYPE_LABEL.
-REMOTE_LIMIT="${FRANKLY_REMOTE_LIMIT:-25}"
-
-build_branch_items() {
-  BRANCH_ITEMS=()
-  local cur seen='' ref note
-
-  cur=$(studio_current_branch)
-
-  # Recents first -- demoing the same two or three branches is the norm.
-  while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-    studio_git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || continue
-    case " $seen " in *" $ref "*) continue ;; esac
-    seen="$seen $ref"
-    note='recent'
-    [ -d "$(worktree_path "$ref")" ] && note='recent, ready'
-    [ "$ref" = "$cur" ] && note="$note, open in Studio"
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  $note"
-  done <<EOF
-$(recent_refs)
-EOF
-
-  # Then every local branch.
-  while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-    case " $seen " in *" $ref "*) continue ;; esac
-    seen="$seen $ref"
-    note='local'
-    [ -d "$(worktree_path "$ref")" ] && note='ready'
-    [ "$ref" = "$cur" ] && note="$note, open in Studio"
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  $note"
-  done <<EOF
-$(studio_git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads 2>/dev/null)
-EOF
-
-  # Then the most recently updated remote-only branches. Picking one just
-  # creates a worktree at the remote tip -- no local branch is created and
-  # nothing in Studio changes.
-  local shown=0
-  while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-    # for-each-ref on refs/remotes/origin also yields the bare "origin"
-    # (that is origin/HEAD's short name). Neither is a branch.
-    case "$ref" in origin|origin/HEAD) continue ;; esac
-    case " $seen " in *" ${ref#origin/} "*) continue ;; esac
-    [ "$shown" -ge "$REMOTE_LIMIT" ] && break
-    shown=$((shown + 1))
-    BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$ref  ·  remote"
-  done <<EOF
-$(studio_git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes/origin 2>/dev/null)
-EOF
-
-  BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$TYPE_LABEL"
-  BRANCH_ITEMS[${#BRANCH_ITEMS[@]}]="$FETCH_LABEL"
-}
-
-# A one-line text prompt. Prints the answer; returns 1 on cancel.
-gui_prompt() {
-  local answer
-  answer=$(osascript 2>/dev/null \
-    -e 'tell me to activate' \
-    -e "text returned of (display dialog \"$(as_quote "$1")\" default answer \"$(as_quote "${2:-}")\" with title \"$(as_quote "$APP_NAME")\")") || return 1
-  [ -n "$answer" ] || return 1
-  printf '%s\n' "$answer"
-}
-
-# Accepts "foo", "origin/foo", or a sha. Prints the ref that resolves.
-resolve_typed_ref() {
-  local want="$1" candidate
-  for candidate in "$want" "origin/$want"; do
-    if studio_git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null; then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
-# Fallback picker: the stock list, used only when the window cannot run.
-# Sets PICKED_REF. Returns 1 if the user cancelled.
-pick_branch_list() {
-  PICKED_REF=''
-  while :; do
-    build_branch_items
-    local picked
-    picked=$(choose "Which branch?" single "Choose" "${BRANCH_ITEMS[@]}") || return 1
-    if [ "$picked" = "$TYPE_LABEL" ]; then
-      local typed resolved
-      typed=$(gui_prompt "Branch name (local, or origin/<name>):") || return 1
-      if ! resolved=$(resolve_typed_ref "$typed"); then
-        gui_alert "$APP_NAME" "No branch or commit called \"$typed\" in $STUDIO.
-
-If it only exists on the remote, refresh the list from origin first."
-        continue
-      fi
-      PICKED_REF="$resolved"
-      return 0
-    fi
-    if [ "$picked" = "$FETCH_LABEL" ]; then
-      # The only write this launcher makes in $STUDIO, and only when asked:
-      # `fetch` updates remote-tracking refs. It never touches the working
-      # tree, the index, or any local branch.
-      gui_notify "$APP_NAME" "Fetching from origin..."
-      studio_git fetch --quiet --prune origin 2>/dev/null \
-        || gui_alert "$APP_NAME" "git fetch failed. The list below may be stale."
-      continue
-    fi
-    PICKED_REF="$(label_ref "$picked")"
-    [ -n "$PICKED_REF" ] && return 0
-    return 1
-  done
-}
-
-PICKER_JS="$(dirname "$SELF")/picker.js"
-
-# The real picker: a Cocoa window (see picker.js) with a Default section for
-# development, your own branches below it, and checkboxes for merged branches
-# and everyone else's. Falls back to the stock list if it cannot run, so a
-# broken bridge degrades to something usable rather than to nothing.
+# Terminal picker
 #
-# Sets PICKED_REF. Returns 1 if the user cancelled.
+# The app is the real front end. This exists so `./frankly-launcher.sh` is
+# usable on its own -- during development, over ssh, or if the app will not
+# build. Same filtering rules as the app: local branches, nothing merged,
+# nothing older than a week, unless you ask.
+# ---------------------------------------------------------------------------
+
+WEEK=604800
+
+# Sets PICKED_REF. Returns 1 on cancel.
 pick_branch() {
   PICKED_REF=''
-  local data result action rest ref
+  local data now i=0 line ref age owner pr ready isdef ts reply
   data="$DEMO_ROOT/.branches"
   mkdir -p "$DEMO_ROOT"
+  collect_branch_data "$data"
+  now=$(date +%s)
 
-  if [ ! -f "$PICKER_JS" ]; then
-    pick_branch_list
-    return $?
-  fi
+  PICK_REFS=()
+  printf '\n%sBranches%s\n\n' "$C_BLD" "$C_OFF"
+  while IFS="$(printf '\t')" read -r ref age ts owner _mine pr ready isdef _cur; do
+    [ -n "$ref" ] || continue
+    if [ "$isdef" != 1 ]; then
+      [ "$pr" = MERGED ] && continue
+      [ $((now - ts)) -gt "$WEEK" ] && continue
+    fi
+    i=$((i + 1))
+    PICK_REFS[$i]="$ref"
+    local tags=''
+    # No PR badge on the default branch -- every PR merges INTO development, so
+    # its own "merged" state says nothing about the branch you are picking.
+    [ "$isdef" = 1 ] && tags="$tags [default]"
+    [ "$isdef" != 1 ] && [ "$pr" != NONE ] && tags="$tags [$(printf '%s' "$pr" | tr 'A-Z' 'a-z')]"
+    tags="$tags [$owner]"
+    [ "$ready" = 1 ]   && tags="$tags [ready]"
+    printf '  %2d.  %-38s%s%s%s  %s%s%s\n' "$i" "$ref" \
+      "$C_DIM" "$tags" "$C_OFF" "$C_DIM" "$age" "$C_OFF"
+  done <"$data"
 
-  while :; do
-    collect_branch_data "$data"
-    result=$(osascript -l JavaScript "$PICKER_JS" "$data" 2>/dev/null) || {
-      # The window failed outright -- degrade rather than dead-end.
-      pick_branch_list
-      return $?
-    }
-    action="${result%%|*}"
-    rest="${result#*|}"
-    ref="${rest%%|*}"
-    case "$action" in
-      choose)
-        [ -n "$ref" ] || return 1
-        PICKED_REF="$ref"
-        return 0
-        ;;
-      fetch)
-        # The only write this launcher makes in $STUDIO, and only when asked.
-        # It also refreshes what counts as merged, which is measured against
-        # the origin/development you last fetched.
-        gui_notify "$APP_NAME" "Fetching from origin..."
-        studio_git fetch --quiet --prune origin 2>/dev/null || true
-        continue
-        ;;
-      *) return 1 ;;
-    esac
-  done
+  [ "$i" -gt 0 ] || die "No branches to show." "$SELF branches   # to see the raw list"
+
+  printf '\n  Number to run, or Return to cancel: '
+  read -r reply || reply=''
+  case "$reply" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$reply" -ge 1 ] && [ "$reply" -le "$i" ] || return 1
+  PICKED_REF="${PICK_REFS[$reply]}"
 }
 
-# Sets PICKED_TARGET to web|admin|both. The api is not optional -- web and
-# admin are useless without it -- so it is never offered as a choice.
-#
-# Three options is what buttons are for. A list would be the wrong control and
-# would look like a list of files rather than a question.
+# Sets PICKED_TARGET to web|admin|both.
 pick_target() {
   PICKED_TARGET=''
-  local picked
-  picked=$(osascript 2>/dev/null \
-    -e 'tell me to activate' \
-    -e "button returned of (display dialog \"$(as_quote "$1")
-
-Web is the customer app, Admin is the staff app. The api starts either way.\" buttons {\"Web\", \"Admin\", \"Both\"} default button \"Web\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))") || return 1
-  case "$picked" in
-    Web)   PICKED_TARGET=web ;;
-    Admin) PICKED_TARGET=admin ;;
-    Both)  PICKED_TARGET=both ;;
+  local reply
+  printf '\n  What should run? %s1%s web  %s2%s admin  %s3%s both  [1]: ' \
+    "$C_BLD" "$C_OFF" "$C_BLD" "$C_OFF" "$C_BLD" "$C_OFF"
+  read -r reply || reply=''
+  case "${reply:-1}" in
+    1|w|web)   PICKED_TARGET=web ;;
+    2|a|admin) PICKED_TARGET=admin ;;
+    3|b|both)  PICKED_TARGET=both ;;
     *) return 1 ;;
   esac
 }
@@ -1125,155 +938,53 @@ Web is the customer app, Admin is the staff app. The api starts either way.\" bu
 # ---------------------------------------------------------------------------
 
 cleanup_worktrees() {
-  local dir name size items=() picked running_wt=''
+  local dir name size running_wt='' i=0 reply n
   demo_running && running_wt="$S_WORKTREE"
 
+  CLEAN_PATHS=()
+  printf '\n%sDemo worktrees%s\n\n' "$C_BLD" "$C_OFF"
   for dir in "$DEMO_ROOT"/*; do
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
     case "$name" in meta|logs|.*) continue ;; esac
     size=$(du -sh "$dir" 2>/dev/null | awk '{print $1}')
+    i=$((i + 1))
+    CLEAN_PATHS[$i]="$dir"
     if [ "$dir" = "$running_wt" ]; then
-      items[${#items[@]}]="$name  ·  $size, running - stop it first"
+      printf '  %2d.  %-34s %6s  %s(running -- stop it first)%s\n' "$i" "$name" "$size" "$C_YEL" "$C_OFF"
     else
-      items[${#items[@]}]="$name  ·  $size"
+      printf '  %2d.  %-34s %6s\n' "$i" "$name" "$size"
     fi
   done
 
-  if [ ${#items[@]} -eq 0 ]; then
-    if [ "$HAVE_TTY" = 1 ]; then info "No worktrees to remove."
-    else gui_alert "$APP_NAME" "There are no demo worktrees to remove."; fi
+  if [ "$i" -eq 0 ]; then
+    info "No worktrees to remove."
     return 0
   fi
 
-  picked=$(choose "Remove which worktrees?" multiple "Remove" "${items[@]}") || return 0
+  printf '\n  Numbers to remove (space separated), or Return to cancel: '
+  read -r reply || reply=''
+  [ -n "$reply" ] || return 0
 
-  local line label path
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    label="$(label_ref "$line")"
-    path="$DEMO_ROOT/$label"
-    if [ "$path" = "$running_wt" ]; then
-      gui_alert "$APP_NAME" "Skipped $label -- its demo is still running. Stop it first."
+  for n in $reply; do
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ "$n" -ge 1 ] && [ "$n" -le "$i" ] || continue
+    dir="${CLEAN_PATHS[$n]}"
+    if [ "$dir" = "$running_wt" ]; then
+      warn "skipped $(basename "$dir") -- its demo is still running"
       continue
     fi
     # `worktree remove` runs in $STUDIO but is a .git metadata operation: it
     # deletes the worktree directory and its administrative entry, and never
     # touches Studio's own working tree.
-    studio_git worktree remove --force "$path" >/dev/null 2>&1 || {
-      safe_rm_worktree "$path"
+    studio_git worktree remove --force "$dir" >/dev/null 2>&1 || {
+      safe_rm_worktree "$dir"
       studio_git worktree prune >/dev/null 2>&1
     }
-    rm -f "$DEMO_ROOT/meta/$label.ref"
-    [ "$HAVE_TTY" = 1 ] && ok "removed $label"
-  done <<EOF
-$picked
-EOF
-  studio_git worktree prune >/dev/null 2>&1
-  gui_notify "$APP_NAME" "Worktrees removed."
-}
-
-# ---------------------------------------------------------------------------
-# Running the noisy phase where the user can see it
-# ---------------------------------------------------------------------------
-
-# Launched from the Dock there is no terminal, and prepare/install/migrate take
-# minutes. Hand that phase to Terminal.app so real output is visible instead of
-# a spinner that looks like a hang.
-run_in_terminal() {
-  local ref="$1" target="$2" cmd
-  case "$ref$target" in *\'*) die "Refusing a ref containing a single quote: $ref" "Rename the branch." ;; esac
-  cmd="clear; FRANKLY_IN_TERMINAL=1 '$SELF' run '$ref' '$target'"
-  osascript >/dev/null 2>&1 \
-    -e 'tell application "Terminal"' \
-    -e "do script \"$(as_quote "$cmd")\"" \
-    -e 'activate' \
-    -e 'end tell' \
-    || die "Could not open Terminal.app to run the demo." "$cmd"
-}
-
-# ---------------------------------------------------------------------------
-# Menus
-# ---------------------------------------------------------------------------
-
-start_flow() {
-  pick_branch || return 0
-  pick_target "Run $PICKED_REF" || return 0
-  remember_ref "$PICKED_REF"
-  if [ "$HAVE_TTY" = 1 ]; then
-    do_run "$PICKED_REF" "$PICKED_TARGET"
-  else
-    run_in_terminal "$PICKED_REF" "$PICKED_TARGET"
-  fi
-}
-
-# How many throwaway worktrees exist, and what they cost. Sets WT_COUNT/WT_SIZE.
-worktree_stats() {
-  WT_COUNT=0
-  WT_SIZE=''
-  local dir
-  for dir in "$DEMO_ROOT"/*; do
-    [ -d "$dir" ] || continue
-    case "$(basename "$dir")" in meta|logs|.*) continue ;; esac
-    WT_COUNT=$((WT_COUNT + 1))
+    rm -f "$DEMO_ROOT/meta/$(basename "$dir").ref"
+    ok "removed $(basename "$dir")"
   done
-  [ "$WT_COUNT" -gt 0 ] && WT_SIZE=$(du -sh "$DEMO_ROOT" 2>/dev/null | awk '{print $1}')
-}
-
-# "Offer to remove a worktree when done" -- so it is offered when the demo
-# stops, which is when it is actually relevant, rather than sitting in the way
-# as a permanent menu item every time you just want to start something.
-offer_cleanup() {
-  worktree_stats
-  [ "$WT_COUNT" -gt 0 ] || return 0
-  local noun='worktree'
-  [ "$WT_COUNT" -gt 1 ] && noun='worktrees'
-  ask "Demo stopped.
-
-$WT_COUNT demo $noun using $WT_SIZE. Remove any?" 1 || return 0
-  cleanup_worktrees
-}
-
-# The running demo, as one native dialog rather than a list of commands.
-# Three actions is what buttons are for, and Open is the default so Return
-# does the obvious thing.
-running_menu() {
-  local what urls='' picked
-  case "$S_TARGET" in
-    web)   what='Web' ;;
-    admin) what='Admin' ;;
-    both)  what='Web and Admin' ;;
-    *)     what="$S_TARGET" ;;
-  esac
-  alive "$S_WEB_PID"   && urls="localhost:$PORT_WEB"
-  alive "$S_ADMIN_PID" && urls="${urls:+$urls    }localhost:$PORT_ADMIN"
-
-  # Built here rather than inline so an absent url line leaves no blank row.
-  local body="$S_REF
-
-$what, running since ${S_STARTED#* }"
-  [ -n "$urls" ] && body="$body
-$urls"
-
-  picked=$(osascript 2>/dev/null \
-    -e 'tell me to activate' \
-    -e "button returned of (display dialog \"$(as_quote "$body")\" buttons {\"Stop\", \"Switch\", \"Open\"} default button \"Open\" with title \"$(as_quote "$APP_NAME")\"$(icon_clause))") || return 0
-
-  case "$picked" in
-    Open)
-      alive "$S_WEB_PID"   && open "$URL_WEB"   >/dev/null 2>&1
-      alive "$S_ADMIN_PID" && open "$URL_ADMIN" >/dev/null 2>&1
-      ;;
-    Switch)
-      stop_demo quiet
-      start_flow
-      ;;
-    Stop)
-      stop_demo quiet
-      gui_notify "$APP_NAME" "Demo stopped."
-      offer_cleanup
-      ;;
-  esac
+  studio_git worktree prune >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -1309,7 +1020,6 @@ do_run() {
 
   printf '\n    %sStop it with:%s  %s stop   (or the Dock icon)\n' "$C_DIM" "$C_OFF" "$SELF"
   printf '    %sThis window can be closed; the demo keeps running.%s\n\n' "$C_DIM" "$C_OFF"
-  hold_terminal_open
 }
 
 usage() {
@@ -1318,6 +1028,7 @@ $APP_NAME — run the Frankly demo from a throwaway git worktree.
 
   $(basename "$SELF")                      interactive (native pickers)
   $(basename "$SELF") run <ref> <target>   target: web | admin | both
+  $(basename "$SELF") branches             machine-readable branch list (used by the app)
   $(basename "$SELF") stop                 stop the running demo
   $(basename "$SELF") status               print status; exit 0 if running
   $(basename "$SELF") cleanup              remove throwaway worktrees
@@ -1337,14 +1048,33 @@ main() {
       [ $# -eq 3 ] || { usage; exit 2; }
       do_run "$2" "$3"
       ;;
+    branches)
+      # Machine-readable branch list for the app front end. See
+      # collect_branch_data for the column order.
+      preflight_host >/dev/null 2>&1 || true
+      collect_branch_data /dev/stdout
+      ;;
+    refresh-branches)
+      refresh_pr_cache && echo "pr cache refreshed" || echo "pr cache refresh failed" >&2
+      ;;
     stop)    stop_demo ;;
     status)  print_status ;;
     cleanup) preflight_host; cleanup_worktrees ;;
     menu|'')
+      if [ "$HAVE_TTY" != 1 ]; then
+        die "Nothing to show: this is the engine, not the front end." \
+          "open '$(dirname "$SELF")/Frankly Launcher.app'"
+      fi
       preflight_host
-      # Opening the app means "start a demo" -- there is no menu in the way.
-      # A demo already running is the one case where a choice is needed.
-      if demo_running; then running_menu; else start_flow; fi
+      if demo_running; then
+        print_status
+        ask "Stop it?" 1 && stop_demo
+        exit 0
+      fi
+      pick_branch || exit 0
+      pick_target || exit 0
+      remember_ref "$PICKED_REF"
+      do_run "$PICKED_REF" "$PICKED_TARGET"
       ;;
     -h|--help|help) usage ;;
     *) usage; exit 2 ;;
