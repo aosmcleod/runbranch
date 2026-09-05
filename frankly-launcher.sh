@@ -937,6 +937,27 @@ pick_target() {
 # Cleanup. Worktrees accumulate and each carries its own node_modules.
 # ---------------------------------------------------------------------------
 
+# Remove one branch's worktree. Refuses the one currently demoing, because
+# deleting the tree out from under running servers is how you get a confusing
+# half-dead demo rather than a clean stop.
+remove_worktree_for() {
+  local ref="$1" wt
+  wt="$(worktree_path "$ref")"
+  [ -d "$wt" ] || { info "No worktree for $ref."; return 0; }
+
+  if demo_running && [ "$S_WORKTREE" = "$wt" ]; then
+    die "$ref is the running demo, so its worktree is in use." "$SELF stop"
+  fi
+
+  step "Removing worktree for $ref"
+  studio_git worktree remove --force "$wt" >/dev/null 2>&1 || {
+    safe_rm_worktree "$wt"
+    studio_git worktree prune >/dev/null 2>&1
+  }
+  rm -f "$(meta_file "$ref")"
+  ok "removed $wt"
+}
+
 cleanup_worktrees() {
   local dir name size running_wt='' i=0 reply n
   demo_running && running_wt="$S_WORKTREE"
@@ -1029,6 +1050,8 @@ $APP_NAME — run the Frankly demo from a throwaway git worktree.
   $(basename "$SELF")                      interactive (native pickers)
   $(basename "$SELF") run <ref> <target>   target: web | admin | both
   $(basename "$SELF") branches             machine-readable branch list (used by the app)
+  $(basename "$SELF") state                machine-readable run state (used by the app)
+  $(basename "$SELF") remove-worktree <ref>  delete one throwaway worktree
   $(basename "$SELF") stop                 stop the running demo
   $(basename "$SELF") status               print status; exit 0 if running
   $(basename "$SELF") cleanup              remove throwaway worktrees
@@ -1047,6 +1070,20 @@ main() {
     run)
       [ $# -eq 3 ] || { usage; exit 2; }
       do_run "$2" "$3"
+      ;;
+    state)
+      # One line for the app: running, ref, target, started, web, admin.
+      if demo_running; then
+        printf 'running\t%s\t%s\t%s\t%s\t%s\n' "$S_REF" "$S_TARGET" "$S_STARTED" \
+          "$(alive "$S_WEB_PID" && echo 1 || echo 0)" \
+          "$(alive "$S_ADMIN_PID" && echo 1 || echo 0)"
+      else
+        printf 'idle\t\t\t\t0\t0\n'
+      fi
+      ;;
+    remove-worktree)
+      [ $# -eq 2 ] || die "remove-worktree needs a branch." "$SELF remove-worktree <ref>"
+      remove_worktree_for "$2"
       ;;
     branches)
       # Machine-readable branch list for the app front end. See

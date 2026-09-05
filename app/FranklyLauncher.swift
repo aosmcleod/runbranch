@@ -96,6 +96,38 @@ enum Target: String, CaseIterable, Identifiable {
     }
 }
 
+/// What the engine says is running right now.
+struct DemoState {
+    var running = false
+    var ref = ""
+    var target: Target = .web
+    var started = ""
+    var webUp = false
+    var adminUp = false
+
+    static let idle = DemoState()
+
+    init() {}
+
+    /// `running|idle  ref  target  started  web  admin`, tab separated.
+    init(tsv line: String) {
+        let f = line.components(separatedBy: "\t")
+        guard f.count >= 6, f[0] == "running" else { self = .idle; return }
+        running = true
+        ref = f[1]
+        target = Target(rawValue: f[2]) ?? .web
+        started = f[3]
+        webUp = f[4] == "1"
+        adminUp = f[5] == "1"
+    }
+
+    var url: URL? {
+        if webUp { return URL(string: "http://localhost:3000") }
+        if adminUp { return URL(string: "http://localhost:3002") }
+        return nil
+    }
+}
+
 // MARK: - Engine
 
 /// Runs frankly-launcher.sh. Always through a login+interactive zsh: an app
@@ -118,7 +150,7 @@ enum Engine {
         return p
     }
 
-    /// Blocking. Used for the short reads (branch list, status).
+    /// Blocking. Used for the short reads (branch list, state).
     static func capture(_ args: [String]) -> (out: String, code: Int32) {
         let p = process(args)
         let pipe = Pipe()
@@ -136,16 +168,21 @@ enum Engine {
             .compactMap { $0.isEmpty ? nil : Branch(tsv: $0) }
     }
 
-    static func isRunning() -> Bool { capture(["status"]).code == 0 }
+    static func state() -> DemoState {
+        let line = capture(["state"]).out.components(separatedBy: "\n").first ?? ""
+        return DemoState(tsv: line)
+    }
 }
 
-/// Streams a run into the window, one line at a time.
+/// Streams a run into the sheet, one line at a time.
 final class Runner: ObservableObject {
     @Published var lines: [String] = []
     @Published var finished = false
     @Published var failed = false
 
     private var proc: Process?
+
+    var isRunning: Bool { proc?.isRunning ?? false }
 
     func start(_ args: [String]) {
         lines = []
@@ -185,12 +222,10 @@ final class Runner: ObservableObject {
         }
     }
 
-    func cancel() {
-        proc?.terminate()
-    }
+    func cancel() { proc?.terminate() }
 }
 
-// MARK: - Views
+// MARK: - Small views
 
 struct Badge: View {
     let text: String
@@ -213,6 +248,7 @@ struct Badge: View {
 
 struct BranchRow: View {
     let branch: Branch
+    let isLive: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -230,7 +266,15 @@ struct BranchRow: View {
                 Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
             }
             Badge(text: branch.owner)
-            if branch.ready {
+
+            // A live demo outranks "ready" — ready only means the worktree
+            // exists, and saying both would be noise.
+            if isLive {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 10, height: 10)
+                    Badge(text: "running", color: .green)
+                }
+            } else if branch.ready {
                 Badge(text: "ready", symbol: "bolt.fill", color: .green)
             }
 
@@ -244,82 +288,16 @@ struct BranchRow: View {
     }
 }
 
-struct PickerView: View {
-    @Binding var selection: String?
-    @Binding var target: Target
-    @Binding var includeMerged: Bool
-    @Binding var showOlder: Bool
-    let branches: [Branch]
-    let onStart: () -> Void
-    let onCancel: () -> Void
+// MARK: - Run sheet
 
-    private static let week = 7 * 24 * 60 * 60
-
-    var visible: [Branch] {
-        let now = Int(Date().timeIntervalSince1970)
-        return branches.filter { b in
-            if b.isDefault { return true }          // development is always offered
-            if !includeMerged && b.pr == .merged { return false }
-            if !showOlder && now - b.timestamp > Self.week { return false }
-            return true
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Run a Frankly demo").font(.system(size: 15, weight: .semibold))
-                Text("From a throwaway worktree. Your Studio checkout is never touched.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
-
-            List(visible, selection: $selection) { branch in
-                BranchRow(branch: branch).tag(branch.ref)
-            }
-            .listStyle(.inset)
-            .frame(minHeight: 220)
-
-            Divider()
-
-            HStack(spacing: 16) {
-                Toggle("Merged", isOn: $includeMerged)
-                Toggle("Older than a week", isOn: $showOlder)
-                Spacer()
-            }
-            .toggleStyle(.checkbox)
-            .font(.system(size: 11))
-            .padding(.horizontal, 16).padding(.vertical, 10)
-
-            Divider()
-
-            HStack(spacing: 12) {
-                Picker("", selection: $target) {
-                    ForEach(Target.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 200)
-
-                Spacer()
-
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Start", action: onStart)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(selection == nil)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-        }
-    }
-}
-
-struct RunView: View {
+/// Blocking sheet over the launcher. Closes itself when the demo comes up;
+/// stays put when it does not, because that is the moment you need the log.
+struct RunSheet: View {
     @ObservedObject var runner: Runner
-    let branch: String
-    let target: Target
-    let onStop: () -> Void
-    let onClose: () -> Void
+    let title: String
+    let onDone: () -> Void
+
+    @State private var closing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -330,12 +308,7 @@ struct RunView: View {
                     Image(systemName: runner.failed ? "xmark.circle.fill" : "checkmark.circle.fill")
                         .foregroundStyle(runner.failed ? .red : .green)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(runner.finished ? (runner.failed ? "Failed" : "Demo running") : "Starting…")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("\(branch) · \(target.title)")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
+                Text(headline).font(.system(size: 13, weight: .semibold))
                 Spacer()
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
@@ -359,78 +332,194 @@ struct RunView: View {
                     withAnimation { proxy.scrollTo(count - 1, anchor: .bottom) }
                 }
             }
-            .frame(minHeight: 260)
 
             Divider()
 
             HStack {
+                if runner.failed {
+                    Button("Copy log") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(runner.lines.joined(separator: "\n"), forType: .string)
+                    }
+                }
                 Spacer()
                 if runner.finished {
-                    Button("Close", action: onClose).keyboardShortcut(.defaultAction)
+                    Button("Close", action: onDone).keyboardShortcut(.defaultAction)
                 } else {
-                    Button("Stop", action: onStop)
+                    Button("Stop") { runner.cancel() }.keyboardShortcut(.cancelAction)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
+        .frame(width: 620, height: 420)
+        .onChange(of: runner.finished) { _, done in
+            // Success needs no audience. Failure does.
+            guard done, !runner.failed, !closing else { return }
+            closing = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { onDone() }
+        }
+    }
+
+    private var headline: String {
+        if !runner.finished { return title }
+        return runner.failed ? "\(title) — failed" : "\(title) — done"
     }
 }
 
+// MARK: - Main
+
 struct ContentView: View {
     @State private var branches: [Branch] = []
+    @State private var demo = DemoState.idle
     @State private var selection: String?
     @State private var target: Target = .web
-    @State private var includeMerged = false
+    @State private var showMerged = false
     @State private var showOlder = false
-    @State private var running = false
+    @State private var sheetTitle = ""
+    @State private var showingRun = false
     @StateObject private var runner = Runner()
 
+    private static let week = 7 * 24 * 60 * 60
+
+    var visible: [Branch] {
+        let now = Int(Date().timeIntervalSince1970)
+        return branches.filter { b in
+            if b.isDefault || b.ref == demo.ref { return true }
+            if !showMerged && b.pr == .merged { return false }
+            if !showOlder && now - b.timestamp > Self.week { return false }
+            return true
+        }
+    }
+
+    /// Start / Stop / Switch, decided by what is running and what is selected.
+    private var primary: (title: String, action: () -> Void)? {
+        guard let ref = selection else { return nil }
+        if demo.running && demo.ref == ref {
+            return ("Stop", { run(["stop"], "Stopping \(ref)") })
+        }
+        if demo.running {
+            // do_run stops the current demo first; only one fits on the shared
+            // Postgres, and it says so as it goes.
+            return ("Switch", { run(["run", ref, target.rawValue], "Switching to \(ref)") })
+        }
+        return ("Start", { run(["run", ref, target.rawValue], "Starting \(ref)") })
+    }
+
     var body: some View {
-        Group {
-            if running {
-                RunView(runner: runner,
-                        branch: selection ?? "",
-                        target: target,
-                        onStop: { runner.cancel(); running = false },
-                        onClose: { NSApp.terminate(nil) })
-            } else {
-                PickerView(selection: $selection,
-                           target: $target,
-                           includeMerged: $includeMerged,
-                           showOlder: $showOlder,
-                           branches: branches,
-                           onStart: start,
-                           onCancel: { NSApp.terminate(nil) })
+        VStack(alignment: .leading, spacing: 0) {
+            Text(demo.running
+                 ? "\(demo.ref) is running · \(demo.target.title) · since \(shortTime(demo.started))"
+                 : "Runs from a throwaway worktree. Your Studio checkout is never touched.")
+                .font(.system(size: 11))
+                .foregroundStyle(demo.running ? .primary : .secondary)
+                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+
+            List(visible, selection: $selection) { branch in
+                BranchRow(branch: branch, isLive: demo.running && demo.ref == branch.ref)
+                    .tag(branch.ref)
+                    .contextMenu {
+                        if branch.ready && demo.ref != branch.ref {
+                            Button("Remove worktree") {
+                                run(["remove-worktree", branch.ref], "Removing \(branch.ref)")
+                            }
+                        }
+                    }
+            }
+            .listStyle(.inset)
+            .onChange(of: selection) { _, _ in syncTargetToDemo() }
+
+            Divider()
+
+            HStack(spacing: 16) {
+                Toggle("Show merged", isOn: $showMerged)
+                Toggle("Show older than a week", isOn: $showOlder)
+                Spacer()
+            }
+            .toggleStyle(.checkbox)
+            .font(.system(size: 11))
+            .padding(.horizontal, 16).padding(.vertical, 10)
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Picker("", selection: $target) {
+                    ForEach(Target.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+                // A running demo's target is a fact, not a choice.
+                .disabled(demo.running && demo.ref == selection)
+
+                Spacer()
+
+                if demo.running, let url = demo.url {
+                    Button("Open") { NSWorkspace.shared.open(url) }
+                }
+                if let primary {
+                    Button(primary.title, action: primary.action)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .frame(width: 580, height: 520)
+        .task { reload() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    _ = Engine.capture(["refresh-branches"])
+                    reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh branches and pull request state")
             }
         }
-        .frame(width: 560, height: 460)
-        .task { load() }
-    }
-
-    private func load() {
-        let found = Engine.branches()
-        branches = found
-        if selection == nil {
-            // Default to the newest branch of yours that is still live.
-            selection = found.first(where: { $0.mine && $0.pr != .merged })?.ref
-                     ?? found.first(where: { $0.isDefault })?.ref
+        .sheet(isPresented: $showingRun) {
+            RunSheet(runner: runner, title: sheetTitle) {
+                showingRun = false
+                reload()
+            }
         }
     }
 
-    private func start() {
-        guard let ref = selection else { return }
-        running = true
-        runner.start(["run", ref, target.rawValue])
+    private func run(_ args: [String], _ title: String) {
+        sheetTitle = title
+        showingRun = true
+        runner.start(args)
+    }
+
+    private func reload() {
+        branches = Engine.branches()
+        demo = Engine.state()
+        if demo.running {
+            selection = demo.ref
+            target = demo.target
+        } else if selection == nil || !branches.contains(where: { $0.ref == selection }) {
+            selection = branches.first(where: { $0.mine && $0.pr != .merged })?.ref
+                     ?? branches.first(where: { $0.isDefault })?.ref
+        }
+    }
+
+    private func syncTargetToDemo() {
+        if demo.running && demo.ref == selection { target = demo.target }
+    }
+
+    /// "2026-09-04 23:32:59" -> "23:32".
+    private func shortTime(_ s: String) -> String {
+        let parts = s.components(separatedBy: " ")
+        guard parts.count == 2 else { return s }
+        return parts[1].components(separatedBy: ":").prefix(2).joined(separator: ":")
     }
 }
 
 @main
 struct FranklyLauncherApp: App {
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Frankly Launcher") {
             ContentView()
         }
         .windowResizability(.contentSize)
-        .windowStyle(.hiddenTitleBar)
     }
 }

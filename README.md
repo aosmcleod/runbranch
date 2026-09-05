@@ -104,9 +104,19 @@ Hidden by default, each behind a checkbox: branches whose PR is **merged**, and
 branches **older than a week**. On a repo where 359 of 400 PRs are merged, that
 is the difference between 7 rows and 636.
 
-Pick a branch, pick Web / Admin / Both, press Start. The window then shows the
-run itself — worktree, install, infra, migrations, servers — line by line, and
-tells you plainly whether it worked.
+Pick a branch, pick Web / Admin / Both, press Start. The run happens in a sheet
+over the window — worktree, install, infra, migrations, servers, line by line.
+It **closes itself when the demo comes up** and **stays open when it does not**,
+because that is the moment you need the log. Failures offer *Copy log*.
+
+**While a demo is running** the launcher shows it: that branch carries a live
+spinner and a `running` badge, the header names it and when it started, and the
+buttons change to *Open* and *Stop*. Select a different branch and the button
+becomes *Switch* — one demo at a time, so it stops the current one first and
+says so as it goes.
+
+Right-click any branch whose worktree is built to **remove that worktree**. The
+running demo's is refused; stop it first.
 
 ### From a shell
 
