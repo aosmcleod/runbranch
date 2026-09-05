@@ -1,285 +1,171 @@
-# frankly-launcher
+# project-launcher
 
-A Dock-able runner for the Frankly (Function Studio) demo.
-
-It runs the demo from a **throwaway git worktree**, so demoing never competes
-with whatever you are editing in `~/Development/work/Studio`.
+A Dock-able runner for any local project, from a **throwaway git worktree**.
 
 ```
-~/Development/work/Studio                    <- your checkout, never touched
-~/Development/work/.frankly-demo/<branch>/   <- throwaway worktree, one per branch
+<your checkout>                                    <- never modified
+~/.project-launcher/<project>/worktrees/<branch>/  <- throwaway, one per branch
 ```
 
 A bash engine with a small SwiftUI front end. No Node, no Homebrew packages,
-no Electron, no SPM manifest — just the Xcode command line tools you already
-have.
+no Electron, no SPM manifest — just the Xcode command line tools.
 
 ---
 
-## Why this exists
+## Why
 
-Running the demo out of the working checkout breaks in the same shape every
-time:
+Demoing out of your working checkout breaks in the same shape every time:
 
-- Switching branches to demo something either fails on uncommitted work, or
+- Switching branches to show something either fails on uncommitted work, or
   silently changes what the person at the keyboard is looking at.
-- `.env.local` is gitignored, so a fresh branch or worktree starts with no
-  config and everything 401s or cannot reach Postgres. That reads as a broken
+- Gitignored config (`.env.local` and friends) does not exist in a fresh tree,
+  so everything 401s or cannot reach its database. That reads as a broken
   branch when it is a missing file.
-- A dev server left running is a concurrent Postgres writer. Two of them plus a
-  test run produced a real deadlock and 29 wasted minutes.
+- A dev server left running is a concurrent writer on a shared database. Two of
+  them plus a test run produced a real deadlock and 29 wasted minutes.
 
-The launcher's answer to all three: never touch your checkout, copy
-`.env.local` in every time, and allow exactly one demo at a time.
+The answer to all three: never touch your checkout, copy the gitignored config
+in every time, and be honest about what is already running.
 
 ---
 
-## First-run setup
+## Projects
 
-**Prerequisites** (the launcher checks each one and names the fix if it is
-missing):
+Each project is a `projects/<name>.conf` — plain bash, sourced by the engine.
+Only `NAME`, `REPO` and `TARGETS` are required.
 
-| Need | Get it |
-|---|---|
-| Node 24 | see `.nvmrc` in Studio |
-| pnpm 9 | `corepack enable` |
-| Docker Desktop, running | `open -a Docker` |
-| A `~/.npmrc` GitHub Packages token | `gh auth refresh -h github.com -s read:packages` then `node scripts/ensure-npmrc.mjs` |
-| HeroUI Pro credentials | `npx heroui-pro login` |
-| `~/Development/work/Studio/.env.local` | `cd ~/Development/work/Studio && pnpm bootstrap` |
-
-Two of those are worth expanding.
-
-**The `read:packages` token.** `@function-point/fxui` comes from GitHub
-Packages. Studio's root `.npmrc` maps the scope but deliberately carries no
-auth line, so the token has to be in `~/.npmrc` — and a default `gh auth login`
-does **not** grant `read:packages`. Without it, `pnpm install` 401s. The
-launcher checks this before the install rather than after, so you get the fix
-instead of a raw pnpm error.
-
-**HeroUI Pro.** Without `HEROUI_AUTH_TOKEN` or `~/.heroui`, `@heroui-pro/react`
-installs as a *stub*. The install still succeeds — the missing types only
-surface later at typecheck, or as a blank render. The launcher warns and lets
-you decide.
-
-**Build the app bundle:**
+Most projects are "install, run one command, open a URL" and stay four lines:
 
 ```bash
-cd ~/Development/work/frankly-launcher && ./make-app.sh
+NAME="function-ui"
+REPO="~/Development/work/function-ui"
+INSTALL="npm ci"
+TARGETS="docs:5173:/:npm run docs"
 ```
 
-Then drag `Frankly Launcher.app` to the Dock.
+Function Studio is the complex one, and the reason every other key exists —
+three servers, shared Postgres, migrations, a gitignored env file:
 
-The bundle does not contain a copy of the script — it calls
-`frankly-launcher.sh` where it sits in this repo, so edits take effect with no
-rebuild. If you ever move the repo, re-run `make-app.sh`.
+```bash
+COPY_FILES=".env.local"
+COMPOSE_PROJECT="studio"
+COMPOSE_SERVICES="postgres valkey"
+MIGRATE="pnpm --filter @fs/db db:migrate"
+TARGETS="api:4000:/live:pnpm --filter @fs/api dev
+web:3000:/:pnpm --filter @fs/web dev
+admin:3002:/:pnpm --filter @fs/admin dev"
+ALWAYS="api"
+PRESETS="web=web admin=admin both=web,admin"
+```
 
-**Why the app runs the script through `zsh -lic`.** An app launched from the
-Dock inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — not the one
-your shell builds. Under that, `docker` (`/usr/local/bin`), `pnpm` and `gh`
-(`/opt/homebrew/bin`) and `node` (fnm, whose bin directory is minted per shell
-session and has no fixed location) are all invisible, and the launcher reports
-them as missing while they sit right there. Running through a login +
-interactive zsh loads your real environment, so `PATH` matches your terminal
-exactly. Only environment variables cross into the script's own bash process,
-so shell functions in `~/.zshrc` cannot change how the launcher behaves. The
-script also hardens its own `PATH` as a second layer, for when it is invoked
-from somewhere with a bare environment.
+Full key reference: [`projects/README.md`](projects/README.md).
 
 ---
 
 ## Using it
 
-Clicking the Dock icon opens one window: a flat list of your **local** branches,
-newest first.
+```bash
+./make-app.sh          # build the bundle
+open .                 # then drag "Project Launcher.app" to the Dock
+```
 
-Each row is the branch name with badges and its last-updated age:
+Projects run down the sidebar, each with a spinner when something of its is up.
+The main pane is that project's **local** branches, newest first, each with
+badges and a last-updated age:
 
 | badge | meaning |
 |---|---|
-| `default` | `development` — always listed, never filtered out |
-| `open` / `merged` / `closed` | its pull request, in GitHub's own status colours |
+| `default` | the project's default branch — always listed, never filtered |
+| `open` / `merged` / `closed` | its pull request, in GitHub's status colours |
 | `me` / a first name | who authored the branch tip |
-| `ready` | its worktree is already built, so this one starts in seconds |
+| `ready` | its worktree is built, so this one starts in seconds |
 
-Hidden by default, each behind a checkbox: branches whose PR is **merged**, and
-branches **older than a week**. On a repo where 359 of 400 PRs are merged, that
-is the difference between 7 rows and 636.
+Merged branches and anything older than a week are hidden behind checkboxes.
 
-Pick a branch, pick Web / Admin / Both, press Start. The run happens in a sheet
-over the window — worktree, install, infra, migrations, servers, line by line.
-It **closes itself when the demo comes up** and **stays open when it does not**,
-because that is the moment you need the log. Failures offer *Copy log*.
+Pick a branch, pick what to run, press Start. The run happens in a sheet over
+the window. It **closes itself when the server comes up** and **stays open when
+it does not**, because that is the moment you need the log.
 
-**While a demo is running** the launcher shows it: that branch carries a live
-spinner and a `running` badge, the header names it and when it started, and the
-buttons change to *Open* and *Stop*. Select a different branch and the button
-becomes *Switch* — one demo at a time, so it stops the current one first and
-says so as it goes.
-
-Right-click any branch whose worktree is built to **remove that worktree**. The
-running demo's is refused; stop it first.
+While something is running: that branch carries a spinner, the header names it,
+and the buttons become *Open* and *Stop*. Select a different branch and it
+becomes *Switch*. Right-click any built branch to remove its worktree.
 
 ### From a shell
 
 ```bash
-./frankly-launcher.sh                    # same pickers, output stays in your terminal
-./frankly-launcher.sh run development both
-./frankly-launcher.sh stop
-./frankly-launcher.sh status             # exit 0 if a demo is running
-./frankly-launcher.sh cleanup
+./project-launcher.sh                              # interactive
+./project-launcher.sh run studio development both
+./project-launcher.sh stop studio
+./project-launcher.sh status                       # every project
+./project-launcher.sh cleanup studio
 ```
 
 ---
 
-## The constraints, and why
+## The parts that are not obvious
 
-### One demo at a time
+### Worktrees are detached, never branch checkouts
 
-**Postgres is shared.** It cannot be isolated per worktree without more
-machinery than this deserves, so the launcher allows exactly one demo and
-offers to stop a running one rather than starting a second.
+Git refuses to check out a branch that is already checked out elsewhere — and
+demoing the branch you are working on is the common case. A demo runner also
+has no business holding a ref it might move.
 
-This is also why it refuses to start when something already holds port 3000,
-3002 or 4000. If that something is *your own* dev server in Studio, the
-launcher names the process and the port and leaves it alone — stopping it is
-your call, not the tool's.
+### `docker compose -p` is pinned
 
-### Migrations mutate the one shared database
-
-There is a single local database and every branch shares it. The launcher
-compares the branch's Drizzle journal against the migrations the database has
-actually applied:
-
-- **Branch ahead** — it runs `pnpm --filter @fs/db db:migrate` and says so.
-- **Database ahead** — another branch already migrated it. Those changes do not
-  roll back and this branch's code has never seen them, so the launcher warns
-  and makes you confirm.
-
-Clean slate, which **destroys all local data**:
-
-```bash
-docker compose -p studio -f ~/Development/work/.frankly-demo/<branch>/docker-compose.yml down -v
-```
-
-Then re-run the launcher and re-seed with `pnpm seed:account`.
-
-A per-branch database (`CREATE DATABASE studio_<branch>` plus a `DATABASE_URL`
-override) would remove this whole class of problem. It is a deliberate
-non-goal for now — it is a bigger change than the pain currently justifies.
+Compose names its project after the directory it runs in, so from a worktree it
+would build a **second** stack with its own empty volumes, then collide on any
+fixed `container_name`. `COMPOSE_PROJECT` pins it to the one real database.
 
 ### "Merged" comes from GitHub, cached
 
-I tried to avoid the network here and got it wrong, so the reasoning is worth
-recording. `git branch --merged origin/development` looks like it should answer
-this for free, and for a merge-commit PR it does. But this repo **squash-merges
-some PRs**, and a squashed branch's commits are rewritten — they are never
-reachable from `development`, so git can never name it. Verified against
-`docs/commit-name-the-ticket`: merged on GitHub, invisible to git.
+`git branch --merged` looks like it should answer this for free, and for a
+merge-commit PR it does. But a **squashed** merge rewrites the commits, so they
+are never reachable from the default branch and git can never name it. Verified
+against `docs/commit-name-the-ticket`: merged on GitHub, invisible to git.
 
-So the PR map comes from `gh pr list` and is cached on disk at
-`.frankly-demo/.prcache`. The cache is read instantly and refreshed in the
-background when it is older than 15 minutes, so only the very first launch
-waits on the network:
+So the PR map comes from `gh` and is cached per project. Cold: ~1.5s. Warm:
+~0.04s, refreshed in the background. The toolbar refresh forces a re-read.
 
-| | |
-|---|---|
-| cold, first ever launch | ~1.5s |
-| every launch after | ~0.04s |
+Ownership needs no network: a branch is yours when its tip carries one of your
+addresses (`PL_MY_EMAILS` overrides).
 
-The toolbar's refresh button forces a re-read when you want one.
+### Stopping signals the process group
 
-Ownership is local and needs no network: a branch is yours when its tip commit
-carries one of your addresses (`alecmcleod@icloud.com`,
-`alec.mcleod@functionpoint.com`, `alec@mcleod.co` — `FRANKLY_MY_EMAILS`
-overrides).
+Each server starts in its own process group. A watcher like `tsx --watch`
+respawns its child if you kill only the child; signalling the group takes the
+tree down. Anything still holding a port afterwards is only reaped when its
+command line points into this project's worktrees — never your own dev server.
 
-### Sign-in only works on `localhost`
+### One run per project
 
-Clerk dev instances accept exactly **one** primary frontend origin, and the
-customer web claims `localhost:3000`. So `admin.studio.test:3002` and
-`portal.studio.test:3001` cannot also be Clerk origins on the same instance.
-The launcher only ever opens `localhost` URLs. The friendly `studio.test`
-hostnames still resolve, but admin and portal sign-in break on them.
+Ports and databases are shared within a project, so starting a second run stops
+the first. Different projects use different ports and can run at once — the
+sidebar shows which.
 
----
+### PATH, and why the app runs `zsh -lic`
 
-## What it does to your Studio checkout
-
-Effectively nothing. It **never** runs `git checkout`, `git stash`, or anything
-else that touches Studio's working tree or index. What it does do:
-
-| Action | Why it is safe |
-|---|---|
-| Reads refs (`for-each-ref`, `rev-parse`) | read-only |
-| Copies `.env.local` | read-only on the source |
-| `git worktree add / remove / prune / list` | `.git` metadata plus the throwaway directory; Studio's working tree is untouched |
-| `git fetch --prune origin` | **only when you pick "Refresh the list from origin"**; updates remote-tracking refs, touches nothing else |
-
-Worktrees are created **detached** at the branch tip, never as a checkout of
-the branch itself. That is deliberate: git refuses to check out a branch that
-is already checked out elsewhere, and demoing the branch you are working on is
-the common case. A demo runner also has no business holding a branch ref it
-might move.
-
----
-
-## Cleanup
-
-Worktrees accumulate and each carries its own `node_modules` — about **1.2 GB**
-each. *Remove old worktrees* in the menu (or `./frankly-launcher.sh cleanup`)
-lists them with sizes and lets you select several at once. The worktree backing
-a running demo is skipped; stop it first.
-
----
-
-## Stopping cleanly
-
-Each server is started in its own process group, and stopping signals the
-**group**, not the pid. This matters: the api runs under `tsx --watch`, which
-respawns its node child if you kill only the child.
-
-If a port is still held after a stop, the launcher only reaps the process when
-its command line points into `.frankly-demo`. Anything else it reports and
-leaves alone.
-
----
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| From the Dock: "`docker` is not on PATH" (or node / pnpm / gh) | The bundle is stale or was built before the `zsh -lic` fix. Re-run `./make-app.sh` |
-| `401` from `npm.pkg.github.com` during install | `gh auth refresh -h github.com -s read:packages`, then `node scripts/ensure-npmrc.mjs` in the worktree |
-| `ERR_PNPM_OUTDATED_LOCKFILE` | The branch's lockfile does not match its `package.json`. `cd <worktree> && pnpm install`, then re-run the launcher |
-| Blank or unstyled UI | HeroUI Pro installed as a stub. `npx heroui-pro login`, then delete the worktree and let it rebuild |
-| Everything 401s, or Postgres is unreachable | `.env.local` did not make it in. Confirm it exists in Studio; the launcher re-copies it on every run |
-| Port busy, and it is not the launcher's | Something else owns it — the launcher names the pid. `kill <pid>` if you meant to |
-| A server never comes up | Logs are in `~/Development/work/.frankly-demo/logs/`. Run it in the foreground: `cd <worktree> && pnpm --filter @fs/web dev` |
+An app launched from the Dock inherits launchd's `PATH`, which has neither
+`docker` (`/usr/local/bin`), `pnpm`/`gh` (`/opt/homebrew/bin`), nor `node`
+(fnm mints its bin directory per shell session). The bundle runs the engine
+through a login+interactive zsh so `PATH` matches your terminal. The script
+hardens its own `PATH` as a second layer.
 
 ---
 
 ## Layout
 
 ```
-frankly-launcher.sh          the engine: git, docker, pnpm, servers. No UI of its own.
-app/FranklyLauncher.swift    the front end: branch picker + live run output
-make-app.sh                  builds Frankly Launcher.app (swiftc + sips + iconutil)
-assets/icon.svg              icon source
-Frankly Launcher.app         the Dock bundle
+project-launcher.sh        the engine: git, install, infra, servers. No UI of its own.
+app/ProjectLauncher.swift  the front end: project sidebar, branch list, run sheet
+projects/*.conf            one file per project
+make-app.sh                builds Project Launcher.app (swiftc + sips + iconutil)
+assets/icon.svg            icon source
 ```
 
-**Why a compiled front end.** The first version used `osascript` dialogs. That
-was wrong: `NSAlert` cannot be made to look like anything but `NSAlert` — it
-picks up desktop translucency, shows the interpreter's icon rather than the
-app's, and stacks buttons vertically past two. Worse, it cannot show progress,
-so starting a demo meant handing off to Terminal.app over Apple Events — a
+**Why a compiled front end.** The first version used `osascript` dialogs.
+`NSAlert` picks up desktop translucency, shows the interpreter's icon rather
+than the app's, and stacks buttons past two. Worse, it cannot show progress, so
+starting a run meant handing off to Terminal.app over Apple Events — a
 permission the bundle does not hold, which made a failed launch fail *silently*.
 The app runs the script as a subprocess and streams it into its own window, so
 there is nowhere for a failure to hide.
-
-The script keeps a plain terminal picker so `./frankly-launcher.sh` still works
-on its own — over ssh, or if the app will not build.
-
-State lives outside the repo, in `~/Development/work/.frankly-demo/`:
-`.state` (the running demo), `.recent` (branch MRU), `logs/`, `meta/`.

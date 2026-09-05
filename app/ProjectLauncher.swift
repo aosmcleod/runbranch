@@ -1,5 +1,6 @@
-// FranklyLauncher — the front end. All the work happens in frankly-launcher.sh;
-// this is a window over it.
+// ProjectLauncher — the front end. All the work happens in project-launcher.sh;
+// this is a window over it. Projects are declared in projects/*.conf and the
+// app knows nothing about any of them beyond what the engine reports.
 //
 // Why a compiled app rather than osascript dialogs: NSAlert cannot be made to
 // look like anything but NSAlert. It picks up desktop translucency, it shows
@@ -84,47 +85,43 @@ enum PRState {
     }
 }
 
-enum Target: String, CaseIterable, Identifiable {
-    case web, admin, both
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .web: return "Web"
-        case .admin: return "Admin"
-        case .both: return "Both"
-        }
+/// A project the engine knows about. Presets are whatever its config declares,
+/// so nothing here is specific to any one repo.
+struct Project: Identifiable, Hashable {
+    let id: String        // the .conf basename
+    let name: String      // display name
+    let repo: String
+
+    init?(tsv line: String) {
+        let f = line.components(separatedBy: "\t")
+        guard f.count >= 3 else { return nil }
+        id = f[0]; name = f[1]; repo = f[2]
     }
 }
 
-/// What the engine says is running right now.
-struct DemoState {
+/// What the engine says is running for one project.
+struct RunState {
     var running = false
     var ref = ""
-    var target: Target = .web
+    var preset = ""
     var started = ""
-    var webUp = false
-    var adminUp = false
+    var urls: [URL] = []
 
-    static let idle = DemoState()
+    static let idle = RunState()
 
     init() {}
 
-    /// `running|idle  ref  target  started  web  admin`, tab separated.
+    /// `running|idle  ref  preset  started  url,url`, tab separated.
     init(tsv line: String) {
         let f = line.components(separatedBy: "\t")
-        guard f.count >= 6, f[0] == "running" else { self = .idle; return }
+        guard f.count >= 5, f[0] == "running" else { self = .idle; return }
         running = true
         ref = f[1]
-        target = Target(rawValue: f[2]) ?? .web
+        preset = f[2]
         started = f[3]
-        webUp = f[4] == "1"
-        adminUp = f[5] == "1"
-    }
-
-    var url: URL? {
-        if webUp { return URL(string: "http://localhost:3000") }
-        if adminUp { return URL(string: "http://localhost:3002") }
-        return nil
+        urls = f[4].components(separatedBy: ",").compactMap {
+            $0.isEmpty ? nil : URL(string: $0)
+        }
     }
 }
 
@@ -140,7 +137,7 @@ enum Engine {
            FileManager.default.isExecutableFile(atPath: p) {
             return p
         }
-        return NSHomeDirectory() + "/Development/work/frankly-launcher/frankly-launcher.sh"
+        return NSHomeDirectory() + "/Development/project-launcher/project-launcher.sh"
     }
 
     static func process(_ args: [String]) -> Process {
@@ -162,15 +159,27 @@ enum Engine {
         return (String(data: data, encoding: .utf8) ?? "", p.terminationStatus)
     }
 
-    static func branches() -> [Branch] {
-        capture(["branches"]).out
+    static func projects() -> [Project] {
+        capture(["projects"]).out
+            .components(separatedBy: "\n")
+            .compactMap { $0.isEmpty ? nil : Project(tsv: $0) }
+    }
+
+    static func branches(_ project: String) -> [Branch] {
+        capture(["branches", project]).out
             .components(separatedBy: "\n")
             .compactMap { $0.isEmpty ? nil : Branch(tsv: $0) }
     }
 
-    static func state() -> DemoState {
-        let line = capture(["state"]).out.components(separatedBy: "\n").first ?? ""
-        return DemoState(tsv: line)
+    static func presets(_ project: String) -> [String] {
+        capture(["presets", project]).out
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+    }
+
+    static func state(_ project: String) -> RunState {
+        let line = capture(["state", project]).out.components(separatedBy: "\n").first ?? ""
+        return RunState(tsv: line)
     }
 }
 
@@ -384,23 +393,48 @@ struct RunSheet: View {
 
 // MARK: - Main
 
+struct ProjectRow: View {
+    let project: Project
+    let isLive: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if isLive {
+                ProgressView().controlSize(.small).scaleEffect(0.55).frame(width: 12, height: 12)
+            }
+            Text(project.name).font(.system(size: 13))
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 struct ContentView: View {
+    @State private var projects: [Project] = []
+    @State private var selectedProject: String?
+    @State private var liveProjects: Set<String> = []
+
     @State private var branches: [Branch] = []
-    @State private var demo = DemoState.idle
+    @State private var presets: [String] = []
+    @State private var state = RunState.idle
     @State private var selection: String?
-    @State private var target: Target = .web
+    @State private var preset = ""
     @State private var showMerged = false
     @State private var showOlder = false
+
     @State private var sheetTitle = ""
     @State private var showingRun = false
     @StateObject private var runner = Runner()
 
     private static let week = 7 * 24 * 60 * 60
 
+    private var project: Project? {
+        projects.first { $0.id == selectedProject }
+    }
+
     var visible: [Branch] {
         let now = Int(Date().timeIntervalSince1970)
         return branches.filter { b in
-            if b.isDefault || b.ref == demo.ref { return true }
+            if b.isDefault || b.ref == state.ref { return true }
             if !showMerged && b.pr == .merged { return false }
             if !showOlder && now - b.timestamp > Self.week { return false }
             return true
@@ -409,42 +443,75 @@ struct ContentView: View {
 
     /// Start / Stop / Switch, decided by what is running and what is selected.
     private var primary: (title: String, action: () -> Void)? {
-        guard let ref = selection else { return nil }
-        if demo.running && demo.ref == ref {
-            return ("Stop", { run(["stop"], "Stopping \(ref)") })
+        guard let p = selectedProject, let ref = selection else { return nil }
+        if state.running && state.ref == ref {
+            return ("Stop", { run(["stop", p], "Stopping \(ref)") })
         }
-        if demo.running {
-            // do_run stops the current demo first; only one fits on the shared
-            // Postgres, and it says so as it goes.
-            return ("Switch", { run(["run", ref, target.rawValue], "Switching to \(ref)") })
+        if state.running {
+            // do_run stops whatever this project has running first, and says
+            // so as it goes.
+            return ("Switch", { run(["run", p, ref, preset], "Switching to \(ref)") })
         }
-        return ("Start", { run(["run", ref, target.rawValue], "Starting \(ref)") })
+        return ("Start", { run(["run", p, ref, preset], "Starting \(ref)") })
     }
 
     var body: some View {
+        NavigationSplitView {
+            List(projects, selection: $selectedProject) { p in
+                ProjectRow(project: p, isLive: liveProjects.contains(p.id)).tag(p.id)
+            }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+        } detail: {
+            if project == nil {
+                ContentUnavailableView("No project selected", systemImage: "square.stack.3d.up")
+            } else {
+                detail
+            }
+        }
+        .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
+        .task { loadProjects() }
+        .onChange(of: selectedProject) { _, _ in reload() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    if let p = selectedProject { _ = Engine.capture(["refresh", p]) }
+                    reload()
+                } label: { Image(systemName: "arrow.clockwise") }
+                .help("Re-read branches and pull request state")
+            }
+        }
+        .sheet(isPresented: $showingRun) {
+            RunSheet(runner: runner, title: sheetTitle) {
+                showingRun = false
+                reload()
+                refreshLive()
+            }
+        }
+    }
+
+    private var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(demo.running
-                 ? "\(demo.ref) is running · \(demo.target.title) · since \(shortTime(demo.started))"
-                 : "Runs from a throwaway worktree. Your Studio checkout is never touched.")
+            Text(state.running
+                 ? "\(state.ref) is running · \(state.preset) · since \(shortTime(state.started))"
+                 : "Runs from a throwaway worktree. Your checkout is never touched.")
                 .font(.system(size: 11))
-                .foregroundStyle(demo.running ? .primary : .secondary)
+                .foregroundStyle(state.running ? .primary : .secondary)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
 
             List(visible, selection: $selection) { branch in
                 BranchRow(branch: branch,
-                          isLive: demo.running && demo.ref == branch.ref,
-                          showGutter: demo.running)
+                          isLive: state.running && state.ref == branch.ref,
+                          showGutter: state.running)
                     .tag(branch.ref)
                     .contextMenu {
-                        if branch.ready && demo.ref != branch.ref {
+                        if branch.ready && state.ref != branch.ref, let p = selectedProject {
                             Button("Remove worktree") {
-                                run(["remove-worktree", branch.ref], "Removing \(branch.ref)")
+                                run(["remove-worktree", p, branch.ref], "Removing \(branch.ref)")
                             }
                         }
                     }
             }
             .listStyle(.inset)
-            .onChange(of: selection) { _, _ in syncTargetToDemo() }
 
             Divider()
 
@@ -460,57 +527,36 @@ struct ContentView: View {
             Divider()
 
             HStack(spacing: 12) {
-                Picker("", selection: $target) {
-                    ForEach(Target.allCases) { Text($0.title).tag($0) }
+                // Presets come from the project's own config, so a one-server
+                // project shows one button and Studio shows three.
+                if presets.count > 1 {
+                    Picker("", selection: $preset) {
+                        ForEach(presets, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.large)
+                    .frame(width: CGFloat(min(presets.count, 4)) * 72)
+                    .disabled(state.running && state.ref == selection)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.large)
-                .frame(width: 210)
-                // A running demo's target is a fact, not a choice.
-                .disabled(demo.running && demo.ref == selection)
 
                 Spacer()
 
-                // Liquid Glass, and grouped so the two buttons blend into one
-                // another the way system controls do rather than reading as two
-                // unrelated slabs.
                 GlassEffectContainer(spacing: 10) {
                     HStack(spacing: 10) {
-                        if demo.running, let url = demo.url {
+                        if state.running, let url = state.urls.first {
                             Button("Open") { NSWorkspace.shared.open(url) }
-                                .buttonStyle(.glass)
-                                .controlSize(.large)
+                                .buttonStyle(.glass).controlSize(.large)
                         }
                         if let primary {
                             Button(primary.title, action: primary.action)
-                                .buttonStyle(.glassProminent)
-                                .controlSize(.large)
+                                .buttonStyle(.glassProminent).controlSize(.large)
                                 .keyboardShortcut(.defaultAction)
                         }
                     }
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
-        }
-        .frame(minWidth: 560, idealWidth: 580, minHeight: 400, idealHeight: 520)
-        .task { reload() }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    _ = Engine.capture(["refresh-branches"])
-                    reload()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("Refresh branches and pull request state")
-            }
-        }
-        .sheet(isPresented: $showingRun) {
-            RunSheet(runner: runner, title: sheetTitle) {
-                showingRun = false
-                reload()
-            }
         }
     }
 
@@ -520,20 +566,33 @@ struct ContentView: View {
         runner.start(args)
     }
 
+    private func loadProjects() {
+        projects = Engine.projects()
+        if selectedProject == nil { selectedProject = projects.first?.id }
+        refreshLive()
+        reload()
+    }
+
+    /// Which projects have something up — drives the sidebar spinners.
+    private func refreshLive() {
+        var live: Set<String> = []
+        for p in projects where Engine.state(p.id).running { live.insert(p.id) }
+        liveProjects = live
+    }
+
     private func reload() {
-        branches = Engine.branches()
-        demo = Engine.state()
-        if demo.running {
-            selection = demo.ref
-            target = demo.target
+        guard let p = selectedProject else { return }
+        branches = Engine.branches(p)
+        presets = Engine.presets(p)
+        state = Engine.state(p)
+        if preset.isEmpty || !presets.contains(preset) { preset = presets.first ?? "" }
+        if state.running {
+            selection = state.ref
+            if presets.contains(state.preset) { preset = state.preset }
         } else if selection == nil || !branches.contains(where: { $0.ref == selection }) {
             selection = branches.first(where: { $0.mine && $0.pr != .merged })?.ref
                      ?? branches.first(where: { $0.isDefault })?.ref
         }
-    }
-
-    private func syncTargetToDemo() {
-        if demo.running && demo.ref == selection { target = demo.target }
     }
 
     /// "2026-09-04 23:32:59" -> "23:32".
@@ -545,9 +604,9 @@ struct ContentView: View {
 }
 
 @main
-struct FranklyLauncherApp: App {
+struct ProjectLauncherApp: App {
     var body: some Scene {
-        WindowGroup("Frankly Launcher") {
+        WindowGroup("Project Launcher") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

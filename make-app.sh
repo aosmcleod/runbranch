@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build "Frankly Launcher.app" -- the front end, compiled from
-# app/FranklyLauncher.swift. All the actual work stays in frankly-launcher.sh;
+# Build "Project Launcher.app" -- the front end, compiled from
+# app/ProjectLauncher.swift. All the actual work stays in project-launcher.sh;
 # the app runs it as a subprocess and streams it into a window.
 #
 # Needs only the Xcode command line tools (swiftc) plus sips and iconutil,
@@ -13,10 +13,10 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$REPO/frankly-launcher.sh"
-SOURCE="$REPO/app/FranklyLauncher.swift"
+SCRIPT="$REPO/project-launcher.sh"
+SOURCE="$REPO/app/ProjectLauncher.swift"
 DEST="${1:-$REPO}"
-APP="$DEST/Frankly Launcher.app"
+APP="$DEST/Project Launcher.app"
 
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
 [ -f "$SOURCE" ] || { echo "missing $SOURCE" >&2; exit 1; }
@@ -50,7 +50,7 @@ rm -rf "$TMP"
 echo "    icon built"
 
 # --- binary ---------------------------------------------------------------
-swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/FranklyLauncher"
+swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/ProjectLauncher"
 echo "    binary built"
 
 # --- Info.plist -----------------------------------------------------------
@@ -61,13 +61,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>              <string>Frankly Launcher</string>
-  <key>CFBundleDisplayName</key>       <string>Frankly Launcher</string>
-  <key>CFBundleIdentifier</key>        <string>local.frankly.launcher</string>
-  <key>CFBundleVersion</key>           <string>2.0</string>
-  <key>CFBundleShortVersionString</key><string>2.0</string>
+  <key>CFBundleName</key>              <string>Project Launcher</string>
+  <key>CFBundleDisplayName</key>       <string>Project Launcher</string>
+  <key>CFBundleIdentifier</key>        <string>local.project.launcher</string>
+  <key>CFBundleVersion</key>           <string>3.0</string>
+  <key>CFBundleShortVersionString</key><string>3.0</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
-  <key>CFBundleExecutable</key>        <string>FranklyLauncher</string>
+  <key>CFBundleExecutable</key>        <string>ProjectLauncher</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>NSHighResolutionCapable</key>   <true/>
   <key>LSMinimumSystemVersion</key>    <string>14.0</string>
