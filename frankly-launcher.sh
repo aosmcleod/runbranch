@@ -544,7 +544,11 @@ handle_migrations() {
 # this function writes progress to stdout.
 STARTED_PID=''
 start_server() {
-  local wt="$1" name="$2" filter="$3" log="$LOG_DIR/$name.log" pid
+  # Split deliberately: bash expands every argument to `local` BEFORE it
+  # assigns any of them, so referencing $name in the same statement that
+  # declares it reads the (unset) global and trips `set -u`.
+  local wt="$1" name="$2" filter="$3"
+  local log="$LOG_DIR/$name.log" pid
   mkdir -p "$LOG_DIR"
   : >"$log"
   set -m
