@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="#1b2233"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="none" stroke="#2e3950" stroke-width="8"/>
+  <!-- worktree: one trunk, branches peeling off to their own demo -->
+  <g stroke="#5c6b8a" stroke-width="34" stroke-linecap="round" fill="none">
+    <path d="M300 236 L300 788"/>
+    <path d="M300 420 C300 508, 420 508, 470 508"/>
+    <path d="M300 604 C300 692, 420 692, 470 692"/>
+  </g>
+  <circle cx="300" cy="236" r="58" fill="#5c6b8a"/>
+  <circle cx="300" cy="788" r="58" fill="#5c6b8a"/>
+  <circle cx="512" cy="692" r="52" fill="#5c6b8a"/>
+  <!-- the demo you actually launch -->
+  <circle cx="620" cy="508" r="150" fill="#3ddc97"/>
+  <path d="M584 440 L584 576 L692 508 Z" fill="#1b2233"/>
+</svg>

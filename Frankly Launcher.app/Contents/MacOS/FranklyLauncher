@@ -1,0 +1,11 @@
+#!/bin/bash
+SCRIPT="/Users/alecmcleod/Development/work/frankly-launcher/frankly-launcher.sh"
+if [ ! -x "$SCRIPT" ]; then
+  osascript -e 'display alert "Frankly Launcher" message "The launcher script is missing from:
+
+/Users/alecmcleod/Development/work/frankly-launcher/frankly-launcher.sh
+
+The repo has moved or been deleted. Re-run make-app.sh from wherever it lives now." as critical buttons {"OK"}'
+  exit 1
+fi
+exec "$SCRIPT"
