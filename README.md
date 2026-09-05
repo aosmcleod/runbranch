@@ -10,7 +10,9 @@ with whatever you are editing in `~/Development/work/Studio`.
 ~/Development/work/.frankly-demo/<branch>/   <- throwaway worktree, one per branch
 ```
 
-Bash and `osascript` only. No Node, no Homebrew packages, no Electron.
+A bash engine with a small SwiftUI front end. No Node, no Homebrew packages,
+no Electron, no SPM manifest — just the Xcode command line tools you already
+have.
 
 ---
 
@@ -166,23 +168,31 @@ A per-branch database (`CREATE DATABASE studio_<branch>` plus a `DATABASE_URL`
 override) would remove this whole class of problem. It is a deliberate
 non-goal for now — it is a bigger change than the pain currently justifies.
 
-### "Merged" is measured with git, not the GitHub API
+### "Merged" comes from GitHub, cached
 
-An earlier version asked `gh pr list` which PRs were merged — 1.7 seconds on
-every single launch. It turns out git already knows. This repo merges PRs with
-merge commits rather than squashing, so a merged branch's commits are reachable
-from `origin/development` and `git branch --merged` names it. Two local git
-calls, no network, and the picker opens in about half a second.
+I tried to avoid the network here and got it wrong, so the reasoning is worth
+recording. `git branch --merged origin/development` looks like it should answer
+this for free, and for a merge-commit PR it does. But this repo **squash-merges
+some PRs**, and a squashed branch's commits are rewritten — they are never
+reachable from `development`, so git can never name it. Verified against
+`docs/commit-name-the-ticket`: merged on GitHub, invisible to git.
 
-The honest tradeoff: "merged" is measured against the `origin/development` you
-**last fetched**. A branch merged since then still looks live. That is what the
-*Fetch* button is for. And if someone ever squash-merges a PR, that branch will
-not be detected as merged — a false negative, which shows you a branch you
-thought was gone rather than hiding one you wanted.
+So the PR map comes from `gh pr list` and is cached on disk at
+`.frankly-demo/.prcache`. The cache is read instantly and refreshed in the
+background when it is older than 15 minutes, so only the very first launch
+waits on the network:
 
-Ownership is likewise local: a branch is yours when its tip commit carries one
-of your addresses (`alecmcleod@icloud.com`, `alec.mcleod@functionpoint.com`,
-`alec@mcleod.co` — `FRANKLY_MY_EMAILS` overrides).
+| | |
+|---|---|
+| cold, first ever launch | ~1.5s |
+| every launch after | ~0.04s |
+
+The toolbar's refresh button forces a re-read when you want one.
+
+Ownership is local and needs no network: a branch is yours when its tip commit
+carries one of your addresses (`alecmcleod@icloud.com`,
+`alec.mcleod@functionpoint.com`, `alec@mcleod.co` — `FRANKLY_MY_EMAILS`
+overrides).
 
 ### Sign-in only works on `localhost`
 

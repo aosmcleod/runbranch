@@ -249,9 +249,21 @@ struct Badge: View {
 struct BranchRow: View {
     let branch: Branch
     let isLive: Bool
+    /// Reserve the leading slot whenever ANY demo is up, so branch names stay
+    /// on one vertical line instead of the live row shunting itself sideways.
+    let showGutter: Bool
 
     var body: some View {
         HStack(spacing: 8) {
+            if showGutter {
+                ZStack {
+                    if isLive {
+                        ProgressView().controlSize(.small).scaleEffect(0.55)
+                    }
+                }
+                .frame(width: 14, height: 14)
+            }
+
             Text(branch.ref)
                 .font(.system(size: 13))
                 .lineLimit(1)
@@ -267,14 +279,10 @@ struct BranchRow: View {
             }
             Badge(text: branch.owner)
 
-            // A live demo outranks "ready" — ready only means the worktree
-            // exists, and saying both would be noise.
-            if isLive {
-                HStack(spacing: 4) {
-                    ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 10, height: 10)
-                    Badge(text: "running", color: .green)
-                }
-            } else if branch.ready {
+            // No "running" badge: the spinner in the gutter already says it,
+            // and the header names the branch. "ready" only means the worktree
+            // exists, which stops being interesting once it is live.
+            if !isLive && branch.ready {
                 Badge(text: "ready", symbol: "bolt.fill", color: .green)
             }
 
@@ -341,12 +349,20 @@ struct RunSheet: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(runner.lines.joined(separator: "\n"), forType: .string)
                     }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
                 }
                 Spacer()
                 if runner.finished {
-                    Button("Close", action: onDone).keyboardShortcut(.defaultAction)
+                    Button("Close", action: onDone)
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
                 } else {
-                    Button("Stop") { runner.cancel() }.keyboardShortcut(.cancelAction)
+                    Button("Stop") { runner.cancel() }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        .keyboardShortcut(.cancelAction)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
@@ -415,7 +431,9 @@ struct ContentView: View {
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
 
             List(visible, selection: $selection) { branch in
-                BranchRow(branch: branch, isLive: demo.running && demo.ref == branch.ref)
+                BranchRow(branch: branch,
+                          isLive: demo.running && demo.ref == branch.ref,
+                          showGutter: demo.running)
                     .tag(branch.ref)
                     .contextMenu {
                         if branch.ready && demo.ref != branch.ref {
@@ -447,23 +465,35 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 200)
+                .controlSize(.large)
+                .frame(width: 210)
                 // A running demo's target is a fact, not a choice.
                 .disabled(demo.running && demo.ref == selection)
 
                 Spacer()
 
-                if demo.running, let url = demo.url {
-                    Button("Open") { NSWorkspace.shared.open(url) }
-                }
-                if let primary {
-                    Button(primary.title, action: primary.action)
-                        .keyboardShortcut(.defaultAction)
+                // Liquid Glass, and grouped so the two buttons blend into one
+                // another the way system controls do rather than reading as two
+                // unrelated slabs.
+                GlassEffectContainer(spacing: 10) {
+                    HStack(spacing: 10) {
+                        if demo.running, let url = demo.url {
+                            Button("Open") { NSWorkspace.shared.open(url) }
+                                .buttonStyle(.glass)
+                                .controlSize(.large)
+                        }
+                        if let primary {
+                            Button(primary.title, action: primary.action)
+                                .buttonStyle(.glassProminent)
+                                .controlSize(.large)
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
-        .frame(width: 580, height: 520)
+        .frame(minWidth: 560, idealWidth: 580, minHeight: 400, idealHeight: 520)
         .task { reload() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -520,6 +550,6 @@ struct FranklyLauncherApp: App {
         WindowGroup("Frankly Launcher") {
             ContentView()
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
     }
 }
