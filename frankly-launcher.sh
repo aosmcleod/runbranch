@@ -836,6 +836,95 @@ print_status() {
 }
 
 # ---------------------------------------------------------------------------
+# Branch data
+#
+# Deliberately NO network. An earlier draft asked `gh pr list` which PRs were
+# merged -- 1.7s on every launch. It turns out git already knows: this repo
+# merges PRs with merge commits (not squash), so a merged branch's commits are
+# reachable from origin/development and `git branch --merged` names it. Two
+# local git calls, no round trip, and the picker opens instantly.
+#
+# The tradeoff, and it is the honest one: "merged" is measured against the
+# origin/development you last fetched. A branch merged since your last fetch
+# still looks live. That is what the Fetch button is for.
+# ---------------------------------------------------------------------------
+
+# Every address Alec has authored commits under. A branch is "mine" when its
+# tip carries one of them.
+MY_EMAILS="${FRANKLY_MY_EMAILS:-alecmcleod@icloud.com alec.mcleod@functionpoint.com alec@mcleod.co}"
+
+DEFAULT_BRANCH="${FRANKLY_DEFAULT_BRANCH:-development}"
+
+# The repo pushes branches faster than anyone reads them -- 636 remote, 428 of
+# them unmerged. "Everyone else" is an escape hatch, not a browser, so it shows
+# the most recent slice and says so.
+OTHER_LIMIT="${FRANKLY_OTHER_LIMIT:-80}"
+
+# Writes "ref|group|age|meta|merged" to $1. group is default|mine|other.
+collect_branch_data() {
+  local out="$1" now ready_slugs dir current
+  now=$(date +%s)
+  current=$(studio_current_branch)
+
+  # Which branches already have a built worktree -- the fast ones to start.
+  ready_slugs=' '
+  for dir in "$DEMO_ROOT"/*; do
+    [ -d "$dir" ] || continue
+    case "$(basename "$dir")" in meta|logs|.*) continue ;; esac
+    ready_slugs="$ready_slugs$(basename "$dir") "
+  done
+
+  {
+    studio_git branch --merged "origin/$DEFAULT_BRANCH" --format='M|%(refname:short)' 2>/dev/null
+    studio_git branch -r --merged "origin/$DEFAULT_BRANCH" --format='M|%(refname:short)' 2>/dev/null
+    studio_git for-each-ref --sort=-committerdate \
+      --format='L|%(refname:short)|%(authoremail)|%(committerdate:unix)' refs/heads 2>/dev/null
+    studio_git for-each-ref --sort=-committerdate \
+      --format='R|%(refname:short)|%(authoremail)|%(committerdate:unix)' refs/remotes/origin 2>/dev/null
+  } | awk -F'|' \
+        -v now="$now" -v emails="$MY_EMAILS" -v ready="$ready_slugs" \
+        -v current="$current" -v defbr="$DEFAULT_BRANCH" -v olimit="$OTHER_LIMIT" '
+    function age(ts,   d) {
+      d = now - ts
+      if (d < 3600)   return int(d / 60) "m"
+      if (d < 86400)  return int(d / 3600) "h"
+      if (d < 2592000) return int(d / 86400) "d"
+      return int(d / 2592000) "mo"
+    }
+    function slug(r) { gsub(/^origin\//, "", r); gsub(/[^A-Za-z0-9._-]/, "-", r); return r }
+    function mine(email,   i, n, parts) {
+      n = split(emails, parts, " ")
+      for (i = 1; i <= n; i++) if (index(email, parts[i]) > 0) return 1
+      return 0
+    }
+    function emit(ref, group, ts,   meta, m) {
+      meta = ""
+      if (index(ready, " " slug(ref) " ") > 0) meta = "ready"
+      if (ref == current) meta = (meta == "" ? "open in Studio" : meta " · in Studio")
+      m = (ref in merged) ? 1 : 0
+      print ref "|" group "|" age(ts) "|" meta "|" m
+    }
+    $1 == "M" { merged[$2] = 1; next }
+    $1 == "L" {
+      seenlocal[$2] = 1
+      if ($2 == defbr) { emit($2, "default", $4); next }
+      emit($2, mine($3) ? "mine" : "other", $4)
+      next
+    }
+    $1 == "R" {
+      if ($2 == "origin" || $2 == "origin/HEAD") next
+      short = $2; sub(/^origin\//, "", short)
+      # A local branch already stands for its remote twin.
+      if (short == defbr || seenlocal[short]) next
+      if (mine($3)) { emit($2, "mine", $4); next }
+      if (others++ >= olimit) next
+      emit($2, "other", $4)
+    }
+  ' > "$out"
+
+}
+
+# ---------------------------------------------------------------------------
 # Branch picking
 # ---------------------------------------------------------------------------
 
@@ -927,8 +1016,9 @@ resolve_typed_ref() {
   return 1
 }
 
+# Fallback picker: the stock list, used only when the window cannot run.
 # Sets PICKED_REF. Returns 1 if the user cancelled.
-pick_branch() {
+pick_branch_list() {
   PICKED_REF=''
   while :; do
     build_branch_items
@@ -958,6 +1048,54 @@ If it only exists on the remote, refresh the list from origin first."
     PICKED_REF="$(label_ref "$picked")"
     [ -n "$PICKED_REF" ] && return 0
     return 1
+  done
+}
+
+PICKER_JS="$(dirname "$SELF")/picker.js"
+
+# The real picker: a Cocoa window (see picker.js) with a Default section for
+# development, your own branches below it, and checkboxes for merged branches
+# and everyone else's. Falls back to the stock list if it cannot run, so a
+# broken bridge degrades to something usable rather than to nothing.
+#
+# Sets PICKED_REF. Returns 1 if the user cancelled.
+pick_branch() {
+  PICKED_REF=''
+  local data result action rest ref
+  data="$DEMO_ROOT/.branches"
+  mkdir -p "$DEMO_ROOT"
+
+  if [ ! -f "$PICKER_JS" ]; then
+    pick_branch_list
+    return $?
+  fi
+
+  while :; do
+    collect_branch_data "$data"
+    result=$(osascript -l JavaScript "$PICKER_JS" "$data" 2>/dev/null) || {
+      # The window failed outright -- degrade rather than dead-end.
+      pick_branch_list
+      return $?
+    }
+    action="${result%%|*}"
+    rest="${result#*|}"
+    ref="${rest%%|*}"
+    case "$action" in
+      choose)
+        [ -n "$ref" ] || return 1
+        PICKED_REF="$ref"
+        return 0
+        ;;
+      fetch)
+        # The only write this launcher makes in $STUDIO, and only when asked.
+        # It also refreshes what counts as merged, which is measured against
+        # the origin/development you last fetched.
+        gui_notify "$APP_NAME" "Fetching from origin..."
+        studio_git fetch --quiet --prune origin 2>/dev/null || true
+        continue
+        ;;
+      *) return 1 ;;
+    esac
   done
 }
 

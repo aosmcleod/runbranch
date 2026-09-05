@@ -91,12 +91,19 @@ from somewhere with a bare environment.
 Clicking the Dock icon means *start a demo* — there is no menu in the way. You
 go straight to two questions:
 
-1. **Which branch.** Recently-demoed branches first, then local branches, then
-   the 25 most recently updated remote branches. The top row is preselected, so
-   restarting the branch you demoed last is just Return. The branch currently
-   open in Studio is marked, and so is any branch whose worktree is already
-   built. Anything older is reachable through *Type a branch name...*; *Fetch
-   from origin* refreshes the list when you ask it to.
+1. **Which branch.** A real window (`picker.js`), because the stock list
+   picker cannot do sections, columns or checkboxes:
+
+   - **Default** — `development`, always listed.
+   - **My branches** — anything whose tip you authored, newest first. Each row
+     shows the branch (ellipsed), a dim hint (`ready` when its worktree is
+     already built, `open in Studio`), and the last-updated age, right-aligned.
+   - **Include branches whose PR is merged** — off by default. Merged work is
+     the bulk of the noise.
+   - **Show everyone else's branches** — off by default; reveals a third
+     section with the most recent slice of everyone else's work.
+
+   *Fetch* re-reads origin and re-renders. *Choose* starts the demo.
 2. **What to run.** Buttons: **Web** (port 3000), **Admin** (port 3002), or
    **Both**. The api (port 4000) always starts — web and admin are useless
    without it.
@@ -162,6 +169,24 @@ Then re-run the launcher and re-seed with `pnpm seed:account`.
 A per-branch database (`CREATE DATABASE studio_<branch>` plus a `DATABASE_URL`
 override) would remove this whole class of problem. It is a deliberate
 non-goal for now — it is a bigger change than the pain currently justifies.
+
+### "Merged" is measured with git, not the GitHub API
+
+An earlier version asked `gh pr list` which PRs were merged — 1.7 seconds on
+every single launch. It turns out git already knows. This repo merges PRs with
+merge commits rather than squashing, so a merged branch's commits are reachable
+from `origin/development` and `git branch --merged` names it. Two local git
+calls, no network, and the picker opens in about half a second.
+
+The honest tradeoff: "merged" is measured against the `origin/development` you
+**last fetched**. A branch merged since then still looks live. That is what the
+*Fetch* button is for. And if someone ever squash-merges a PR, that branch will
+not be detected as merged — a false negative, which shows you a branch you
+thought was gone rather than hiding one you wanted.
+
+Ownership is likewise local: a branch is yours when its tip commit carries one
+of your addresses (`alecmcleod@icloud.com`, `alec.mcleod@functionpoint.com`,
+`alec@mcleod.co` — `FRANKLY_MY_EMAILS` overrides).
 
 ### Sign-in only works on `localhost`
 
@@ -232,10 +257,14 @@ leaves alone.
 
 ```
 frankly-launcher.sh   the whole thing
+picker.js             the branch window (JXA + AppKit, run by osascript)
 make-app.sh           builds Frankly Launcher.app (sips + iconutil, both built into macOS)
 assets/icon.svg       icon source
 Frankly Launcher.app  the Dock bundle
 ```
+
+If the window cannot run for any reason, the launcher falls back to the stock
+list picker rather than dead-ending.
 
 State lives outside the repo, in `~/Development/work/.frankly-demo/`:
 `.state` (the running demo), `.recent` (branch MRU), `logs/`, `meta/`.
