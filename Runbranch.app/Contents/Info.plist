@@ -10,6 +10,7 @@
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>CFBundleExecutable</key>        <string>RunBranch</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
+  <key>CFBundleIconName</key>          <string>AppIcon</string>
   <key>NSHighResolutionCapable</key>   <true/>
   <key>LSMinimumSystemVersion</key>    <string>14.0</string>
   <key>FLScriptPath</key>              <string>/Users/alecmcleod/Development/runbranch/runbranch.sh</string>

@@ -136,6 +136,19 @@ So $1 is either genuinely missing, or installed somewhere unusual." "$2"
 # ---------------------------------------------------------------------------
 
 PROJECT=''
+IN_REPO_CONFIG=''
+
+expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
+
+# Reset on every load so a second load cannot inherit the first, and so the
+# in-repo file and the local one both start from the same place.
+reset_project_defaults() {
+  NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
+  COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
+  MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
+  PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
+  DB_URL_VARS=""; DB_TEMPLATE=""; DB_ADMIN_USER=""
+}
 
 load_project() {
   # Split deliberately: bash expands every argument to `local` BEFORE it
@@ -145,20 +158,36 @@ load_project() {
   [ -f "$file" ] || die "No project called \"$name\"." \
     "ls $PROJECTS_DIR    # or add $name.conf there"
 
-  # Defaults, reset on every load so a second load cannot inherit the first.
-  NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
-  COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
-  MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
-  PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
-  DB_URL_VARS=""; DB_TEMPLATE=""; DB_ADMIN_USER=""
+  reset_project_defaults
 
   # shellcheck disable=SC1090
   . "$file"
 
+  # A project can keep its definition in the repo, where the team can review it
+  # in a pull request and a new machine gets it from the clone. The local file
+  # still wins, so one person can override a port or a preset without changing
+  # what everyone else runs.
+  #
+  # The order below is why: the local file is read first for REPO, the in-repo
+  # file is then read as the base, and the local file is read again on top.
+  expand_repo
+  if [ -f "$REPO/.runbranch" ]; then
+    IN_REPO_CONFIG="$REPO/.runbranch"
+    reset_project_defaults
+    # shellcheck disable=SC1090
+    . "$IN_REPO_CONFIG"
+    # shellcheck disable=SC1090
+    . "$file"
+    # The second pass reset REPO to whatever the local file literally says,
+    # so expand it again rather than leaving a tilde in a path.
+    expand_repo
+  else
+    IN_REPO_CONFIG=""
+  fi
+
   PROJECT="$name"
   [ -n "$NAME" ] || NAME="$name"
   [ -n "$REPO" ] || die "$name.conf sets no REPO." "edit $file"
-  case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac
   [ -d "$REPO/.git" ] || die "$NAME: $REPO is not a git repository." "edit $file"
   # A Procfile already IS a target list: `name: command`, one per line. Foreman
   # assigns each process a PORT; we do the same so a health check has somewhere
@@ -1148,6 +1177,7 @@ doctor_project() {
   local bad=0 t cmd head f
   step "$NAME"
   info "config    $PROJECTS_DIR/$PROJECT.conf"
+  [ -n "$IN_REPO_CONFIG" ] && ok "in-repo   $IN_REPO_CONFIG (local file overrides it)"
 
   if [ -d "$REPO/.git" ]; then ok "repo      $REPO"
   else warn "repo      $REPO is not a git repository"; bad=1; fi
@@ -1271,6 +1301,19 @@ EOF
 
 pick_project() {
   PICKED_PROJECT=''
+IN_REPO_CONFIG=''
+
+expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
+
+# Reset on every load so a second load cannot inherit the first, and so the
+# in-repo file and the local one both start from the same place.
+reset_project_defaults() {
+  NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
+  COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
+  MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
+  PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
+  DB_URL_VARS=""; DB_TEMPLATE=""; DB_ADMIN_USER=""
+}
   local i=0 name disp repo has line reply
   PROJ_NAMES=()
   printf '\n%sProjects%s\n\n' "$C_BLD" "$C_OFF"

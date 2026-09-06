@@ -1,171 +1,188 @@
-# runbranch
+<img src="docs/img/mark-256.png" width="72" alt="">
 
-A Dock-able runner for any local project, from a **throwaway git worktree**.
+# Runbranch
 
-```
-<your checkout>                                    <- never modified
-~/.runbranch/<project>/worktrees/<branch>/  <- throwaway, one per branch
-```
+**Run a branch that isn't the one you're working on.** On a real port, beside
+your work, without touching your checkout.
 
-A bash engine with a small SwiftUI front end. No Node, no Homebrew packages,
-no Electron, no SPM manifest — just the Xcode command line tools.
+A native macOS app for the thing every developer improvises badly.
 
 ---
 
 ## Why
 
-Demoing out of your working checkout breaks in the same shape every time:
+A colleague's pull request needs a look. Not a diff — a look. You want to click
+the thing. Your options today are all bad:
 
-- Switching branches to show something either fails on uncommitted work, or
-  silently changes what the person at the keyboard is looking at.
-- Gitignored config (`.env.local` and friends) does not exist in a fresh tree,
-  so everything 401s or cannot reach its database. That reads as a broken
-  branch when it is a missing file.
-- A dev server left running is a concurrent writer on a shared database. Two of
-  them plus a test run produced a real deadlock and 29 wasted minutes.
+- **Switch branches in your checkout.** Fails on uncommitted work, or silently
+  changes what you were doing.
+- **Clone the repo again.** The gitignored `.env` doesn't come with it, so
+  everything 401s and it looks like the branch is broken.
+- **Keep a second checkout by hand.** You'll forget to update it, and you won't
+  remember to delete its `node_modules`.
+- **Wait for a preview deploy.** If the stack even has one, and if it can reach
+  the data you need.
 
-The answer to all three: never touch your checkout, copy the gitignored config
-in every time, and be honest about what is already running.
+Runbranch does the version you'd build yourself given an afternoon: a throwaway
+git worktree per branch, your gitignored config copied in, dependencies
+installed, servers started, and a window that tells you when it's actually up.
 
----
-
-## Projects
-
-Each project is a `projects/<name>.conf` — plain bash, sourced by the engine.
-Only `NAME`, `REPO` and `TARGETS` are required.
-
-Most projects are "install, run one command, open a URL" and stay four lines:
-
-```bash
-NAME="function-ui"
-REPO="~/Development/work/function-ui"
-INSTALL="npm ci"
-TARGETS="docs:5173:/:npm run docs"
-```
-
-Function Studio is the complex one, and the reason every other key exists —
-three servers, shared Postgres, migrations, a gitignored env file:
-
-```bash
-COPY_FILES=".env.local"
-COMPOSE_PROJECT="studio"
-COMPOSE_SERVICES="postgres valkey"
-MIGRATE="pnpm --filter @fs/db db:migrate"
-TARGETS="api:4000:/live:pnpm --filter @fs/api dev
-web:3000:/:pnpm --filter @fs/web dev
-admin:3002:/:pnpm --filter @fs/admin dev"
-ALWAYS="api"
-PRESETS="web=web admin=admin both=web,admin"
-```
-
-Full key reference: [`projects/README.md`](projects/README.md).
+**Your checkout is never modified.** No `checkout`, no `stash`, ever.
 
 ---
 
-## Using it
+## Install
+
+You need the Xcode command line tools (`xcode-select --install`). Nothing else.
 
 ```bash
-./make-app.sh          # build the bundle
-open .                 # then drag "runbranch.app" to the Dock
+git clone https://github.com/aosmcleod/runbranch
+cd runbranch && ./make-app.sh && open .
 ```
 
-Projects run down the sidebar, each with a spinner when something of its is up.
-The main pane is that project's **local** branches, newest first, each with
-badges and a last-updated age:
+Drag `Runbranch.app` to the Dock.
 
-| badge | meaning |
-|---|---|
-| `default` | the project's default branch — always listed, never filtered |
-| `open` / `merged` / `closed` | its pull request, in GitHub's status colours |
-| `me` / a first name | who authored the branch tip |
-| `ready` | its worktree is built, so this one starts in seconds |
+The build is ad-hoc signed, not notarised, so the first launch needs
+**right-click → Open** rather than a double-click. Notarising it would need an
+Apple Developer account; until then that prompt is the honest cost of building
+it yourself.
 
-Merged branches and anything older than a week are hidden behind checkboxes.
+---
 
-Pick a branch, pick what to run, press Start. The run happens in a sheet over
-the window. It **closes itself when the server comes up** and **stays open when
-it does not**, because that is the moment you need the log.
+## Point it at a repo
 
-While something is running: that branch carries a spinner, the header names it,
-and the buttons become *Open* and *Stop*. Select a different branch and it
-becomes *Switch*. Right-click any built branch to remove its worktree.
+You shouldn't have to write a config from nothing. **Add project…** in the
+`•••` menu reads the repo — package manager, lockfile, scripts, `Procfile`,
+compose services, version pins, which files are gitignored — and proposes one,
+then opens it so you can correct the guesses.
 
-### From a shell
+A complete project can be four lines:
 
 ```bash
-./runbranch.sh                              # interactive
-./runbranch.sh run studio development both
+NAME="my-app"
+REPO="~/code/my-app"
+INSTALL="pnpm install --frozen-lockfile"
+TARGETS="web:3000:/:pnpm dev"
+```
+
+Bigger stacks add only what they need:
+
+```bash
+COPY_FILES=".env.local"                    # gitignored, so a worktree lacks it
+COMPOSE_SERVICES="postgres valkey"         # brought up and health-waited
+MIGRATE="pnpm --filter @app/db db:migrate"
+SEED="pnpm --filter @app/db db:seed"       # an empty app isn't worth looking at
+RUNTIME="mise"                             # honour the repo's pinned versions
+DB_URL_VARS="DATABASE_URL"                 # a database per branch
+TARGETS="api:4000:/health:pnpm --filter api dev
+web:3000:/:pnpm --filter web dev"
+ALWAYS="api"                               # web is useless without it
+PRESETS="web=web  full=web,worker"
+```
+
+A `Procfile` needs no target list at all — set `PROCFILE=1` and its processes
+become your targets.
+
+Full reference: **[docs/config.md](docs/config.md)**. Check any project with
+`./runbranch.sh doctor`.
+
+---
+
+## What you get
+
+**A window that tells the truth.** Branches for the selected project, newest
+first, each with its pull request state, who wrote it, and what it's actually
+about — the PR title, not just the branch name. Remote branches with an open
+pull request are listed too, because reviewing someone else's work is the whole
+point. Merged and stale branches stay out of the way until you ask.
+
+**A run you can watch.** Press Start and the work happens in front of you:
+worktree, install, infrastructure, migrations, seed, servers. It closes itself
+when the thing is up and stays put when it isn't — which is the only moment the
+log matters.
+
+**Data that doesn't leak between branches.** Two branches with divergent
+migrations need not share a database. A project can declare one per run, seeded
+from the same source and thrown away with the worktree.
+
+**Status that keeps being true.** Uptime ticks. Health is polled, not assumed.
+Processes and ports orphaned by a crash, a sleep or a force quit are found and
+reclaimed on next launch — you should never go hunting with `lsof`.
+
+---
+
+## From a shell
+
+The app is a window over `runbranch.sh`. Anything it does, you can do here.
+
+```bash
+./runbranch.sh                          # interactive
+./runbranch.sh run studio main both
 ./runbranch.sh stop studio
-./runbranch.sh status                       # every project
-./runbranch.sh cleanup studio
+./runbranch.sh status                   # every project
+./runbranch.sh doctor                   # check every config resolves
+./runbranch.sh scan                     # repos not yet declared
+./runbranch.sh add <repo>               # propose a config and write it
+./runbranch.sh cleanup studio           # remove worktrees
 ```
 
 ---
 
-## The parts that are not obvious
+## Principles
 
-### Worktrees are detached, never branch checkouts
+- **Never touch the working checkout.** If a feature needs to, the design is wrong.
+- **No daemon.** Nothing runs in the background when you're not using it. A run
+  you started outlives the window on purpose — close the app, keep the demo —
+  and anything orphaned is reclaimed rather than left for you to find.
+- **The engine is a shell script you can read.**
+- **Fail loudly, with the fix.** Every error names the command that resolves it.
+- **Configuration is a file, not a database.** In the repo, versioned, diffable.
 
-Git refuses to check out a branch that is already checked out elsewhere — and
-demoing the branch you are working on is the common case. A demo runner also
-has no business holding a ref it might move.
+---
 
-### `docker compose -p` is pinned
+## It is not
 
-Compose names its project after the directory it runs in, so from a worktree it
-would build a **second** stack with its own empty volumes, then collide on any
-fixed `container_name`. `COMPOSE_PROJECT` pins it to the one real database.
+- a process manager — [Overmind](https://github.com/DarthSim/overmind) is better
+  at supervising a `Procfile` you already have;
+- a worktree browser — [Grovr](https://github.com/j1king/grovr) and
+  [Tower](https://www.git-tower.com/) are better at managing worktrees as worktrees;
+- an agent orchestrator — [Conductor](https://conductor.build/) and
+  [cmux](https://cmux.com/) run parallel coding agents;
+- a preview deploy — Vercel and Netlify are better at showing a branch to the
+  internet. Runbranch is for private repos, real local data, stacks that need a
+  real database, and not waiting on a build queue;
+- a sharing tool — what's running is on your machine, for you.
 
-### "Merged" comes from GitHub, cached
+Runbranch does the narrow thing none of them do: **put a branch on a port, and
+tell you when it's up.**
 
-`git branch --merged` looks like it should answer this for free, and for a
-merge-commit PR it does. But a **squashed** merge rewrites the commits, so they
-are never reachable from the default branch and git can never name it. Verified
-against `docs/commit-name-the-ticket`: merged on GitHub, invisible to git.
+---
 
-So the PR map comes from `gh` and is cached per project. Cold: ~1.5s. Warm:
-~0.04s, refreshed in the background. The toolbar refresh forces a re-read.
+## Known limits
 
-Ownership needs no network: a branch is yours when its tip carries one of your
-addresses (`RB_MY_EMAILS` overrides).
-
-### Stopping signals the process group
-
-Each server starts in its own process group. A watcher like `tsx --watch`
-respawns its child if you kill only the child; signalling the group takes the
-tree down. Anything still holding a port afterwards is only reaped when its
-command line points into this project's worktrees — never your own dev server.
-
-### One run per project
-
-Ports and databases are shared within a project, so starting a second run stops
-the first. Different projects use different ports and can run at once — the
-sidebar shows which.
-
-### PATH, and why the app runs `zsh -lic`
-
-An app launched from the Dock inherits launchd's `PATH`, which has neither
-`docker` (`/usr/local/bin`), `pnpm`/`gh` (`/opt/homebrew/bin`), nor `node`
-(fnm mints its bin directory per shell session). The bundle runs the engine
-through a login+interactive zsh so `PATH` matches your terminal. The script
-hardens its own `PATH` as a second layer.
+- **One run per project at a time.** Ports and databases are shared within a
+  project, so starting a second stops the first. Different projects use
+  different ports and can run at once. `PORTS="stepping"` is declared in the
+  config format but not implemented.
+- **Per-run databases are Postgres only.**
+- **Fork branches aren't listed.** Remote branches on `origin` are; a pull
+  request from someone's fork isn't yet.
+- **macOS only**, and built against macOS 26 APIs.
 
 ---
 
 ## Layout
 
 ```
-runbranch.sh        the engine: git, install, infra, servers. No UI of its own.
-app/RunBranch.swift  the front end: project sidebar, branch list, run sheet
-projects/*.conf            one file per project
-make-app.sh                builds runbranch.app (swiftc + sips + iconutil)
-assets/icon.svg            icon source
+runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
+app/RunBranch.swift   the front end
+projects/*.conf       one file per project
+make-app.sh           builds Runbranch.app
+make-icons.sh         the graphic set, from two SVGs
+docs/config.md        every config key
+docs/PLAN.md          design notes and roadmap
 ```
 
-**Why a compiled front end.** The first version used `osascript` dialogs.
-`NSAlert` picks up desktop translucency, shows the interpreter's icon rather
-than the app's, and stacks buttons past two. Worse, it cannot show progress, so
-starting a run meant handing off to Terminal.app over Apple Events — a
-permission the bundle does not hold, which made a failed launch fail *silently*.
-The app runs the script as a subprocess and streams it into its own window, so
-there is nowhere for a failure to hide.
+## Licence
+
+MIT.
