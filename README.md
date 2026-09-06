@@ -1,10 +1,10 @@
-# project-launcher
+# runbranch
 
 A Dock-able runner for any local project, from a **throwaway git worktree**.
 
 ```
 <your checkout>                                    <- never modified
-~/.project-launcher/<project>/worktrees/<branch>/  <- throwaway, one per branch
+~/.runbranch/<project>/worktrees/<branch>/  <- throwaway, one per branch
 ```
 
 A bash engine with a small SwiftUI front end. No Node, no Homebrew packages,
@@ -66,7 +66,7 @@ Full key reference: [`projects/README.md`](projects/README.md).
 
 ```bash
 ./make-app.sh          # build the bundle
-open .                 # then drag "Project Launcher.app" to the Dock
+open .                 # then drag "runbranch.app" to the Dock
 ```
 
 Projects run down the sidebar, each with a spinner when something of its is up.
@@ -93,11 +93,11 @@ becomes *Switch*. Right-click any built branch to remove its worktree.
 ### From a shell
 
 ```bash
-./project-launcher.sh                              # interactive
-./project-launcher.sh run studio development both
-./project-launcher.sh stop studio
-./project-launcher.sh status                       # every project
-./project-launcher.sh cleanup studio
+./runbranch.sh                              # interactive
+./runbranch.sh run studio development both
+./runbranch.sh stop studio
+./runbranch.sh status                       # every project
+./runbranch.sh cleanup studio
 ```
 
 ---
@@ -127,7 +127,7 @@ So the PR map comes from `gh` and is cached per project. Cold: ~1.5s. Warm:
 ~0.04s, refreshed in the background. The toolbar refresh forces a re-read.
 
 Ownership needs no network: a branch is yours when its tip carries one of your
-addresses (`PL_MY_EMAILS` overrides).
+addresses (`RB_MY_EMAILS` overrides).
 
 ### Stopping signals the process group
 
@@ -155,10 +155,10 @@ hardens its own `PATH` as a second layer.
 ## Layout
 
 ```
-project-launcher.sh        the engine: git, install, infra, servers. No UI of its own.
-app/ProjectLauncher.swift  the front end: project sidebar, branch list, run sheet
+runbranch.sh        the engine: git, install, infra, servers. No UI of its own.
+app/RunBranch.swift  the front end: project sidebar, branch list, run sheet
 projects/*.conf            one file per project
-make-app.sh                builds Project Launcher.app (swiftc + sips + iconutil)
+make-app.sh                builds runbranch.app (swiftc + sips + iconutil)
 assets/icon.svg            icon source
 ```
 

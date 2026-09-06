@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build "Project Launcher.app" -- the front end, compiled from
-# app/ProjectLauncher.swift. All the actual work stays in project-launcher.sh;
+# Build "runbranch.app" -- the front end, compiled from
+# app/RunBranch.swift. All the actual work stays in runbranch.sh;
 # the app runs it as a subprocess and streams it into a window.
 #
 # Needs only the Xcode command line tools (swiftc) plus sips and iconutil,
@@ -13,10 +13,10 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$REPO/project-launcher.sh"
-SOURCE="$REPO/app/ProjectLauncher.swift"
+SCRIPT="$REPO/runbranch.sh"
+SOURCE="$REPO/app/RunBranch.swift"
 DEST="${1:-$REPO}"
-APP="$DEST/Project Launcher.app"
+APP="$DEST/runbranch.app"
 
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
 [ -f "$SOURCE" ] || { echo "missing $SOURCE" >&2; exit 1; }
@@ -50,7 +50,7 @@ rm -rf "$TMP"
 echo "    icon built"
 
 # --- binary ---------------------------------------------------------------
-swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/ProjectLauncher"
+swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/RunBranch"
 echo "    binary built"
 
 # --- Info.plist -----------------------------------------------------------
@@ -61,13 +61,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>              <string>Project Launcher</string>
-  <key>CFBundleDisplayName</key>       <string>Project Launcher</string>
-  <key>CFBundleIdentifier</key>        <string>local.project.launcher</string>
+  <key>CFBundleName</key>              <string>runbranch</string>
+  <key>CFBundleDisplayName</key>       <string>runbranch</string>
+  <key>CFBundleIdentifier</key>        <string>dev.runbranch.app</string>
   <key>CFBundleVersion</key>           <string>3.0</string>
   <key>CFBundleShortVersionString</key><string>3.0</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
-  <key>CFBundleExecutable</key>        <string>ProjectLauncher</string>
+  <key>CFBundleExecutable</key>        <string>RunBranch</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>NSHighResolutionCapable</key>   <true/>
   <key>LSMinimumSystemVersion</key>    <string>14.0</string>

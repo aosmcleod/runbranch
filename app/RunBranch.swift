@@ -1,4 +1,4 @@
-// ProjectLauncher — the front end. All the work happens in project-launcher.sh;
+// RunBranch — the front end. All the work happens in runbranch.sh;
 // this is a window over it. Projects are declared in projects/*.conf and the
 // app knows nothing about any of them beyond what the engine reports.
 //
@@ -137,7 +137,7 @@ enum Engine {
            FileManager.default.isExecutableFile(atPath: p) {
             return p
         }
-        return NSHomeDirectory() + "/Development/project-launcher/project-launcher.sh"
+        return NSHomeDirectory() + "/Development/runbranch/runbranch.sh"
     }
 
     static func process(_ args: [String]) -> Process {
@@ -604,9 +604,9 @@ struct ContentView: View {
 }
 
 @main
-struct ProjectLauncherApp: App {
+struct RunBranchApp: App {
     var body: some Scene {
-        WindowGroup("Project Launcher") {
+        WindowGroup("runbranch") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

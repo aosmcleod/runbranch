@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# project-launcher — run any local project from a throwaway git worktree.
+# runbranch — run any local project from a throwaway git worktree.
 #
 # The problem, which is not specific to one repo: demoing out of your working
 # checkout means the demo competes with whatever you are editing. Switching
@@ -13,10 +13,10 @@
 # working checkout is NEVER modified. Everything else is ergonomics.
 #
 #   <your repo>                                  <- never modified
-#   ~/.project-launcher/<project>/worktrees/<branch>/   <- throwaway
+#   ~/.runbranch/<project>/worktrees/<branch>/   <- throwaway
 #
 # This script is the ENGINE. Its only UI is a plain terminal picker; the front
-# end is "Project Launcher.app" (app/ProjectLauncher.swift), which runs this as
+# end is "runbranch.app" (app/RunBranch.swift), which runs this as
 # a subprocess and streams its output into a window. Every message here is
 # written to be read by a person either way.
 #
@@ -30,14 +30,14 @@ set -uo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SELF_DIR="$(dirname "$SELF")"
 
-PL_HOME="${PL_HOME:-$HOME/.project-launcher}"
-PROJECTS_DIR="${PL_PROJECTS_DIR:-$SELF_DIR/projects}"
+RB_HOME="${RB_HOME:-$HOME/.runbranch}"
+PROJECTS_DIR="${RB_PROJECTS_DIR:-$SELF_DIR/projects}"
 
 # Every address you author commits under. A branch is "yours" when its tip
 # carries one of them.
-MY_EMAILS="${PL_MY_EMAILS:-alecmcleod@icloud.com alec.mcleod@functionpoint.com alec@mcleod.co}"
+MY_EMAILS="${RB_MY_EMAILS:-alecmcleod@icloud.com alec.mcleod@functionpoint.com alec@mcleod.co}"
 
-PR_CACHE_TTL="${PL_PR_TTL:-900}"   # 15 minutes
+PR_CACHE_TTL="${RB_PR_TTL:-900}"   # 15 minutes
 WEEK=604800
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ load_project() {
   [ -d "$REPO/.git" ] || die "$NAME: $REPO is not a git repository." "edit $file"
   [ -n "$TARGETS" ] || die "$name.conf declares no TARGETS." "edit $file"
 
-  WORK_ROOT="$PL_HOME/$name"
+  WORK_ROOT="$RB_HOME/$name"
   WORKTREES="$WORK_ROOT/worktrees"
   LOG_DIR="$WORK_ROOT/logs"
   STATE_FILE="$WORK_ROOT/state"
@@ -883,24 +883,24 @@ cleanup_worktrees() {
 
 usage() {
   cat <<USAGE
-project-launcher — run any local project from a throwaway git worktree.
+runbranch — run any local project from a throwaway git worktree.
 
-  project-launcher.sh                          interactive
-  project-launcher.sh run <project> <ref> <preset>
-  project-launcher.sh stop <project>
-  project-launcher.sh status [<project>]
-  project-launcher.sh cleanup <project>
+  runbranch.sh                          interactive
+  runbranch.sh run <project> <ref> <preset>
+  runbranch.sh stop <project>
+  runbranch.sh status [<project>]
+  runbranch.sh cleanup <project>
 
-  machine-readable, used by Project Launcher.app:
-  project-launcher.sh projects
-  project-launcher.sh branches <project>
-  project-launcher.sh presets <project>
-  project-launcher.sh state <project>
-  project-launcher.sh remove-worktree <project> <ref>
-  project-launcher.sh refresh <project>
+  machine-readable, used by runbranch.app:
+  runbranch.sh projects
+  runbranch.sh branches <project>
+  runbranch.sh presets <project>
+  runbranch.sh state <project>
+  runbranch.sh remove-worktree <project> <ref>
+  runbranch.sh refresh <project>
 
 Projects   : $PROJECTS_DIR
-State      : $PL_HOME/<project>/
+State      : $RB_HOME/<project>/
 USAGE
 }
 
@@ -949,7 +949,7 @@ EOF
     -h|--help|help) usage ;;
     menu|'')
       [ "$HAVE_TTY" = 1 ] || die "This is the engine, not the front end." \
-        "open '$SELF_DIR/Project Launcher.app'"
+        "open '$SELF_DIR/runbranch.app'"
       pick_project || exit 0
       load_project "$PICKED_PROJECT"
       if demo_running; then
