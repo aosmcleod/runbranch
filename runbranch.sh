@@ -895,6 +895,7 @@ runbranch — run any local project from a throwaway git worktree.
   runbranch.sh projects
   runbranch.sh branches <project>
   runbranch.sh presets <project>
+  runbranch.sh paths <project> [<ref>]
   runbranch.sh state <project>
   runbranch.sh remove-worktree <project> <ref>
   runbranch.sh refresh <project>
@@ -914,6 +915,14 @@ main() {
   case "${1:-menu}" in
     projects) list_projects ;;
     branches) need_project "${2:-}"; collect_branch_data /dev/stdout ;;
+    paths)
+      # Where things live, so the app never hardcodes the layout.
+      #   worktrees <TAB> logs <TAB> config <TAB> repo [<TAB> worktree-for-ref]
+      need_project "${2:-}"
+      printf '%s\t%s\t%s\t%s' "$WORKTREES" "$LOG_DIR" "$PROJECTS_DIR/$PROJECT.conf" "$REPO"
+      [ $# -ge 3 ] && printf '\t%s' "$(worktree_path "$3")"
+      printf '\n'
+      ;;
     presets)  need_project "${2:-}"; preset_names ;;
     state)
       need_project "${2:-}"

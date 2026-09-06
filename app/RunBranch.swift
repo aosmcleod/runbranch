@@ -97,6 +97,10 @@ struct Project: Identifiable, Hashable {
         guard f.count >= 3 else { return nil }
         id = f[0]; name = f[1]; repo = f[2]
     }
+
+    /// Sidebar glyph. SF Symbols are fine here — the licence only bars them
+    /// from the app icon.
+    var symbol: String { "shippingbox" }
 }
 
 /// What the engine says is running for one project.
@@ -175,6 +179,20 @@ enum Engine {
         capture(["presets", project]).out
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
+    }
+
+    /// Where the engine keeps things for a project:
+    /// worktrees, logs, config, repo, and optionally one branch's worktree.
+    static func paths(_ project: String, ref: String? = nil) -> [String] {
+        var args = ["paths", project]
+        if let ref { args.append(ref) }
+        return capture(args).out
+            .components(separatedBy: "\n").first?
+            .components(separatedBy: "\t") ?? []
+    }
+
+    static var projectsDir: String {
+        (scriptPath as NSString).deletingLastPathComponent + "/projects"
     }
 
     static func state(_ project: String) -> RunState {
@@ -399,11 +417,15 @@ struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if isLive {
-                ProgressView().controlSize(.small).scaleEffect(0.55).frame(width: 12, height: 12)
-            }
+            Image(systemName: project.symbol)
+                .font(.system(size: 12))
+                .foregroundStyle(isLive ? Color.green : .secondary)
+                .frame(width: 16)
             Text(project.name).font(.system(size: 13))
             Spacer(minLength: 0)
+            if isLive {
+                ProgressView().controlSize(.small).scaleEffect(0.5).frame(width: 12, height: 12)
+            }
         }
     }
 }
@@ -420,6 +442,7 @@ struct ContentView: View {
     @State private var preset = ""
     @State private var showMerged = false
     @State private var showOlder = false
+    @State private var query = ""
 
     @State private var sheetTitle = ""
     @State private var showingRun = false
@@ -433,12 +456,22 @@ struct ContentView: View {
 
     var visible: [Branch] {
         let now = Int(Date().timeIntervalSince1970)
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         return branches.filter { b in
+            // Search overrides the filters: if you typed a branch's name you
+            // want to see it, merged and ancient or not.
+            if !q.isEmpty { return b.ref.lowercased().contains(q) }
             if b.isDefault || b.ref == state.ref { return true }
             if !showMerged && b.pr == .merged { return false }
             if !showOlder && now - b.timestamp > Self.week { return false }
             return true
         }
+    }
+
+    private var filtersActive: Bool { showMerged || showOlder }
+
+    private var selectedBranch: Branch? {
+        branches.first { $0.ref == selection }
     }
 
     /// Start / Stop / Switch, decided by what is running and what is selected.
@@ -457,13 +490,28 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(projects, selection: $selectedProject) { p in
-                ProjectRow(project: p, isLive: liveProjects.contains(p.id)).tag(p.id)
+            List(selection: $selectedProject) {
+                // Running first, the way Finder puts Recents above Favorites.
+                if !liveProjects.isEmpty {
+                    Section("Running") {
+                        ForEach(projects.filter { liveProjects.contains($0.id) }) { p in
+                            ProjectRow(project: p, isLive: true).tag(p.id)
+                        }
+                    }
+                }
+                Section("Projects") {
+                    ForEach(projects.filter { !liveProjects.contains($0.id) }) { p in
+                        ProjectRow(project: p, isLive: false).tag(p.id)
+                    }
+                }
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             if project == nil {
-                ContentUnavailableView("No project selected", systemImage: "square.stack.3d.up")
+                ContentUnavailableView(
+                    "No project selected",
+                    systemImage: "square.stack.3d.up",
+                    description: Text("Projects are declared in \(Engine.projectsDir)"))
             } else {
                 detail
             }
@@ -471,13 +519,75 @@ struct ContentView: View {
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
         .task { loadProjects() }
         .onChange(of: selectedProject) { _, _ in reload() }
+        .background {
+            // Shortcuts with no visible control of their own.
+            Group {
+                ForEach(Array(projects.prefix(9).enumerated()), id: \.element.id) { i, p in
+                    Button("") { selectedProject = p.id }
+                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                }
+                Button("") {
+                    if state.running, let p = selectedProject {
+                        run(["stop", p], "Stopping \(state.ref)")
+                    }
+                }
+                .keyboardShortcut(".", modifiers: .command)
+            }
+            .opacity(0)
+        }
+        .searchable(text: $query, placement: .toolbar, prompt: "Search branches")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                // Filters belong in the toolbar, not as checkboxes in the body:
+                // the body is content, the chrome is options.
+                Menu {
+                    Toggle("Show merged", isOn: $showMerged)
+                    Toggle("Show older than a week", isOn: $showOlder)
+                } label: {
+                    Image(systemName: filtersActive
+                          ? "line.3.horizontal.decrease.circle.fill"
+                          : "line.3.horizontal.decrease.circle")
+                }
+                .help("Filter branches")
+
                 Button {
                     if let p = selectedProject { _ = Engine.capture(["refresh", p]) }
                     reload()
                 } label: { Image(systemName: "arrow.clockwise") }
                 .help("Re-read branches and pull request state")
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+
+                Menu {
+                    if let b = selectedBranch, let p = selectedProject {
+                        Button("Copy branch name") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(b.ref, forType: .string)
+                        }
+                        if let url = state.urls.first, state.running, state.ref == b.ref {
+                            Button("Copy URL") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                            }
+                        }
+                        Divider()
+                        if b.ready {
+                            Button("Reveal worktree in Finder") { revealWorktree(b.ref) }
+                            Button("Remove worktree") {
+                                run(["remove-worktree", p, b.ref], "Removing \(b.ref)")
+                            }
+                            .disabled(state.running && state.ref == b.ref)
+                            Divider()
+                        }
+                    }
+                    Button("Open logs in Finder") { openLogs() }
+                    if let p = project {
+                        Button("Reveal repository in Finder") {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.repo)
+                        }
+                        Button("Edit project config") { editConfig(p.id) }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .help("More actions")
             }
         }
         .sheet(isPresented: $showingRun) {
@@ -498,6 +608,18 @@ struct ContentView: View {
                 .foregroundStyle(state.running ? .primary : .secondary)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
 
+            if visible.isEmpty {
+                Spacer()
+                ContentUnavailableView {
+                    Label(query.isEmpty ? "No branches to show" : "No match",
+                          systemImage: query.isEmpty ? "arrow.triangle.branch" : "magnifyingglass")
+                } description: {
+                    Text(query.isEmpty
+                         ? "Merged branches and anything older than a week are hidden. Change that in the filter menu."
+                         : "No branch matches “\(query)”.")
+                }
+                Spacer()
+            } else {
             List(visible, selection: $selection) { branch in
                 BranchRow(branch: branch,
                           isLive: state.running && state.ref == branch.ref,
@@ -512,17 +634,7 @@ struct ContentView: View {
                     }
             }
             .listStyle(.inset)
-
-            Divider()
-
-            HStack(spacing: 16) {
-                Toggle("Show merged", isOn: $showMerged)
-                Toggle("Show older than a week", isOn: $showOlder)
-                Spacer()
             }
-            .toggleStyle(.checkbox)
-            .font(.system(size: 11))
-            .padding(.horizontal, 16).padding(.vertical, 10)
 
             Divider()
 
@@ -552,6 +664,7 @@ struct ContentView: View {
                             Button(primary.title, action: primary.action)
                                 .buttonStyle(.glassProminent).controlSize(.large)
                                 .keyboardShortcut(.defaultAction)
+                                .help("\(primary.title) \(selection ?? "")")
                         }
                     }
                 }
@@ -593,6 +706,30 @@ struct ContentView: View {
             selection = branches.first(where: { $0.mine && $0.pr != .merged })?.ref
                      ?? branches.first(where: { $0.isDefault })?.ref
         }
+    }
+
+    private func reveal(_ path: String) {
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return }
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+    }
+
+    private func revealWorktree(_ ref: String) {
+        guard let p = selectedProject else { return }
+        let fields = Engine.paths(p, ref: ref)
+        if fields.count >= 5 { reveal(fields[4]) }
+    }
+
+    private func openLogs() {
+        guard let p = selectedProject else { return }
+        let fields = Engine.paths(p)
+        if fields.count >= 2 { reveal(fields[1]) }
+    }
+
+    /// Hand the .conf to whatever the user opens shell scripts with.
+    private func editConfig(_ p: String) {
+        let fields = Engine.paths(p)
+        guard fields.count >= 3 else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: fields[2]))
     }
 
     /// "2026-09-04 23:32:59" -> "23:32".

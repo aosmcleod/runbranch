@@ -369,13 +369,14 @@ solve secret distribution, and implying it does will bite someone.
 Each item is a commit-sized change. Ordered so nothing depends on something
 later.
 
-### Phase 1 — Native chrome
+### Phase 1 — Native chrome ✅ done
 | # | Change | Touches |
 |---|---|---|
-| 1.1 | Toolbar: search field, filter `Menu`, refresh, `•••` overflow. Delete the checkbox row | Swift |
-| 1.2 | SF Symbols across sidebar and menus; sectioned sidebar (`Running` / `Projects`) | Swift |
-| 1.3 | `ContentUnavailableView` for every empty state | Swift |
-| 1.4 | Shortcuts: `⌘R` `⌘.` `⌘F` `⌘1…9` `⌘⌫` | Swift |
+| 1.1 | Toolbar: search field, filter `Menu`, refresh, `•••` overflow. Checkbox row deleted | Swift |
+| 1.2 | SF Symbols in sidebar and menus; sectioned sidebar (`Running` / `Projects`) | Swift |
+| 1.3 | `ContentUnavailableView` for no-project, no-branches and no-search-match | Swift |
+| 1.4 | Shortcuts: `⌘R` run · `⌘.` stop · `⌘F` search · `⌘⇧R` refresh · `⌘1…9` project | Swift |
+| 1.5 | `paths` subcommand so the app never hardcodes the state layout | engine |
 
 ### Phase 2 — Say what is happening
 | # | Change | Touches |
