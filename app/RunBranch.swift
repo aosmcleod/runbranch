@@ -355,6 +355,51 @@ extension HealthMonitor.Health {
     }
 }
 
+/// Editors we can offer, in the order most people would want them. Only the
+/// ones actually installed are shown — a menu full of things you do not have
+/// is worse than a short menu.
+enum Editor: CaseIterable {
+    case vscode, cursor, zed, xcode, terminal, finder
+
+    var title: String {
+        switch self {
+        case .vscode: return "Visual Studio Code"
+        case .cursor: return "Cursor"
+        case .zed: return "Zed"
+        case .xcode: return "Xcode"
+        case .terminal: return "Terminal"
+        case .finder: return "Finder"
+        }
+    }
+
+    var bundleID: String? {
+        switch self {
+        case .vscode: return "com.microsoft.VSCode"
+        case .cursor: return "com.todesktop.230313mzl4w4u92"
+        case .zed: return "dev.zed.Zed"
+        case .xcode: return "com.apple.dt.Xcode"
+        case .terminal: return "com.apple.Terminal"
+        case .finder: return nil          // always there
+        }
+    }
+
+    var isInstalled: Bool {
+        guard let id = bundleID else { return true }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil
+    }
+
+    func open(_ path: String) {
+        let dir = URL(fileURLWithPath: path)
+        guard let id = bundleID else {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+            return
+        }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return }
+        NSWorkspace.shared.open([dir], withApplicationAt: app,
+                                configuration: NSWorkspace.OpenConfiguration())
+    }
+}
+
 // MARK: - Small views
 
 struct Badge: View {
@@ -903,8 +948,16 @@ struct ContentView: View {
                                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
                             }
                         }
+                        if !b.prNumber.isEmpty {
+                            Button("Open pull request #\(b.prNumber)") { openPR(b.prNumber) }
+                        }
                         Divider()
                         if b.ready {
+                            Menu("Open worktree in") {
+                                ForEach(Editor.allCases.filter(\.isInstalled), id: \.self) { e in
+                                    Button(e.title) { openWorktree(b.ref, in: e) }
+                                }
+                            }
                             Button("Reveal worktree in Finder") { revealWorktree(b.ref) }
                             Button("Remove worktree") {
                                 run(["remove-worktree", p, b.ref], "Removing \(b.ref)")
@@ -1063,10 +1116,27 @@ struct ContentView: View {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     }
 
+    private func openWorktree(_ ref: String, in editor: Editor) {
+        guard let p = selectedProject else { return }
+        let fields = Engine.paths(p, ref: ref)
+        if fields.count >= 6 { editor.open(fields[5]) }
+    }
+
+    /// The engine reports the GitHub slug, so the app does not have to parse a
+    /// remote URL of its own.
+    private func openPR(_ number: String) {
+        guard let p = selectedProject else { return }
+        let fields = Engine.paths(p)
+        guard fields.count >= 5, !fields[4].isEmpty,
+              let url = URL(string: "https://github.com/\(fields[4])/pull/\(number)")
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     private func revealWorktree(_ ref: String) {
         guard let p = selectedProject else { return }
         let fields = Engine.paths(p, ref: ref)
-        if fields.count >= 5 { reveal(fields[4]) }
+        if fields.count >= 6 { reveal(fields[5]) }
     }
 
     private func openLogs() {

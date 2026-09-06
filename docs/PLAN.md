@@ -395,15 +395,15 @@ later.
 | 3.1 | ✅ PR title, number and author cached; commit subject as fallback | engine |
 | 3.2 | ✅ Two-line branch rows | Swift |
 | 3.3 | ✅ Remote branches listed. Those with an open PR show by default (17 of 629 on Studio); the rest behind a filter. **Fork branches still to do** — they need `gh` head-repo data, not `refs/remotes` | engine |
-| 3.4 | Open in editor / Terminal; open the PR | both |
+| 3.4 | ✅ Open worktree in VS Code / Cursor / Zed / Xcode / Terminal / Finder (only those installed are listed); open the pull request | both |
 
 ### Phase 4 — Breadth
 | # | Change | Touches |
 |---|---|---|
-| 4.1 | `PROCFILE=1` derives targets | engine |
-| 4.2 | `RUNTIME="mise\|fnm\|asdf\|nvm"` activation inside the worktree | engine |
-| 4.3 | `SEED`; `PORTS=fixed\|stepping` | engine |
-| 4.4 | `doctor` — verify every declared command resolves | engine |
+| 4.1 | ✅ `PROCFILE=1` derives targets, foreman-style port assignment | engine |
+| 4.2 | ✅ `RUNTIME` activation inside the worktree | engine |
+| 4.3 | ✅ `SEED`. `PORTS` key parsed; only `fixed` behaves, stepping is Phase 5 | engine |
+| 4.4 | ✅ `doctor` | engine |
 | 4.5 | Repo scan and config proposal | engine + Swift |
 
 ### Phase 5 — Isolation

@@ -148,7 +148,8 @@ load_project() {
   # Defaults, reset on every load so a second load cannot inherit the first.
   NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
-  MIGRATE=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
+  MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
+  PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
 
   # shellcheck disable=SC1090
   . "$file"
@@ -158,6 +159,14 @@ load_project() {
   [ -n "$REPO" ] || die "$name.conf sets no REPO." "edit $file"
   case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac
   [ -d "$REPO/.git" ] || die "$NAME: $REPO is not a git repository." "edit $file"
+  # A Procfile already IS a target list: `name: command`, one per line. Foreman
+  # assigns each process a PORT; we do the same so a health check has somewhere
+  # to look, and export it the way the app expects.
+  if [ "$PROCFILE" = 1 ] && [ -z "$TARGETS" ]; then
+    TARGETS="$(procfile_targets "$REPO/Procfile")"
+    [ -n "$TARGETS" ] || die "$name.conf sets PROCFILE=1 but $REPO/Procfile has no processes." \
+      "cat $REPO/Procfile"
+  fi
   [ -n "$TARGETS" ] || die "$name.conf declares no TARGETS." "edit $file"
 
   WORK_ROOT="$RB_HOME/$name"
@@ -166,6 +175,25 @@ load_project() {
   STATE_FILE="$WORK_ROOT/state"
   PR_CACHE="$WORK_ROOT/prcache"
   META_DIR="$WORK_ROOT/meta"
+}
+
+# Procfile -> TARGETS. Ports are assigned, not declared, because a Procfile
+# never says: foreman's convention is a base incremented per process.
+procfile_targets() {
+  local file="$1" i=0
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue ;; esac
+    case "$line" in *:*) ;; *) continue ;; esac
+    local pname cmd
+    pname="${line%%:*}"
+    cmd="${line#*:}"
+    # Trim leading space without invoking anything.
+    while case "$cmd" in ' '*) true ;; *) false ;; esac; do cmd="${cmd# }"; done
+    printf '%s:%s:/:PORT=%s %s\n' "$pname" "$((PORT_BASE + i * 100))" \
+      "$((PORT_BASE + i * 100))" "$cmd"
+    i=$((i + 1))
+  done <"$file"
 }
 
 list_projects() {
@@ -456,6 +484,27 @@ remove_worktree_for() {
 # Install, infrastructure, migrations — all optional per project
 # ---------------------------------------------------------------------------
 
+# A repo that pins its toolchain expects that pin to be honoured. The activation
+# has to happen INSIDE the worktree, because that is where .nvmrc / .tool-versions
+# / mise.toml live — activating in the launcher's own directory reads the wrong
+# pin, or none.
+runtime_prelude() {
+  case "$RUNTIME" in
+    mise) printf 'eval "$(mise activate bash --shims 2>/dev/null || true)"; ' ;;
+    fnm)  printf 'eval "$(fnm env 2>/dev/null || true)"; fnm use --install-if-missing >/dev/null 2>&1 || true; ' ;;
+    asdf) printf '. "$(brew --prefix asdf 2>/dev/null)/libexec/asdf.sh" 2>/dev/null || true; ' ;;
+    nvm)  printf '. "$HOME/.nvm/nvm.sh" 2>/dev/null && nvm use >/dev/null 2>&1 || true; ' ;;
+    "")   ;;
+    *)    ;;
+  esac
+}
+
+# Run a command in the worktree with the project's runtime active.
+in_worktree() {
+  local wt="$1" cmd="$2"
+  ( cd "$wt" && eval "$(runtime_prelude)$cmd" )
+}
+
 GH_PACKAGES_REFRESH='gh auth refresh -h github.com -s read:packages'
 
 install_deps() {
@@ -465,7 +514,7 @@ install_deps() {
   info "$INSTALL   (first run on a branch can take a few minutes)"
   info "logging to $log"
   printf '\n'
-  ( cd "$wt" && eval "$INSTALL" 2>&1 ) | tee "$log"
+  ( cd "$wt" && eval "$(runtime_prelude)$INSTALL" 2>&1 ) | tee "$log"
   rc=${PIPESTATUS[0]}
   printf '\n'
   [ "$rc" = 0 ] && { ok "dependencies installed"; return 0; }
@@ -518,8 +567,18 @@ handle_migrations() {
   step "Database"
   info "$MIGRATE"
   dim "this mutates the shared database — every branch of this project uses it"
-  ( cd "$wt" && eval "$MIGRATE" ) || die "Migrations failed." "cd $wt && $MIGRATE"
+  in_worktree "$wt" "$MIGRATE" || die "Migrations failed." "cd $wt && $MIGRATE"
   ok "migrations applied"
+}
+
+# An empty app is not worth looking at.
+run_seed() {
+  local wt="$1"
+  [ -n "$SEED" ] || return 0
+  step "Seed"
+  info "$SEED"
+  in_worktree "$wt" "$SEED" || die "Seeding failed." "cd $wt && $SEED"
+  ok "seeded"
 }
 
 # ---------------------------------------------------------------------------
@@ -565,7 +624,7 @@ start_server() {
   mkdir -p "$LOG_DIR"
   : >"$log"
   set -m
-  ( cd "$wt" && exec nohup /bin/bash -c "$cmd" ) >"$log" 2>&1 &
+  ( cd "$wt" && exec nohup /bin/bash -c "$(runtime_prelude)$cmd" ) >"$log" 2>&1 &
   pid=$!
   disown %% 2>/dev/null || true
   set +m
@@ -761,6 +820,7 @@ do_run() {
   install_deps      "$WORKTREE"
   bring_up_infra    "$WORKTREE"
   handle_migrations "$WORKTREE"
+  run_seed          "$WORKTREE"
   start_run "$WORKTREE" "$ref" "$preset" "$targets"
 }
 
@@ -781,6 +841,76 @@ print_status() {
   fi
   printf '\n%s: nothing running.\n\n' "$NAME"
   return 1
+}
+
+# ---------------------------------------------------------------------------
+# doctor — check a project's config before you need it
+#
+# Every one of these is something that would otherwise surface minutes into a
+# run, as a failure that looks like the branch's fault.
+# ---------------------------------------------------------------------------
+
+# The first word of a command, which is the thing that has to exist.
+cmd_head() { printf '%s' "$1" | awk '{for(i=1;i<=NF;i++){if($i !~ /=/){print $i; exit}}}'; }
+
+doctor_project() {
+  local bad=0 t cmd head f
+  step "$NAME"
+  info "config    $PROJECTS_DIR/$PROJECT.conf"
+
+  if [ -d "$REPO/.git" ]; then ok "repo      $REPO"
+  else warn "repo      $REPO is not a git repository"; bad=1; fi
+
+  if repo_git rev-parse --verify --quiet "$DEFAULT_BRANCH^{commit}" >/dev/null; then
+    ok "branch    $DEFAULT_BRANCH"
+  else
+    warn "branch    DEFAULT_BRANCH=$DEFAULT_BRANCH does not resolve"; bad=1
+  fi
+
+  for f in $COPY_FILES; do
+    if [ -e "$REPO/$f" ]; then ok "copy      $f"
+    else warn "copy      $f is declared in COPY_FILES but missing from the checkout"; bad=1; fi
+  done
+
+  if [ -n "$INSTALL" ]; then
+    head="$(cmd_head "$INSTALL")"
+    if command -v "$head" >/dev/null 2>&1; then ok "install   $head"
+    else warn "install   \`$head\` is not on PATH"; bad=1; fi
+  fi
+
+  if [ -n "$COMPOSE_SERVICES" ]; then
+    if command -v docker >/dev/null 2>&1; then ok "docker    present"
+    else warn "docker    needed for COMPOSE_SERVICES but not on PATH"; bad=1; fi
+    if [ -f "$REPO/$COMPOSE_FILE" ]; then ok "compose   $COMPOSE_FILE"
+    else warn "compose   $COMPOSE_FILE not found in the checkout"; bad=1; fi
+  fi
+
+  if [ -n "$RUNTIME" ]; then
+    if command -v "$RUNTIME" >/dev/null 2>&1 || [ "$RUNTIME" = nvm ]; then ok "runtime   $RUNTIME"
+    else warn "runtime   RUNTIME=$RUNTIME is not installed"; bad=1; fi
+  fi
+
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    cmd="$(target_field "$t" command)"
+    head="$(cmd_head "$cmd")"
+    if command -v "$head" >/dev/null 2>&1; then
+      ok "target    $t -> $head on port $(target_field "$t" port)"
+    else
+      warn "target    $t needs \`$head\`, which is not on PATH"; bad=1
+    fi
+  done <<EOF
+$(target_names)
+EOF
+
+  if command -v gh >/dev/null 2>&1 && [ -n "$(gh_repo)" ]; then
+    ok "github    $(gh_repo)"
+  else
+    dim "github    no gh or no GitHub remote — pull request badges will be absent"
+  fi
+
+  [ "$bad" = 0 ] || return 1
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -970,6 +1100,7 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh stop <project>
   runbranch.sh status [<project>]
   runbranch.sh cleanup <project>
+  runbranch.sh doctor [<project>]              check a project's config resolves
 
   machine-readable, used by runbranch.app:
   runbranch.sh projects
@@ -998,9 +1129,10 @@ main() {
     branches) need_project "${2:-}"; collect_branch_data /dev/stdout ;;
     paths)
       # Where things live, so the app never hardcodes the layout.
-      #   worktrees <TAB> logs <TAB> config <TAB> repo [<TAB> worktree-for-ref]
+      #   worktrees <TAB> logs <TAB> config <TAB> repo <TAB> owner/repo [<TAB> worktree-for-ref]
       need_project "${2:-}"
-      printf '%s\t%s\t%s\t%s' "$WORKTREES" "$LOG_DIR" "$PROJECTS_DIR/$PROJECT.conf" "$REPO"
+      printf '%s\t%s\t%s\t%s\t%s' "$WORKTREES" "$LOG_DIR" \
+        "$PROJECTS_DIR/$PROJECT.conf" "$REPO" "$(gh_repo)"
       [ $# -ge 3 ] && printf '\t%s' "$(worktree_path "$3")"
       printf '\n'
       ;;
@@ -1047,6 +1179,17 @@ EOF
       exit "$any"
       ;;
     cleanup) need_project "${2:-}"; cleanup_worktrees ;;
+    doctor)
+      if [ $# -ge 2 ]; then load_project "$2"; doctor_project; exit $?; fi
+      local n rc=0
+      while IFS="$(printf '\t')" read -r n _; do
+        [ -n "$n" ] || continue
+        ( load_project "$n"; doctor_project ) || rc=1
+      done <<EOF
+$(list_projects)
+EOF
+      exit "$rc"
+      ;;
     -h|--help|help) usage ;;
     menu|'')
       [ "$HAVE_TTY" = 1 ] || die "This is the engine, not the front end." \
