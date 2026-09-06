@@ -261,21 +261,56 @@ smaller, but says nothing about state.
 Testing/demo glyphs (flask, beaker, checkmark-seal) are worth prototyping but I
 suspect they misdirect: this tool does not test anything, it *runs* things.
 
+### The non-GUI path — verified
+
+Icon Composer is a GUI app and `.icon` is undocumented, but it turns out we do
+not need either. `actool` — which ships with Xcode — compiles a hand-written
+asset catalogue straight from the command line, **including appearance
+variants**:
+
+```
+assets/AppIcon.appiconset/
+  Contents.json          # hand-written; images tagged with appearances
+  light-512x512@2x.png   # generated from SVG by sips
+  dark-512x512@2x.png
+```
+
+```bash
+xcrun actool assets/Icons.xcassets --compile "$APP/Contents/Resources" \
+  --platform macosx --minimum-deployment-target 14.0 --app-icon AppIcon \
+  --output-partial-info-plist /tmp/icon.plist
+```
+
+Verified: this emits `Assets.car` carrying the light and dark variants, plus an
+`AppIcon.icns` fallback. `Info.plist` needs `CFBundleIconName` alongside the
+existing `CFBundleIconFile`. Everything stays a shell script and a diffable SVG.
+
+*Dark is confirmed working. `tinted` uses the same mechanism and is untested —
+worth trying, not worth promising.*
+
+### The graphic set
+
+The app icon is not the only place the mark appears. `make-icons.sh` produces
+all of it from two SVG sources:
+
+| Source | Output | Used by |
+|---|---|---|
+| `assets/icon.svg` — full tile, background + glyph | `Assets.car`, `AppIcon.icns` | the app |
+| | `docs/img/icon-512.png` | README, the Homebrew cask |
+| `assets/mark.svg` — glyph only, **transparent background** | `docs/img/mark-{256,512,1024}.png` | README header, GitHub social preview, docs, anywhere on a light or dark page |
+
+Two sources rather than one because they are genuinely different drawings: the
+tile needs its glyph inset within the icon grid's safe area, while the mark
+needs to fill its own bounds with no padding. Deriving one from the other by
+cropping gives you a mark that is mysteriously small.
+
 ### Plan
 
 1. Draw the layers flat — background and foreground as separate SVGs, **no
-   gradients, no shadow, no specular highlight**.
-2. Assemble in Icon Composer, set the appearance variants, export `.icon`.
-3. Test at 16/32/128/512 against a Dock full of real icons, in light, dark and
-   tinted.
-4. Keep the `.icns` path in `make-app.sh` as the fallback for anyone on an
-   older system.
-
-**Honest caveat:** step 2 is the one part of this build that is not
-scriptable. Icon Composer is a GUI app and the `.icon` format is undocumented —
-`actool` shows no flags for it. I can produce the layer artwork and a written
-assembly recipe, but somebody clicks through Icon Composer once. Everything
-else in the repo builds from a shell script.
+   gradients, no shadow, no specular highlight**; the system supplies those.
+2. Draw `mark.svg` separately, transparent, glyph filling its bounds.
+3. `make-icons.sh`: SVG → PNG (`sips`) → `Contents.json` → `actool`.
+4. Test at 16/32/128/512 against a Dock full of real icons, light and dark.
 
 ---
 
@@ -379,7 +414,7 @@ later.
 | # | Change | Touches |
 |---|---|---|
 | 6.1 | Rename everything to `runbranch` | all |
-| 6.2 | Layered icon via Icon Composer | assets |
+| 6.2 | `make-icons.sh`: flat layered art, `actool` appearance variants, plus the transparent mark for docs | assets |
 | 6.3 | `.runbranch` in-repo config with local override | engine |
 | 6.4 | MIT licence, `docs/config.md`, screenshots, honest README | docs |
 | 6.5 | Release: signing and notarisation, or a documented right-click → Open | build |
