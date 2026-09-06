@@ -368,22 +368,13 @@ struct Badge: View {
     }
 }
 
-/// The Stocks detail grid, applied to a run: a row of labelled facts.
-struct StatCell<Content: View>: View {
-    let label: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
+/// The run's status, as one glass bar.
+///
+/// An earlier version copied Stocks' stats grid literally — a column of
+/// 9pt uppercase labels over values. At that size, in tertiary, the labels
+/// were unreadable, and four of them turned a status line into a form. What
+/// actually matters is one sentence (how it is, how long) and the things you
+/// might click. So: no labels, and the clickable parts look clickable.
 struct RunStrip: View {
     let state: RunState
     let health: HealthMonitor
@@ -399,49 +390,49 @@ struct RunStrip: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            StatCell(label: "Uptime") {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(worst.color)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: worst.color.opacity(0.7), radius: 3)
+
+                Text(worst.label.capitalized)
+                    .font(.system(size: 13, weight: .medium))
+
                 Text(uptime)
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-            }
-            StatCell(label: "Health") {
-                HStack(spacing: 5) {
-                    Circle().fill(worst.color).frame(width: 7, height: 7)
-                    Text(worst.label).font(.system(size: 13))
-                }
-            }
-            ForEach(state.targets) { t in
-                StatCell(label: t.name) {
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                ForEach(state.targets) { t in
                     Button {
                         if let u = t.url { onOpen(u) }
                     } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill((health.status[t.name] ?? .unknown).color)
-                                .frame(width: 6, height: 6)
-                            Text("localhost:\(String(t.port))").font(.system(size: 13))
-                        }
+                        Label("localhost:\(String(t.port))", systemImage: "arrow.up.right")
+                            .font(.system(size: 12))
                     }
-                    .buttonStyle(.link)
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                    .help("Open \(t.name)")
                 }
+
+                Button(action: onLogs) {
+                    Label("Logs", systemImage: "text.alignleft")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
             }
-            StatCell(label: "Logs") {
-                Button("Show", action: onLogs)
-                    .buttonStyle(.link)
-                    .font(.system(size: 13))
-            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        // A floating card rather than a full-width band: the band drew its own
-        // opaque background across the window and read as a second toolbar.
-        // This lets the branch list scroll under real material instead.
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
         .padding(.horizontal, 12)
         .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 }
 
