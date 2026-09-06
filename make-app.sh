@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build "runbranch.app" -- the front end, compiled from
+# Build "Runbranch.app" -- the front end, compiled from
 # app/RunBranch.swift. All the actual work stays in runbranch.sh;
 # the app runs it as a subprocess and streams it into a window.
 #
@@ -16,7 +16,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$REPO/runbranch.sh"
 SOURCE="$REPO/app/RunBranch.swift"
 DEST="${1:-$REPO}"
-APP="$DEST/runbranch.app"
+APP="$DEST/Runbranch.app"
 
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
 [ -f "$SOURCE" ] || { echo "missing $SOURCE" >&2; exit 1; }
@@ -61,8 +61,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>              <string>runbranch</string>
-  <key>CFBundleDisplayName</key>       <string>runbranch</string>
+  <key>CFBundleName</key>              <string>Runbranch</string>
+  <key>CFBundleDisplayName</key>       <string>Runbranch</string>
   <key>CFBundleIdentifier</key>        <string>dev.runbranch.app</string>
   <key>CFBundleVersion</key>           <string>3.0</string>
   <key>CFBundleShortVersionString</key><string>3.0</string>

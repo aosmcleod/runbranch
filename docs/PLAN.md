@@ -378,15 +378,16 @@ later.
 | 1.4 | Shortcuts: `⌘R` run · `⌘.` stop · `⌘F` search · `⌘⇧R` refresh · `⌘1…9` project | Swift |
 | 1.5 | `paths` subcommand so the app never hardcodes the state layout | engine |
 
-### Phase 2 — Say what is happening
+### Phase 2 — Say what is happening ✅ done
 | # | Change | Touches |
 |---|---|---|
-| 2.1 | `state` reports per-target PID, port, health path, start epoch | engine |
-| 2.2 | Ticking uptime in sidebar and detail | Swift |
-| 2.3 | Health polling per target, coloured dot | Swift |
-| 2.4 | Stats strip in the running detail (the Stocks grid) | Swift |
-| 2.5 | Log viewer — tail, search, copy, reveal | Swift + engine |
-| 2.6 | Orphan reclamation: `reclaim` subcommand, run on launch | engine |
+| 2.1 | `state` emits a `run` line plus one `target` line each: port, health path, pid, alive. `EPOCH` added to the state file | engine |
+| 2.2 | Ticking uptime, driven by a local clock rather than polling the engine | Swift |
+| 2.3 | Health polled every 5s per target; a first non-answer reads as *starting*, a later one as *failing* | Swift |
+| 2.4 | Stats strip: uptime · health · a button per target · logs | Swift |
+| 2.5 | Log viewer — live tail, per-target picker, filter, copy, reveal | Swift |
+| 2.6 | `reclaim` subcommand, run before the first draw | engine |
+| 2.7 | `SYMBOL` per project, used in the sidebar | engine + configs |
 
 ### Phase 3 — Second line
 | # | Change | Touches |

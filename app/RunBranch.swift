@@ -92,15 +92,29 @@ struct Project: Identifiable, Hashable {
     let name: String      // display name
     let repo: String
 
+    /// Sidebar glyph, named by the project's own config. SF Symbols are fine
+    /// here — the licence only bars them from the app icon.
+    let symbol: String
+
     init?(tsv line: String) {
         let f = line.components(separatedBy: "\t")
         guard f.count >= 3 else { return nil }
         id = f[0]; name = f[1]; repo = f[2]
+        symbol = f.count >= 5 && !f[4].isEmpty ? f[4] : "shippingbox"
     }
+}
 
-    /// Sidebar glyph. SF Symbols are fine here — the licence only bars them
-    /// from the app icon.
-    var symbol: String { "shippingbox" }
+/// One server inside a run.
+struct RunTarget: Identifiable, Hashable {
+    let name: String
+    let port: Int
+    let health: String
+    let pid: Int
+    let alive: Bool
+
+    var id: String { name }
+    var url: URL? { URL(string: "http://localhost:\(port)") }
+    var healthURL: URL? { URL(string: "http://localhost:\(port)\(health.isEmpty ? "/" : health)") }
 }
 
 /// What the engine says is running for one project.
@@ -109,24 +123,36 @@ struct RunState {
     var ref = ""
     var preset = ""
     var started = ""
-    var urls: [URL] = []
+    var epoch: TimeInterval = 0
+    var worktree = ""
+    var targets: [RunTarget] = []
 
     static let idle = RunState()
 
     init() {}
 
-    /// `running|idle  ref  preset  started  url,url`, tab separated.
-    init(tsv line: String) {
-        let f = line.components(separatedBy: "\t")
-        guard f.count >= 5, f[0] == "running" else { self = .idle; return }
-        running = true
-        ref = f[1]
-        preset = f[2]
-        started = f[3]
-        urls = f[4].components(separatedBy: ",").compactMap {
-            $0.isEmpty ? nil : URL(string: $0)
+    /// One `run` line then one `target` line each; `idle` on its own when not.
+    init(output: String) {
+        for line in output.components(separatedBy: "\n") where !line.isEmpty {
+            let f = line.components(separatedBy: "\t")
+            switch f.first {
+            case "run" where f.count >= 6:
+                running = true
+                ref = f[1]; preset = f[2]; started = f[3]
+                epoch = TimeInterval(f[4]) ?? 0
+                worktree = f[5]
+            case "target" where f.count >= 6:
+                targets.append(RunTarget(name: f[1],
+                                         port: Int(f[2]) ?? 0,
+                                         health: f[3],
+                                         pid: Int(f[4]) ?? 0,
+                                         alive: f[5] == "1"))
+            default: break
+            }
         }
     }
+
+    var urls: [URL] { targets.compactMap(\.url) }
 }
 
 // MARK: - Engine
@@ -196,9 +222,11 @@ enum Engine {
     }
 
     static func state(_ project: String) -> RunState {
-        let line = capture(["state", project]).out.components(separatedBy: "\n").first ?? ""
-        return RunState(tsv: line)
+        RunState(output: capture(["state", project]).out)
     }
+
+    @discardableResult
+    static func reclaim() -> String { capture(["reclaim"]).out }
 }
 
 /// Streams a run into the sheet, one line at a time.
@@ -252,6 +280,73 @@ final class Runner: ObservableObject {
     func cancel() { proc?.terminate() }
 }
 
+/// Polls each target's health URL. Health is a fact to be checked, not
+/// something to assume because a process is still alive — a server can be up
+/// and answering 500s.
+@MainActor
+final class HealthMonitor: ObservableObject {
+    enum Health { case unknown, starting, healthy, failing }
+
+    @Published var status: [String: Health] = [:]
+    private var timer: Timer?
+    private var targets: [RunTarget] = []
+
+    func watch(_ targets: [RunTarget]) {
+        self.targets = targets
+        timer?.invalidate()
+        guard !targets.isEmpty else { status = [:]; return }
+        for t in targets where status[t.name] == nil { status[t.name] = .unknown }
+        poll()
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.poll() }
+        }
+    }
+
+    func stop() { timer?.invalidate(); timer = nil; status = [:]; targets = [] }
+
+    private func poll() {
+        for t in targets {
+            guard t.alive, let url = t.healthURL else {
+                status[t.name] = .failing
+                continue
+            }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 3
+            req.httpMethod = "GET"
+            URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if error != nil {
+                        // Not answering yet is not the same as broken.
+                        self.status[t.name] = self.status[t.name] == .healthy ? .failing : .starting
+                    } else if let http = response as? HTTPURLResponse {
+                        self.status[t.name] = http.statusCode < 500 ? .healthy : .failing
+                    }
+                }
+            }.resume()
+        }
+    }
+}
+
+extension HealthMonitor.Health {
+    var color: Color {
+        switch self {
+        case .healthy: return .green
+        case .starting: return .orange
+        case .failing: return .red
+        case .unknown: return .secondary
+        }
+    }
+    var label: String {
+        switch self {
+        case .healthy: return "healthy"
+        case .starting: return "starting"
+        case .failing: return "not responding"
+        case .unknown: return "unknown"
+        }
+    }
+}
+
 // MARK: - Small views
 
 struct Badge: View {
@@ -270,6 +365,74 @@ struct Badge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(color.opacity(0.14), in: Capsule())
+    }
+}
+
+/// The Stocks detail grid, applied to a run: a row of labelled facts.
+struct StatCell<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct RunStrip: View {
+    let state: RunState
+    let health: HealthMonitor
+    let uptime: String
+    let onOpen: (URL) -> Void
+    let onLogs: () -> Void
+
+    private var worst: HealthMonitor.Health {
+        let all = state.targets.compactMap { health.status[$0.name] }
+        if all.contains(.failing) { return .failing }
+        if all.contains(.starting) || all.isEmpty { return .starting }
+        return all.allSatisfy { $0 == .healthy } ? .healthy : .starting
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            StatCell(label: "Uptime") {
+                Text(uptime)
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+            }
+            StatCell(label: "Health") {
+                HStack(spacing: 5) {
+                    Circle().fill(worst.color).frame(width: 7, height: 7)
+                    Text(worst.label).font(.system(size: 13))
+                }
+            }
+            ForEach(state.targets) { t in
+                StatCell(label: t.name) {
+                    Button {
+                        if let u = t.url { onOpen(u) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill((health.status[t.name] ?? .unknown).color)
+                                .frame(width: 6, height: 6)
+                            Text("localhost:\(String(t.port))").font(.system(size: 13))
+                        }
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+            StatCell(label: "Logs") {
+                Button("Show", action: onLogs)
+                    .buttonStyle(.link)
+                    .font(.system(size: 13))
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.quaternary.opacity(0.4))
     }
 }
 
@@ -409,6 +572,97 @@ struct RunSheet: View {
     }
 }
 
+/// A live tail of one target's log. The engine already writes each target to
+/// its own file; this just follows it.
+struct LogViewer: View {
+    let logDir: String
+    let targets: [RunTarget]
+    let onClose: () -> Void
+
+    @State private var selected: String = ""
+    @State private var lines: [String] = []
+    @State private var filter = ""
+    @State private var timer: Timer?
+
+    private var shown: [String] {
+        filter.isEmpty ? lines : lines.filter { $0.localizedCaseInsensitiveContains(filter) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                if targets.count > 1 {
+                    Picker("", selection: $selected) {
+                        ForEach(targets) { Text($0.name).tag($0.name) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                }
+                TextField("Filter", text: $filter)
+                    .textFieldStyle(.roundedBorder).frame(width: 180)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+                } label: { Image(systemName: "doc.on.doc") }
+                    .help("Copy log")
+                Button {
+                    NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
+                                                  inFileViewerRootedAtPath: logDir)
+                } label: { Image(systemName: "folder") }
+                    .help("Reveal in Finder")
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(shown.enumerated()), id: \.offset) { i, line in
+                            Text(line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(i)
+                        }
+                    }
+                    .padding(12)
+                }
+                .onChange(of: shown.count) { _, n in
+                    withAnimation { proxy.scrollTo(n - 1, anchor: .bottom) }
+                }
+            }
+
+            Divider()
+            HStack {
+                Text("\(shown.count) lines").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Done", action: onClose)
+                    .buttonStyle(.glassProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+        }
+        .frame(width: 680, height: 460)
+        .onAppear {
+            selected = targets.first?.name ?? ""
+            load()
+            timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in load() }
+        }
+        .onDisappear { timer?.invalidate() }
+        .onChange(of: selected) { _, _ in lines = []; load() }
+    }
+
+    private func load() {
+        guard !selected.isEmpty else { return }
+        let path = "\(logDir)/\(selected).log"
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        let clean = text.replacingOccurrences(
+            of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+        lines = clean.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+}
+
 // MARK: - Main
 
 struct ProjectRow: View {
@@ -443,10 +697,23 @@ struct ContentView: View {
     @State private var showMerged = false
     @State private var showOlder = false
     @State private var query = ""
+    @State private var logDir = ""
 
     @State private var sheetTitle = ""
     @State private var showingRun = false
+    @State private var showingLogs = false
+    @State private var now = Date()
     @StateObject private var runner = Runner()
+    @StateObject private var health = HealthMonitor()
+
+    /// Ticks so uptime stays true without polling the engine.
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var uptime: String {
+        guard state.running, state.epoch > 0 else { return "—" }
+        let s = max(0, Int(now.timeIntervalSince1970 - state.epoch))
+        return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+    }
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -517,7 +784,13 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
-        .task { loadProjects() }
+        .task {
+            // Reclaim before reading state, so a crash's leftovers are gone
+            // before anything is drawn rather than showing as a phantom run.
+            Engine.reclaim()
+            loadProjects()
+        }
+        .onReceive(clock) { now = $0 }
         .onChange(of: selectedProject) { _, _ in reload() }
         .background {
             // Shortcuts with no visible control of their own.
@@ -597,16 +870,23 @@ struct ContentView: View {
                 refreshLive()
             }
         }
+        .sheet(isPresented: $showingLogs) {
+            LogViewer(logDir: logDir, targets: state.targets) { showingLogs = false }
+        }
     }
 
     private var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(state.running
-                 ? "\(state.ref) is running · \(state.preset) · since \(shortTime(state.started))"
-                 : "Runs from a throwaway worktree. Your checkout is never touched.")
-                .font(.system(size: 11))
-                .foregroundStyle(state.running ? .primary : .secondary)
-                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+            if state.running {
+                RunStrip(state: state, health: health, uptime: uptime,
+                         onOpen: { NSWorkspace.shared.open($0) },
+                         onLogs: { showingLogs = true })
+            } else {
+                Text("Runs from a throwaway worktree. Your checkout is never touched.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+            }
 
             if visible.isEmpty {
                 Spacer()
@@ -698,6 +978,8 @@ struct ContentView: View {
         branches = Engine.branches(p)
         presets = Engine.presets(p)
         state = Engine.state(p)
+        logDir = Engine.paths(p).count >= 2 ? Engine.paths(p)[1] : ""
+        if state.running { health.watch(state.targets) } else { health.stop() }
         if preset.isEmpty || !presets.contains(preset) { preset = presets.first ?? "" }
         if state.running {
             selection = state.ref
@@ -743,7 +1025,7 @@ struct ContentView: View {
 @main
 struct RunBranchApp: App {
     var body: some Scene {
-        WindowGroup("runbranch") {
+        WindowGroup("Runbranch") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

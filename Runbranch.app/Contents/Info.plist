@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>              <string>runbranch</string>
-  <key>CFBundleDisplayName</key>       <string>runbranch</string>
+  <key>CFBundleName</key>              <string>Runbranch</string>
+  <key>CFBundleDisplayName</key>       <string>Runbranch</string>
   <key>CFBundleIdentifier</key>        <string>dev.runbranch.app</string>
   <key>CFBundleVersion</key>           <string>3.0</string>
   <key>CFBundleShortVersionString</key><string>3.0</string>

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# runbranch — run any local project from a throwaway git worktree.
+# Runbranch — run any local project from a throwaway git worktree.
 #
 # The problem, which is not specific to one repo: demoing out of your working
 # checkout means the demo competes with whatever you are editing. Switching
@@ -148,7 +148,7 @@ load_project() {
   # Defaults, reset on every load so a second load cannot inherit the first.
   NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
-  MIGRATE=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0
+  MIGRATE=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
 
   # shellcheck disable=SC1090
   . "$file"
@@ -176,8 +176,8 @@ list_projects() {
     name="$(basename "$f" .conf)"
     ( load_project "$name" >/dev/null 2>&1 || exit 0
       [ -n "$PROJECT" ] || exit 0
-      printf '%s\t%s\t%s\t%s\n' "$name" "$NAME" "$REPO" \
-        "$( [ -f "$STATE_FILE" ] && echo 1 || echo 0 )" )
+      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$NAME" "$REPO" \
+        "$( [ -f "$STATE_FILE" ] && echo 1 || echo 0 )" "${SYMBOL:-shippingbox}" )
   done
 }
 
@@ -589,11 +589,12 @@ write_state() {
     printf 'TARGETS=%s\n'  "$4"
     printf 'PIDS=%s\n'     "$5"
     printf 'STARTED=%s\n'  "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'EPOCH=%s\n'    "$(date +%s)"
   } >"$STATE_FILE"
 }
 
 load_state() {
-  S_REF=''; S_WORKTREE=''; S_PRESET=''; S_TARGETS=''; S_PIDS=''; S_STARTED=''
+  S_REF=''; S_WORKTREE=''; S_PRESET=''; S_TARGETS=''; S_PIDS=''; S_STARTED=''; S_EPOCH=0
   [ -f "$STATE_FILE" ] || return 1
   local line key val
   while IFS= read -r line || [ -n "$line" ]; do
@@ -601,7 +602,7 @@ load_state() {
     case "$key" in
       REF) S_REF="$val" ;; WORKTREE) S_WORKTREE="$val" ;;
       PRESET) S_PRESET="$val" ;; TARGETS) S_TARGETS="$val" ;;
-      PIDS) S_PIDS="$val" ;; STARTED) S_STARTED="$val" ;;
+      PIDS) S_PIDS="$val" ;; STARTED) S_STARTED="$val" ;; EPOCH) S_EPOCH="$val" ;;
     esac
   done <"$STATE_FILE"
   return 0
@@ -762,6 +763,64 @@ print_status() {
 }
 
 # ---------------------------------------------------------------------------
+# Reclaiming what a crash left behind
+#
+# A force quit, a panic or a sleep can leave servers holding ports with no
+# state to match, or state naming pids that are long gone. Neither is the
+# user's problem to solve with `lsof`, so find both on demand.
+# ---------------------------------------------------------------------------
+
+# Anything still listening on one of this project's ports whose command line
+# points into its worktrees is ours, whatever the state file believes.
+reclaim_project() {
+  local t port pid cmd found=0 stale=0
+  if load_state && ! demo_running; then
+    stale=1
+  fi
+
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    port="$(target_field "$t" port)"
+    [ -n "$port" ] || continue
+    pid=$(port_holder "$port")
+    [ -n "$pid" ] || continue
+    cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+    case "$cmd" in
+      *"$WORKTREES"*)
+        # Ours, and not accounted for by a live run.
+        if [ "$stale" = 1 ] || ! demo_running; then
+          info "$NAME: reclaiming $t on port $port (pid $pid)"
+          kill_group "$pid"
+          found=$((found + 1))
+        fi
+        ;;
+    esac
+  done <<EOF
+$(target_names)
+EOF
+
+  if [ "$stale" = 1 ]; then
+    info "$NAME: clearing stale state for $S_REF"
+    rm -f "$STATE_FILE"
+    found=$((found + 1))
+  fi
+  return "$found"
+}
+
+reclaim_all() {
+  local n total=0
+  while IFS="$(printf '\t')" read -r n _; do
+    [ -n "$n" ] || continue
+    ( load_project "$n" >/dev/null 2>&1 || exit 0
+      reclaim_project || exit $? ) || total=$((total + $?))
+  done <<EOF
+$(list_projects)
+EOF
+  [ "$total" = 0 ] && info "Nothing to reclaim."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Terminal picker
 #
 # The app is the real front end. This exists so the script is usable alone —
@@ -883,7 +942,7 @@ cleanup_worktrees() {
 
 usage() {
   cat <<USAGE
-runbranch — run any local project from a throwaway git worktree.
+Runbranch — run any local project from a throwaway git worktree.
 
   runbranch.sh                          interactive
   runbranch.sh run <project> <ref> <preset>
@@ -896,6 +955,7 @@ runbranch — run any local project from a throwaway git worktree.
   runbranch.sh branches <project>
   runbranch.sh presets <project>
   runbranch.sh paths <project> [<ref>]
+  runbranch.sh reclaim [<project>]     reclaim ports and clear state a crash left
   runbranch.sh state <project>
   runbranch.sh remove-worktree <project> <ref>
   runbranch.sh refresh <project>
@@ -925,14 +985,25 @@ main() {
       ;;
     presets)  need_project "${2:-}"; preset_names ;;
     state)
+      local t pid
       need_project "${2:-}"
-      if demo_running; then
-        printf 'running\t%s\t%s\t%s\t%s\n' "$S_REF" "$S_PRESET" "$S_STARTED" "$(running_urls)"
-      else
-        printf 'idle\t\t\t\t\n'
-      fi
+      if ! demo_running; then printf 'idle\n'; exit 0; fi
+      printf 'run\t%s\t%s\t%s\t%s\t%s\n' \
+        "$S_REF" "$S_PRESET" "$S_STARTED" "$S_EPOCH" "$S_WORKTREE"
+      # TARGETS and PIDS are written in the same order, so they zip.
+      set -- $S_PIDS
+      for t in $S_TARGETS; do
+        pid="${1:-}"; [ $# -gt 0 ] && shift
+        printf 'target\t%s\t%s\t%s\t%s\t%s\n' "$t" \
+          "$(target_field "$t" port)" "$(target_field "$t" health)" \
+          "${pid:-0}" "$(alive "${pid:-}" && echo 1 || echo 0)"
+      done
       ;;
     refresh) need_project "${2:-}"; refresh_pr_cache && echo "refreshed" || echo "refresh failed" >&2 ;;
+    reclaim)
+      if [ $# -ge 2 ]; then load_project "$2"; reclaim_project || true
+      else reclaim_all; fi
+      ;;
     remove-worktree)
       [ $# -eq 3 ] || { usage; exit 2; }
       load_project "$2"; remove_worktree_for "$3"
@@ -958,7 +1029,7 @@ EOF
     -h|--help|help) usage ;;
     menu|'')
       [ "$HAVE_TTY" = 1 ] || die "This is the engine, not the front end." \
-        "open '$SELF_DIR/runbranch.app'"
+        "open '$SELF_DIR/Runbranch.app'"
       pick_project || exit 0
       load_project "$PICKED_PROJECT"
       if demo_running; then
