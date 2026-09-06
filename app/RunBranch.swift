@@ -775,6 +775,32 @@ struct LogViewer: View {
     }
 }
 
+/// Everything the detail pane needs for one project, as a single value.
+///
+/// It used to be six separate @State vars assigned at different moments —
+/// branches from cache synchronously, run state only when the engine replied —
+/// so mid-switch the window showed one project's branches beside another's
+/// status bar, title and subtitle. Snapshots are swapped whole, and the pane
+/// refuses to draw one whose id is not the selected project, so a mismatch
+/// cannot be represented rather than merely being unlikely.
+struct ProjectSnapshot {
+    let id: String
+    var branches: [Branch] = []
+    var presets: [String] = []
+    var state: RunState = .idle
+    var paths: [String] = []
+
+    var logDir: String { paths.count >= 2 ? paths[1] : "" }
+
+    static func load(_ id: String) -> ProjectSnapshot {
+        ProjectSnapshot(id: id,
+                        branches: Engine.branches(id),
+                        presets: Engine.presets(id),
+                        state: Engine.state(id),
+                        paths: Engine.paths(id))
+    }
+}
+
 // MARK: - Main
 
 struct ProjectRow: View {
@@ -802,9 +828,10 @@ struct ContentView: View {
     @State private var selectedProject: String?
     @State private var liveProjects: Set<String> = []
 
-    @State private var branches: [Branch] = []
-    @State private var presets: [String] = []
-    @State private var state = RunState.idle
+    /// The one currently displayed, and everything already fetched.
+    @State private var snapshot: ProjectSnapshot?
+    @State private var cache: [String: ProjectSnapshot] = [:]
+
     @State private var selection: String?
     @State private var preset = ""
     @State private var showMerged = false
@@ -813,16 +840,6 @@ struct ContentView: View {
     @State private var query = ""
     @State private var searchOpen = false
     @FocusState private var searchFocused: Bool
-    @State private var logDir = ""
-
-    // Everything the engine reports, kept per project. Switching to a project
-    // you have already visited should be instant; it was not, because reload()
-    // made five blocking subprocess calls on the main thread and the window
-    // simply stopped for the best part of a second.
-    @State private var branchCache: [String: [Branch]] = [:]
-    @State private var presetCache: [String: [String]] = [:]
-    @State private var pathCache: [String: [String]] = [:]
-    @State private var loading = false
 
     @State private var sheetTitle = ""
     @State private var showingRun = false
@@ -830,14 +847,22 @@ struct ContentView: View {
     @StateObject private var runner = Runner()
     @StateObject private var health = HealthMonitor()
 
-
     private static let week = 7 * 24 * 60 * 60
 
     private var project: Project? {
         projects.first { $0.id == selectedProject }
     }
 
-    var visible: [Branch] {
+    /// The snapshot, but only if it belongs to the selected project. Every
+    /// read goes through here, so stale data cannot reach the screen.
+    private var current: ProjectSnapshot? {
+        guard let s = snapshot, s.id == selectedProject else { return nil }
+        return s
+    }
+
+    func visible(_ snap: ProjectSnapshot) -> [Branch] {
+        let branches = snap.branches
+        let state = snap.state
         let now = Int(Date().timeIntervalSince1970)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         return branches.filter { b in
@@ -860,12 +885,21 @@ struct ContentView: View {
 
     private var filtersActive: Bool { showMerged || showOlder || showAllRemote }
 
+    /// ⌘1…9. Precomputed because building the key equivalents inline defeated
+    /// the type checker.
+    private var shortcutProjects: [(key: KeyEquivalent, id: String)] {
+        projects.prefix(9).enumerated().map { i, p in
+            (KeyEquivalent(Character(String(i + 1))), p.id)
+        }
+    }
+
     private var selectedBranch: Branch? {
-        branches.first { $0.ref == selection }
+        current?.branches.first { $0.ref == selection }
     }
 
     /// Start / Stop / Switch, decided by what is running and what is selected.
-    private var primary: (title: String, destructive: Bool, action: () -> Void)? {
+    private func primary(_ snap: ProjectSnapshot) -> (title: String, destructive: Bool, action: () -> Void)? {
+        let state = snap.state
         guard let p = selectedProject, let ref = selection else { return nil }
         if state.running && state.ref == ref {
             return ("Stop", true, { run(["stop", p], "Stopping \(ref)") })
@@ -905,8 +939,16 @@ struct ContentView: View {
                     "No project selected",
                     systemImage: "square.stack.3d.up",
                     description: Text("Projects are declared in \(Engine.projectsDir)"))
+            } else if let snap = current {
+                detail(snap)
             } else {
-                detail
+                // Loading. Deliberately not the previous project's data with
+                // pieces swapped in as they arrive.
+                VStack { ProgressView().controlSize(.small) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
+                    .navigationTitle(project?.name ?? "")
+                    .navigationSubtitle("")
             }
         }
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
@@ -929,13 +971,13 @@ struct ContentView: View {
         .background {
             // Shortcuts with no visible control of their own.
             Group {
-                ForEach(Array(projects.prefix(9).enumerated()), id: \.element.id) { i, p in
-                    Button("") { selectedProject = p.id }
-                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                ForEach(shortcutProjects, id: \.key) { pair in
+                    Button("") { selectedProject = pair.id }
+                        .keyboardShortcut(pair.key, modifiers: .command)
                 }
                 Button("") {
-                    if state.running, let p = selectedProject {
-                        run(["stop", p], "Stopping \(state.ref)")
+                    if let snap = current, snap.state.running, let p = selectedProject {
+                        run(["stop", p], "Stopping \(snap.state.ref)")
                     }
                 }
                 .keyboardShortcut(".", modifiers: .command)
@@ -984,7 +1026,7 @@ struct ContentView: View {
                     Task {
                         if let p = selectedProject {
                             _ = await Task.detached { Engine.capture(["refresh", p]) }.value
-                            branchCache[p] = nil
+                            cache[p] = nil
                         }
                         await reload()
                     }
@@ -998,7 +1040,8 @@ struct ContentView: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(b.ref, forType: .string)
                         }
-                        if let url = state.urls.first, state.running, state.ref == b.ref {
+                        if let snap = current, snap.state.running, snap.state.ref == b.ref,
+                           let url = snap.state.urls.first {
                             Button("Copy URL") {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
@@ -1018,7 +1061,7 @@ struct ContentView: View {
                             Button("Remove worktree") {
                                 run(["remove-worktree", p, b.ref], "Removing \(b.ref)")
                             }
-                            .disabled(state.running && state.ref == b.ref)
+                            .disabled(current?.state.running == true && current?.state.ref == b.ref)
                             Divider()
                         }
                     }
@@ -1039,23 +1082,22 @@ struct ContentView: View {
         .sheet(isPresented: $showingRun) {
             RunSheet(runner: runner, title: sheetTitle) {
                 showingRun = false
-                if let p = selectedProject { branchCache[p] = nil }
+                if let p = selectedProject { cache[p] = nil }
                 Task { await reload(); await refreshLive() }
             }
         }
         .sheet(isPresented: $showingLogs) {
-            LogViewer(logDir: logDir, targets: state.targets) { showingLogs = false }
+            LogViewer(logDir: current?.logDir ?? "",
+                      targets: current?.state.targets ?? []) { showingLogs = false }
         }
     }
 
-    private var detail: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func detail(_ snap: ProjectSnapshot) -> some View {
+        let state = snap.state
+        let rows = visible(snap)
+        return VStack(alignment: .leading, spacing: 0) {
 
-            if loading {
-                Spacer()
-                ProgressView().controlSize(.small)
-                Spacer()
-            } else if visible.isEmpty {
+            if rows.isEmpty {
                 Spacer()
                 ContentUnavailableView {
                     Label(query.isEmpty ? "No branches to show" : "No match",
@@ -1067,7 +1109,7 @@ struct ContentView: View {
                 }
                 Spacer()
             } else {
-            List(visible, selection: $selection) { branch in
+            List(rows, selection: $selection) { branch in
                 BranchRow(branch: branch,
                           isLive: state.running && state.ref == branch.ref,
                           showGutter: state.running,
@@ -1098,14 +1140,14 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 // Presets come from the project's own config, so a one-server
                 // project shows one button and Studio shows three.
-                if presets.count > 1 {
+                if snap.presets.count > 1 {
                     Picker("", selection: $preset) {
-                        ForEach(presets, id: \.self) { Text($0.capitalized).tag($0) }
+                        ForEach(snap.presets, id: \.self) { Text($0.capitalized).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .controlSize(.large)
-                    .frame(width: CGFloat(min(presets.count, 4)) * 72)
+                    .frame(width: CGFloat(min(snap.presets.count, 4)) * 72)
                     .disabled(state.running && state.ref == selection)
                 }
 
@@ -1121,12 +1163,12 @@ struct ContentView: View {
                             Button("Open") { NSWorkspace.shared.open(url) }
                                 .buttonStyle(.glass).controlSize(.large)
                         }
-                        if let primary {
-                            Button(primary.title, action: primary.action)
+                        if let p = primary(snap) {
+                            Button(p.title, action: p.action)
                                 .buttonStyle(.glassProminent).controlSize(.large)
-                                .tint(primary.destructive ? .red : .accentColor)
+                                .tint(p.destructive ? .red : .accentColor)
                                 .keyboardShortcut(.defaultAction)
-                                .help("\(primary.title) \(selection ?? "")")
+                                .help("\(p.title) \(selection ?? "")")
                         }
                     }
                 }
@@ -1137,7 +1179,7 @@ struct ContentView: View {
         .background(.background)
         // Finder titles the folder, Mail titles the mailbox. The app's own name
         // is already on the menu bar and does not need repeating here.
-        .navigationTitle(project?.name ?? "Runbranch")
+        .navigationTitle(projects.first { $0.id == snap.id }?.name ?? "")
         .navigationSubtitle(state.running ? "\(state.ref) · \(state.preset)" : "")
     }
 
@@ -1158,10 +1200,7 @@ struct ContentView: View {
             // and every one after, costs nothing.
             for p in found where p.id != selectedProject {
                 let id = p.id
-                let b = await Task.detached { Engine.branches(id) }.value
-                let pr = await Task.detached { Engine.presets(id) }.value
-                branchCache[id] = b
-                presetCache[id] = pr
+                cache[id] = await Task.detached { ProjectSnapshot.load(id) }.value
             }
         }
     }
@@ -1175,36 +1214,38 @@ struct ContentView: View {
         liveProjects = live
     }
 
+    /// Builds the whole snapshot, then assigns it in one go. Nothing is
+    /// applied piecemeal, and a reply that arrives after you have switched away
+    /// is dropped rather than half-drawn.
     private func reload() async {
-        guard let p = selectedProject else { return }
+        guard let p = selectedProject else { snapshot = nil; return }
 
-        // Show what we already know immediately; the engine call only replaces it.
-        if let cached = branchCache[p] { branches = cached }
-        if let cached = presetCache[p] { presets = cached }
-        loading = branchCache[p] == nil
+        // A cached snapshot is complete, so showing it immediately is safe.
+        snapshot = cache[p]
 
-        let fresh = await Task.detached { () -> ([Branch], [String], RunState, [String]) in
-            (Engine.branches(p), Engine.presets(p), Engine.state(p), Engine.paths(p))
-        }.value
+        let fresh = await Task.detached { ProjectSnapshot.load(p) }.value
+        guard selectedProject == p else { return }
 
-        guard selectedProject == p else { return }   // switched away mid-flight
-        branches = fresh.0; branchCache[p] = fresh.0
-        presets  = fresh.1; presetCache[p] = fresh.1
-        state    = fresh.2
-        pathCache[p] = fresh.3
-        logDir = fresh.3.count >= 2 ? fresh.3[1] : ""
-        loading = false
+        cache[p] = fresh
+        snapshot = fresh
+        applySelection(fresh)
+    }
 
-        if state.running { health.watch(state.targets) } else { health.stop() }
-        if preset.isEmpty || !presets.contains(preset) { preset = presets.first ?? "" }
-        if state.running {
-            selection = state.ref
-            if presets.contains(state.preset) { preset = state.preset }
-        } else if selection == nil || !branches.contains(where: { $0.ref == selection }) {
-            selection = branches.first(where: { $0.mine && $0.pr != .merged })?.ref
-                     ?? branches.first(where: { $0.isDefault })?.ref
+    /// Selection and preset belong to the snapshot, so they move with it.
+    private func applySelection(_ snap: ProjectSnapshot) {
+        if snap.state.running { health.watch(snap.state.targets) } else { health.stop() }
+
+        if preset.isEmpty || !snap.presets.contains(preset) { preset = snap.presets.first ?? "" }
+        if snap.state.running {
+            selection = snap.state.ref
+            if snap.presets.contains(snap.state.preset) { preset = snap.state.preset }
+        } else if selection == nil || !snap.branches.contains(where: { $0.ref == selection }) {
+            selection = snap.branches.first(where: { $0.mine && $0.pr != .merged })?.ref
+                     ?? snap.branches.first(where: { $0.isDefault })?.ref
         }
     }
+
+    private func cachedPaths(_ p: String) -> [String] { cache[p]?.paths ?? Engine.paths(p) }
 
     private func reveal(_ path: String) {
         guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return }
@@ -1217,7 +1258,35 @@ struct ContentView: View {
         if fields.count >= 6 { editor.open(fields[5]) }
     }
 
-    private func cachedPaths(_ p: String) -> [String] { pathCache[p] ?? Engine.paths(p) }
+    private func revealWorktree(_ ref: String) {
+        guard let p = selectedProject else { return }
+        let fields = Engine.paths(p, ref: ref)
+        if fields.count >= 6 { reveal(fields[5]) }
+    }
+
+    private func openLogs() {
+        guard let p = selectedProject else { return }
+        let fields = cachedPaths(p)
+        if fields.count >= 2 { reveal(fields[1]) }
+    }
+
+    /// The engine reports the GitHub slug, so the app does not have to parse a
+    /// remote URL of its own.
+    private func openPR(_ number: String) {
+        guard let p = selectedProject else { return }
+        let fields = cachedPaths(p)
+        guard fields.count >= 5, !fields[4].isEmpty,
+              let url = URL(string: "https://github.com/\(fields[4])/pull/\(number)")
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Hand the .conf to whatever the user opens shell scripts with.
+    private func editConfig(_ p: String) {
+        let fields = cachedPaths(p)
+        guard fields.count >= 3 else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: fields[2]))
+    }
 
     /// Point it at a repo and it writes a config by reading what is already
     /// there — lockfile, scripts, ports, compose services, toolchain pin. The
@@ -1242,42 +1311,11 @@ struct ContentView: View {
                 a.runModal()
                 return
             }
-            let found = await Task.detached { Engine.projects() }.value
-            projects = found
+            projects = await Task.detached { Engine.projects() }.value
             selectedProject = added.name
             NSWorkspace.shared.open(URL(fileURLWithPath: added.file))
             await reload()
         }
-    }
-
-    /// The engine reports the GitHub slug, so the app does not have to parse a
-    /// remote URL of its own.
-    private func openPR(_ number: String) {
-        guard let p = selectedProject else { return }
-        let fields = cachedPaths(p)
-        guard fields.count >= 5, !fields[4].isEmpty,
-              let url = URL(string: "https://github.com/\(fields[4])/pull/\(number)")
-        else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func revealWorktree(_ ref: String) {
-        guard let p = selectedProject else { return }
-        let fields = Engine.paths(p, ref: ref)
-        if fields.count >= 6 { reveal(fields[5]) }
-    }
-
-    private func openLogs() {
-        guard let p = selectedProject else { return }
-        let fields = cachedPaths(p)
-        if fields.count >= 2 { reveal(fields[1]) }
-    }
-
-    /// Hand the .conf to whatever the user opens shell scripts with.
-    private func editConfig(_ p: String) {
-        let fields = cachedPaths(p)
-        guard fields.count >= 3 else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: fields[2]))
     }
 
     /// "2026-09-04 23:32:59" -> "23:32".
