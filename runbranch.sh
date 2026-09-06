@@ -150,6 +150,7 @@ load_project() {
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
   MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
   PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
+  DB_URL_VARS=""; DB_TEMPLATE=""; DB_ADMIN_USER=""
 
   # shellcheck disable=SC1090
   . "$file"
@@ -472,6 +473,7 @@ remove_worktree_for() {
     die "$ref is running, so its worktree is in use." "$SELF stop $PROJECT"
   fi
   step "Removing worktree for $ref"
+  drop_run_database "$wt" "$ref"
   repo_git worktree remove --force "$wt" >/dev/null 2>&1 || {
     safe_rm_worktree "$wt"
     repo_git worktree prune >/dev/null 2>&1
@@ -579,6 +581,117 @@ run_seed() {
   info "$SEED"
   in_worktree "$wt" "$SEED" || die "Seeding failed." "cd $wt && $SEED"
   ok "seeded"
+}
+
+# The compose container id for a service, so we can run psql inside it rather
+# than requiring a client on the host.
+pg_container() { compose "$1" ps -q postgres 2>/dev/null | head -1; }
+
+# ---------------------------------------------------------------------------
+# Per-run databases
+#
+# Two branches with divergent migrations sharing one database is the oldest
+# problem this tool has: migrating for one silently rewrites the other, and
+# nothing rolls it back. A branch can have its own database instead — created
+# with the worktree, migrated and seeded from scratch, dropped when the
+# worktree goes.
+#
+# Postgres only, and declared rather than assumed: a project says which
+# variable carries its URL, because only it knows.
+# ---------------------------------------------------------------------------
+
+# postgresql://user:pass@host:port/dbname -> dbname
+db_name_from_url() { printf '%s' "$1" | sed -E 's#^.*/([^/?]+)(\?.*)?$#\1#'; }
+
+# The URL as the main checkout has it, which is the one to derive from.
+db_source_url() {
+  local var="$1" f
+  for f in $COPY_FILES; do
+    [ -f "$REPO/$f" ] || continue
+    grep -E "^${var}=" "$REPO/$f" | tail -1 | sed -E "s/^${var}=//" | tr -d '"'"'" && return 0
+  done
+  return 1
+}
+
+# Postgres identifiers cap at 63 bytes, and a branch slug can be longer.
+db_name_for() {
+  local base="$1" slug="$2"
+  printf '%s' "${base}_rb_${slug}" | tr -c 'A-Za-z0-9_' '_' | cut -c1-63
+}
+
+psql_admin() {
+  local wt="$1" sql="$2" cid user
+  cid="$(pg_container "$wt")"
+  [ -n "$cid" ] || die \
+    "$NAME declares DB_URL_VARS but has no running postgres service to create the database in." \
+    "check COMPOSE_SERVICES in $PROJECTS_DIR/$PROJECT.conf names postgres"
+  user="${DB_ADMIN_USER:-$(printf '%s' "$DB_BASE_URL" | sed -E 's#^[a-z]+://([^:]+):.*#\1#')}"
+  docker exec "$cid" psql -U "$user" -d postgres -v ON_ERROR_STOP=1 -tAc "$sql"
+}
+
+# Sets DB_RUN_NAME. Creates the database if it is not already there.
+DB_RUN_NAME=''
+DB_BASE_URL=''
+setup_run_database() {
+  local wt="$1" ref="$2" var first base exists
+  DB_RUN_NAME=''
+  [ -n "$DB_URL_VARS" ] || return 0
+
+  first="${DB_URL_VARS%% *}"
+  DB_BASE_URL="$(db_source_url "$first")"
+  [ -n "$DB_BASE_URL" ] || die \
+    "$NAME declares DB_URL_VARS=\"$DB_URL_VARS\" but $first is not set in ${COPY_FILES:-<COPY_FILES>}." \
+    "grep $first $REPO/${COPY_FILES%% *}"
+
+  base="$(db_name_from_url "$DB_BASE_URL")"
+  DB_RUN_NAME="$(db_name_for "$base" "$(slug_for "$ref")")"
+
+  step "Database  $DB_RUN_NAME"
+  exists="$(psql_admin "$wt" "SELECT 1 FROM pg_database WHERE datname='$DB_RUN_NAME'" 2>/dev/null)"
+  if [ "$exists" = 1 ]; then
+    ok "already exists — reusing it"
+  else
+    if [ -n "$DB_TEMPLATE" ]; then
+      info "creating from template $DB_TEMPLATE"
+      psql_admin "$wt" "CREATE DATABASE \"$DB_RUN_NAME\" TEMPLATE \"$DB_TEMPLATE\"" >/dev/null || die \
+        "Could not create $DB_RUN_NAME from template $DB_TEMPLATE." \
+        "docker exec -it $(pg_container "$wt") psql -U ${DB_ADMIN_USER:-postgres} -c 'CREATE DATABASE \"$DB_RUN_NAME\"'"
+    else
+      info "creating"
+      psql_admin "$wt" "CREATE DATABASE \"$DB_RUN_NAME\"" >/dev/null || die \
+        "Could not create $DB_RUN_NAME." \
+        "docker exec -it $(pg_container "$wt") psql -U ${DB_ADMIN_USER:-postgres} -c 'CREATE DATABASE \"$DB_RUN_NAME\"'"
+    fi
+    ok "created"
+  fi
+
+  # Point the worktree's own copies at it. Rewriting the file rather than
+  # relying on an exported variable, because dotenv loaders differ on which
+  # wins and a file you can read is easier to trust than a precedence rule.
+  local f
+  for var in $DB_URL_VARS; do
+    for f in $COPY_FILES; do
+      [ -f "$wt/$f" ] || continue
+      local newurl
+      newurl="$(printf '%s' "$DB_BASE_URL" | sed -E "s#/[^/?]+(\?.*)?\$#/$DB_RUN_NAME\1#")"
+      /usr/bin/sed -i '' -E "s#^${var}=.*#${var}=${newurl}#" "$wt/$f"
+    done
+  done
+  ok "$COPY_FILES now points at $DB_RUN_NAME"
+}
+
+drop_run_database() {
+  local wt="$1" ref="$2" base name
+  [ -n "$DB_URL_VARS" ] || return 0
+  DB_BASE_URL="$(db_source_url "${DB_URL_VARS%% *}")" || return 0
+  [ -n "$DB_BASE_URL" ] || return 0
+  base="$(db_name_from_url "$DB_BASE_URL")"
+  name="$(db_name_for "$base" "$(slug_for "$ref")")"
+  # Never the base database, whatever the arithmetic said.
+  [ "$name" = "$base" ] && return 0
+  psql_admin "$wt" "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE)" >/dev/null 2>&1 \
+    && ok "dropped $name"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -819,6 +932,7 @@ do_run() {
   prepare_worktree "$ref"
   install_deps      "$WORKTREE"
   bring_up_infra    "$WORKTREE"
+  setup_run_database "$WORKTREE" "$ref"
   handle_migrations "$WORKTREE"
   run_seed          "$WORKTREE"
   start_run "$WORKTREE" "$ref" "$preset" "$targets"

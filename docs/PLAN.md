@@ -409,7 +409,7 @@ later.
 ### Phase 5 — Isolation
 | # | Change | Touches |
 |---|---|---|
-| 5.1 | Per-run database: `DB_URL_VAR`, `DB_TEMPLATE`, create/drop with the worktree | engine |
+| 5.1 | ✅ `DB_URL_VARS`, `DB_TEMPLATE`, `DB_ADMIN_USER`. Postgres only. Verified on Studio: the run database took the branch's 169 migrations while the shared one kept its 173 | engine |
 | 5.2 | Parallel runs of one project when `PORTS="stepping"` | engine + Swift |
 
 ### Phase 6 — Ship

@@ -27,6 +27,9 @@ URL" and should stay four lines long.
 | `PORT_BASE` | no | first port assigned when `PROCFILE=1` |
 | `PORTS` | no | `fixed` (default) or `stepping`. Stepping is not implemented yet — a stack that bakes its origins into config (an OAuth origin, a CORS allowlist, an API URL the client was built with) must stay fixed |
 | `SYMBOL` | no | SF Symbol for the sidebar |
+| `DB_URL_VARS` | no | variables carrying the connection string, e.g. `"DATABASE_URL DATABASE_READ_URL"`. Each run gets its own database, created and migrated from scratch and dropped with the worktree. **Postgres only** |
+| `DB_TEMPLATE` | no | create from this database instead of empty — faster than migrating and seeding |
+| `DB_ADMIN_USER` | no | who creates it (default: the user in the URL) |
 
 Only the first three colons in a `TARGETS` line are separators, so commands
 may contain colons.
@@ -48,6 +51,19 @@ obvious blank rather than a plausible command that fails minutes later.
 
 In the app it is **Add project…** in the `•••` menu, which then opens the file
 so you can correct the guesses.
+
+### Per-run databases
+
+Two branches with divergent migrations sharing one database is the oldest
+problem here: migrating for one silently rewrites the other, and nothing rolls
+it back. `DB_URL_VARS` gives each branch its own instead.
+
+The database is named `<base>_rb_<branch>`, created when the run starts,
+migrated and seeded from scratch, and dropped when the worktree is removed —
+not when the run stops, so restarting is cheap. The worktree's copies of
+`COPY_FILES` are rewritten to point at it, rather than relying on an exported
+variable, because dotenv loaders disagree about which wins and a file you can
+read is easier to trust than a precedence rule.
 
 Run `./runbranch.sh doctor` to check every project's config resolves — that
 each declared command exists, the branch resolves, `COPY_FILES` are present,
