@@ -392,10 +392,10 @@ later.
 ### Phase 3 — Second line
 | # | Change | Touches |
 |---|---|---|
-| 3.1 | Cache PR **title** and author alongside state; fall back to commit subject | engine |
-| 3.2 | Two-line branch rows | Swift |
-| 3.3 | Remote and fork branches; fetch on selection | engine |
-| 3.4 | Open in editor / Terminal / Finder; copy and open URLs; open PR | both |
+| 3.1 | ✅ PR title, number and author cached; commit subject as fallback | engine |
+| 3.2 | ✅ Two-line branch rows | Swift |
+| 3.3 | ✅ Remote branches listed. Those with an open PR show by default (17 of 629 on Studio); the rest behind a filter. **Fork branches still to do** — they need `gh` head-repo data, not `refs/remotes` | engine |
+| 3.4 | Open in editor / Terminal; open the PR | both |
 
 ### Phase 4 — Breadth
 | # | Change | Touches |

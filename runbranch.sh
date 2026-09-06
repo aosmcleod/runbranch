@@ -275,8 +275,12 @@ refresh_pr_cache() {
   [ -n "$slug" ] || return 1
   mkdir -p "$WORK_ROOT"
   tmp="$PR_CACHE.$$"
-  if gh -R "$slug" pr list --state all --limit 300 --json headRefName,state \
-       --jq '.[] | [.headRefName, .state] | @tsv' >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+  # Title and number too: a branch name says what someone called the work,
+  # the PR title says what it is.
+  if gh -R "$slug" pr list --state all --limit 300 \
+       --json headRefName,state,number,title,author \
+       --jq '.[] | [.headRefName, .state, (.number|tostring), .title, .author.login] | @tsv' \
+       >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv "$tmp" "$PR_CACHE"; return 0
   fi
   rm -f "$tmp"; return 1
@@ -297,8 +301,12 @@ ensure_pr_cache() {
   return 0
 }
 
-# Tab separated, one LOCAL branch per line:
-#   ref  age  ts  owner  mine  pr  ready  isDefault  isCurrent
+# Tab separated, one branch per line:
+#   ref  age  ts  owner  mine  pr  ready  isDefault  isCurrent  prNumber  subject  remote
+#
+# Local branches first, then remote-tracking branches with no local twin —
+# reviewing a colleague's pull request is the whole use case, and it does not
+# start with a local branch.
 collect_branch_data() {
   local out="$1" now ready_slugs dir cur
   now=$(date +%s)
@@ -318,8 +326,11 @@ collect_branch_data() {
     # %09 is a tab. git for-each-ref does NOT interpret \t — it emits the two
     # characters literally, which silently collapses every row into one field.
     repo_git for-each-ref --sort=-committerdate \
-      --format="B%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)" \
+      --format="B%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)%09%(contents:subject)" \
       refs/heads 2>/dev/null
+    repo_git for-each-ref --sort=-committerdate \
+      --format="R%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)%09%(contents:subject)" \
+      refs/remotes/origin 2>/dev/null
   } | awk -F'\t' -v OFS='\t' \
         -v now="$now" -v emails="$MY_EMAILS" -v ready="$ready_slugs" \
         -v cur="$cur" -v defbr="$DEFAULT_BRANCH" '
@@ -337,13 +348,23 @@ collect_branch_data() {
       return 0
     }
     function firstname(w,   p) { split(w, p, " "); return p[1] }
-    $1 == "P" { pr[$2] = $3; next }
-    $1 == "B" {
-      isMine = mine($3)
-      print $2, age($4), $4, (isMine ? "me" : firstname($5)), isMine, \
-            (($2 in pr) ? pr[$2] : "NONE"), \
-            (index(ready, " " slug($2) " ") > 0 ? 1 : 0), \
-            ($2 == defbr ? 1 : 0), ($2 == cur ? 1 : 0)
+    $1 == "P" { pr[$2] = $3; num[$2] = $4; title[$2] = $5; next }
+    function emit(ref, key, email, ts, who, subject, isRemote,   isMine) {
+      isMine = mine(email)
+      print ref, age(ts), ts, (isMine ? "me" : firstname(who)), isMine, \
+            ((key in pr) ? pr[key] : "NONE"), \
+            (index(ready, " " slug(ref) " ") > 0 ? 1 : 0), \
+            (ref == defbr ? 1 : 0), (ref == cur ? 1 : 0), \
+            ((key in num) ? num[key] : ""), \
+            ((key in title) ? title[key] : subject), \
+            isRemote
+    }
+    $1 == "B" { seen[$2] = 1; emit($2, $2, $3, $4, $5, $6, 0); next }
+    $1 == "R" {
+      short = $2; sub(/^origin\//, "", short)
+      if (short == "" || $2 == "origin" || $2 == "origin/HEAD") next
+      if (seen[short]) next          # a local branch already stands for it
+      emit($2, short, $3, $4, $5, $6, 1)
     }
   ' > "$out"
 }

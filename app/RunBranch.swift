@@ -25,8 +25,13 @@ struct Branch: Identifiable, Hashable {
     let ready: Bool
     let isDefault: Bool
     let isCurrent: Bool
+    let prNumber: String
+    /// The pull request title, or the tip commit's subject when there is none.
+    let subject: String
+    let isRemote: Bool
 
     var id: String { ref }
+    var display: String { isRemote ? String(ref.dropFirst("origin/".count)) : ref }
 
     /// `ref age ts owner mine pr ready isDefault isCurrent`, tab separated.
     init?(tsv line: String) {
@@ -41,6 +46,9 @@ struct Branch: Identifiable, Hashable {
         ready = f[6] == "1"
         isDefault = f[7] == "1"
         isCurrent = f[8] == "1"
+        prNumber = f.count > 9 ? f[9] : ""
+        subject = f.count > 10 ? f[10] : ""
+        isRemote = f.count > 11 && f[11] == "1"
     }
 }
 
@@ -406,15 +414,10 @@ struct RunStrip: View {
             // A label, not a button: Open already opens it, and two ways to do
             // one thing is worse than one obvious way.
             ForEach(state.targets) { t in
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill((health.status[t.name] ?? .unknown).color)
-                        .frame(width: 5, height: 5)
-                    Text("localhost:\(String(t.port))")
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                .help(t.name)
+                Text("localhost:\(String(t.port))")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .help(t.name)
             }
         }
         .padding(.horizontal, 12)
@@ -434,36 +437,48 @@ struct BranchRow: View {
     let showGutter: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             if showGutter {
                 ZStack {
-                    if isLive {
-                        ProgressView().controlSize(.small).scaleEffect(0.55)
-                    }
+                    if isLive { ProgressView().controlSize(.small).scaleEffect(0.55) }
                 }
                 .frame(width: 14, height: 14)
+                .padding(.top, 2)
             }
 
-            Text(branch.ref)
-                .font(.system(size: 13))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    if branch.isRemote {
+                        Image(systemName: "cloud")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .help("Remote branch — selecting it builds a worktree at its tip")
+                    }
+                    Text(branch.display)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-            if branch.isDefault {
-                Badge(text: "default", color: .accentColor)
-            } else if let l = branch.pr.label {
-                // No PR badge on the default branch: every PR merges INTO
-                // development, so its own state says nothing about the branch
-                // you are choosing.
-                Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
-            }
-            Badge(text: branch.owner)
+                    if branch.isDefault {
+                        Badge(text: "default", color: .accentColor)
+                    } else if let l = branch.pr.label {
+                        Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
+                    }
+                    Badge(text: branch.owner)
+                    if !isLive && branch.ready {
+                        Badge(text: "ready", symbol: "bolt.fill", color: .green)
+                    }
+                }
 
-            // No "running" badge: the spinner in the gutter already says it,
-            // and the header names the branch. "ready" only means the worktree
-            // exists, which stops being interesting once it is live.
-            if !isLive && branch.ready {
-                Badge(text: "ready", symbol: "bolt.fill", color: .green)
+                // What the work actually is. A branch name is what someone
+                // called it; this is what it does.
+                if !branch.subject.isEmpty {
+                    Text(branch.subject)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
 
             Spacer(minLength: 8)
@@ -471,8 +486,9 @@ struct BranchRow: View {
             Text(branch.age)
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
+                .padding(.top, 1)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 }
 
@@ -686,6 +702,7 @@ struct ContentView: View {
     @State private var preset = ""
     @State private var showMerged = false
     @State private var showOlder = false
+    @State private var showAllRemote = false
     @State private var query = ""
     @State private var searchOpen = false
     @FocusState private var searchFocused: Bool
@@ -719,32 +736,39 @@ struct ContentView: View {
         return branches.filter { b in
             // Search overrides the filters: if you typed a branch's name you
             // want to see it, merged and ancient or not.
-            if !q.isEmpty { return b.ref.lowercased().contains(q) }
+            if !q.isEmpty {
+                return b.ref.lowercased().contains(q) || b.subject.lowercased().contains(q)
+            }
             if b.isDefault || b.ref == state.ref { return true }
+            // A repo can carry hundreds of remote branches and almost none of
+            // them are worth looking at. The ones with an open pull request
+            // are exactly the reviewable set, so those show by default and
+            // the rest are opt-in.
+            if b.isRemote && !showAllRemote && b.pr != .open { return false }
             if !showMerged && b.pr == .merged { return false }
             if !showOlder && now - b.timestamp > Self.week { return false }
             return true
         }
     }
 
-    private var filtersActive: Bool { showMerged || showOlder }
+    private var filtersActive: Bool { showMerged || showOlder || showAllRemote }
 
     private var selectedBranch: Branch? {
         branches.first { $0.ref == selection }
     }
 
     /// Start / Stop / Switch, decided by what is running and what is selected.
-    private var primary: (title: String, action: () -> Void)? {
+    private var primary: (title: String, destructive: Bool, action: () -> Void)? {
         guard let p = selectedProject, let ref = selection else { return nil }
         if state.running && state.ref == ref {
-            return ("Stop", { run(["stop", p], "Stopping \(ref)") })
+            return ("Stop", true, { run(["stop", p], "Stopping \(ref)") })
         }
         if state.running {
             // do_run stops whatever this project has running first, and says
             // so as it goes.
-            return ("Switch", { run(["run", p, ref, preset], "Switching to \(ref)") })
+            return ("Switch", false, { run(["run", p, ref, preset], "Switching to \(ref)") })
         }
-        return ("Start", { run(["run", p, ref, preset], "Starting \(ref)") })
+        return ("Start", false, { run(["run", p, ref, preset], "Starting \(ref)") })
     }
 
     var body: some View {
@@ -837,6 +861,8 @@ struct ContentView: View {
                 Menu {
                     Toggle("Show merged", isOn: $showMerged)
                     Toggle("Show older than a week", isOn: $showOlder)
+                    Divider()
+                    Toggle("Show all remote branches", isOn: $showAllRemote)
                 } label: {
                     // A plain glyph: the chevron a Menu draws by default is
                     // noise, and no native app shows one here.
@@ -966,6 +992,7 @@ struct ContentView: View {
                         if let primary {
                             Button(primary.title, action: primary.action)
                                 .buttonStyle(.glassProminent).controlSize(.large)
+                                .tint(primary.destructive ? .red : .accentColor)
                                 .keyboardShortcut(.defaultAction)
                                 .help("\(primary.title) \(selection ?? "")")
                         }
