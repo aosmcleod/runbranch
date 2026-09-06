@@ -235,6 +235,21 @@ enum Engine {
 
     @discardableResult
     static func reclaim() -> String { capture(["reclaim"]).out }
+
+    /// Whether a command resolves in the user's login shell — which is not the
+    /// same as this process's PATH.
+    static func hasCommand(_ name: String) -> Bool {
+        if let cached = commandCache[name] { return cached }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-lic", "command -v \(name) >/dev/null 2>&1"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        try? p.run(); p.waitUntilExit()
+        let found = p.terminationStatus == 0
+        commandCache[name] = found
+        return found
+    }
+    private nonisolated(unsafe) static var commandCache: [String: Bool] = [:]
 }
 
 /// Streams a run into the sheet, one line at a time.
@@ -359,7 +374,7 @@ extension HealthMonitor.Health {
 /// ones actually installed are shown — a menu full of things you do not have
 /// is worse than a short menu.
 enum Editor: CaseIterable {
-    case vscode, cursor, zed, xcode, terminal, finder
+    case vscode, cursor, zed, xcode, claudeCode, terminal, finder
 
     var title: String {
         switch self {
@@ -367,6 +382,7 @@ enum Editor: CaseIterable {
         case .cursor: return "Cursor"
         case .zed: return "Zed"
         case .xcode: return "Xcode"
+        case .claudeCode: return "Claude Code"
         case .terminal: return "Terminal"
         case .finder: return "Finder"
         }
@@ -378,17 +394,33 @@ enum Editor: CaseIterable {
         case .cursor: return "com.todesktop.230313mzl4w4u92"
         case .zed: return "dev.zed.Zed"
         case .xcode: return "com.apple.dt.Xcode"
+        // Claude Code is a CLI, so it opens a Terminal sitting in the worktree.
+        // Claude.app declares a claude:// scheme but the format for opening a
+        // directory is not documented, and guessing at one is how you ship a
+        // menu item that silently does nothing.
+        case .claudeCode: return "com.apple.Terminal"
         case .terminal: return "com.apple.Terminal"
         case .finder: return nil          // always there
         }
     }
 
     var isInstalled: Bool {
+        if case .claudeCode = self { return Engine.hasCommand("claude") }
         guard let id = bundleID else { return true }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil
     }
 
     func open(_ path: String) {
+        if case .claudeCode = self {
+            let script = """
+            tell application "Terminal"
+              do script "cd \(path.replacingOccurrences(of: "\"", with: "\\\"")) && claude"
+              activate
+            end tell
+            """
+            if let s = NSAppleScript(source: script) { s.executeAndReturnError(nil) }
+            return
+        }
         let dir = URL(fileURLWithPath: path)
         guard let id = bundleID else {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
@@ -438,7 +470,13 @@ struct Badge: View {
 struct RunStrip: View {
     let state: RunState
     let health: HealthMonitor
-    let uptime: String
+    let epoch: TimeInterval
+
+    static func elapsed(since epoch: TimeInterval, now: Date) -> String {
+        guard epoch > 0 else { return "—" }
+        let s = max(0, Int(now.timeIntervalSince1970 - epoch))
+        return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+    }
 
     private var worst: HealthMonitor.Health {
         let all = state.targets.compactMap { health.status[$0.name] }
@@ -457,9 +495,14 @@ struct RunStrip: View {
             Text(worst.label.capitalized)
                 .font(.system(size: 13, weight: .medium))
 
-            Text(uptime)
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(.secondary)
+            // TimelineView keeps the tick inside this label. Driving it from
+            // ContentView re-rendered the whole detail every second, which
+            // rebuilt the toolbar menus and dismissed any open submenu.
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                Text(Self.elapsed(since: epoch, now: ctx.date))
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer(minLength: 12)
 
@@ -493,9 +536,9 @@ struct BranchRow: View {
         HStack(alignment: .top, spacing: 8) {
             if showGutter {
                 ZStack {
-                    if isLive { ProgressView().controlSize(.small).scaleEffect(0.55) }
+                    if isLive { ProgressView().controlSize(.small) }
                 }
-                .frame(width: 14, height: 14)
+                .frame(width: 16, height: 16)
                 .padding(.top, 2)
             }
 
@@ -739,7 +782,7 @@ struct ProjectRow: View {
             Text(project.name).font(.system(size: 13))
             Spacer(minLength: 0)
             if isLive {
-                ProgressView().controlSize(.small).scaleEffect(0.5).frame(width: 12, height: 12)
+                ProgressView().controlSize(.small).frame(width: 16, height: 16)
             }
         }
     }
@@ -763,21 +806,21 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var logDir = ""
 
+    // Everything the engine reports, kept per project. Switching to a project
+    // you have already visited should be instant; it was not, because reload()
+    // made five blocking subprocess calls on the main thread and the window
+    // simply stopped for the best part of a second.
+    @State private var branchCache: [String: [Branch]] = [:]
+    @State private var presetCache: [String: [String]] = [:]
+    @State private var pathCache: [String: [String]] = [:]
+    @State private var loading = false
+
     @State private var sheetTitle = ""
     @State private var showingRun = false
     @State private var showingLogs = false
-    @State private var now = Date()
     @StateObject private var runner = Runner()
     @StateObject private var health = HealthMonitor()
 
-    /// Ticks so uptime stays true without polling the engine.
-    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    private var uptime: String {
-        guard state.running, state.epoch > 0 else { return "—" }
-        let s = max(0, Int(now.timeIntervalSince1970 - state.epoch))
-        return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-    }
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -867,14 +910,13 @@ struct ContentView: View {
         .task {
             // Reclaim before reading state, so a crash's leftovers are gone
             // before anything is drawn rather than showing as a phantom run.
-            Engine.reclaim()
+            await Task.detached { Engine.reclaim() }.value
             loadProjects()
         }
-        .onReceive(clock) { now = $0 }
         .onChange(of: searchFocused) { _, focused in
             if !focused && query.isEmpty { searchOpen = false }
         }
-        .onChange(of: selectedProject) { _, _ in reload() }
+        .onChange(of: selectedProject) { _, _ in Task { await reload() } }
         .background {
             // Shortcuts with no visible control of their own.
             Group {
@@ -930,8 +972,13 @@ struct ContentView: View {
                 .help("Filter branches")
 
                 Button {
-                    if let p = selectedProject { _ = Engine.capture(["refresh", p]) }
-                    reload()
+                    Task {
+                        if let p = selectedProject {
+                            _ = await Task.detached { Engine.capture(["refresh", p]) }.value
+                            branchCache[p] = nil
+                        }
+                        await reload()
+                    }
                 } label: { Image(systemName: "arrow.clockwise") }
                 .help("Re-read branches and pull request state")
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -981,8 +1028,8 @@ struct ContentView: View {
         .sheet(isPresented: $showingRun) {
             RunSheet(runner: runner, title: sheetTitle) {
                 showingRun = false
-                reload()
-                refreshLive()
+                if let p = selectedProject { branchCache[p] = nil }
+                Task { await reload(); await refreshLive() }
             }
         }
         .sheet(isPresented: $showingLogs) {
@@ -993,7 +1040,11 @@ struct ContentView: View {
     private var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
 
-            if visible.isEmpty {
+            if loading {
+                Spacer()
+                ProgressView().controlSize(.small)
+                Spacer()
+            } else if visible.isEmpty {
                 Spacer()
                 ContentUnavailableView {
                     Label(query.isEmpty ? "No branches to show" : "No match",
@@ -1022,11 +1073,15 @@ struct ContentView: View {
             .listStyle(.inset)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if state.running {
-                    RunStrip(state: state, health: health, uptime: uptime)
+                    RunStrip(state: state, health: health, epoch: state.epoch)
                 }
             }
             }
 
+            // Nothing selected means nothing to press, and an empty bar with a
+            // separator above it reads as a broken control rather than an
+            // absent one.
+            if selection != nil {
             Divider()
 
             HStack(spacing: 12) {
@@ -1066,6 +1121,7 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
+            }
         }
         .background(.background)
         // Finder titles the folder, Mail titles the mailbox. The app's own name
@@ -1081,25 +1137,53 @@ struct ContentView: View {
     }
 
     private func loadProjects() {
-        projects = Engine.projects()
-        if selectedProject == nil { selectedProject = projects.first?.id }
-        refreshLive()
-        reload()
+        Task {
+            let found = await Task.detached { Engine.projects() }.value
+            projects = found
+            if selectedProject == nil { selectedProject = found.first?.id }
+            await refreshLive()
+            await reload()
+            // Warm every other project in the background so the second switch,
+            // and every one after, costs nothing.
+            for p in found where p.id != selectedProject {
+                let id = p.id
+                let b = await Task.detached { Engine.branches(id) }.value
+                let pr = await Task.detached { Engine.presets(id) }.value
+                branchCache[id] = b
+                presetCache[id] = pr
+            }
+        }
     }
 
     /// Which projects have something up — drives the sidebar spinners.
-    private func refreshLive() {
-        var live: Set<String> = []
-        for p in projects where Engine.state(p.id).running { live.insert(p.id) }
+    private func refreshLive() async {
+        let ids = projects.map(\.id)
+        let live = await Task.detached { () -> Set<String> in
+            Set(ids.filter { Engine.state($0).running })
+        }.value
         liveProjects = live
     }
 
-    private func reload() {
+    private func reload() async {
         guard let p = selectedProject else { return }
-        branches = Engine.branches(p)
-        presets = Engine.presets(p)
-        state = Engine.state(p)
-        logDir = Engine.paths(p).count >= 2 ? Engine.paths(p)[1] : ""
+
+        // Show what we already know immediately; the engine call only replaces it.
+        if let cached = branchCache[p] { branches = cached }
+        if let cached = presetCache[p] { presets = cached }
+        loading = branchCache[p] == nil
+
+        let fresh = await Task.detached { () -> ([Branch], [String], RunState, [String]) in
+            (Engine.branches(p), Engine.presets(p), Engine.state(p), Engine.paths(p))
+        }.value
+
+        guard selectedProject == p else { return }   // switched away mid-flight
+        branches = fresh.0; branchCache[p] = fresh.0
+        presets  = fresh.1; presetCache[p] = fresh.1
+        state    = fresh.2
+        pathCache[p] = fresh.3
+        logDir = fresh.3.count >= 2 ? fresh.3[1] : ""
+        loading = false
+
         if state.running { health.watch(state.targets) } else { health.stop() }
         if preset.isEmpty || !presets.contains(preset) { preset = presets.first ?? "" }
         if state.running {
@@ -1122,11 +1206,13 @@ struct ContentView: View {
         if fields.count >= 6 { editor.open(fields[5]) }
     }
 
+    private func cachedPaths(_ p: String) -> [String] { pathCache[p] ?? Engine.paths(p) }
+
     /// The engine reports the GitHub slug, so the app does not have to parse a
     /// remote URL of its own.
     private func openPR(_ number: String) {
         guard let p = selectedProject else { return }
-        let fields = Engine.paths(p)
+        let fields = cachedPaths(p)
         guard fields.count >= 5, !fields[4].isEmpty,
               let url = URL(string: "https://github.com/\(fields[4])/pull/\(number)")
         else { return }
@@ -1141,13 +1227,13 @@ struct ContentView: View {
 
     private func openLogs() {
         guard let p = selectedProject else { return }
-        let fields = Engine.paths(p)
+        let fields = cachedPaths(p)
         if fields.count >= 2 { reveal(fields[1]) }
     }
 
     /// Hand the .conf to whatever the user opens shell scripts with.
     private func editConfig(_ p: String) {
-        let fields = Engine.paths(p)
+        let fields = cachedPaths(p)
         guard fields.count >= 3 else { return }
         NSWorkspace.shared.open(URL(fileURLWithPath: fields[2]))
     }
