@@ -404,7 +404,7 @@ later.
 | 4.2 | ✅ `RUNTIME` activation inside the worktree | engine |
 | 4.3 | ✅ `SEED`. `PORTS` key parsed; only `fixed` behaves, stepping is Phase 5 | engine |
 | 4.4 | ✅ `doctor` | engine |
-| 4.5 | Repo scan and config proposal | engine + Swift |
+| 4.5 | ✅ `propose` reads a repo and guesses a config; `add` writes it; `scan` finds repos not yet declared. **Add project…** in the app opens a folder picker, writes the config and opens it for correction | engine + Swift |
 
 ### Phase 5 — Isolation
 | # | Change | Touches |

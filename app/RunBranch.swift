@@ -236,6 +236,15 @@ enum Engine {
     @discardableResult
     static func reclaim() -> String { capture(["reclaim"]).out }
 
+    /// Reads a repo, writes a proposed config, returns (name, file).
+    static func add(_ repoPath: String) -> (name: String, file: String)? {
+        let r = capture(["add", repoPath])
+        guard r.code == 0 else { return nil }
+        let f = r.out.components(separatedBy: "\n").first?.components(separatedBy: "\t") ?? []
+        guard f.count >= 2 else { return nil }
+        return (f[0], f[1])
+    }
+
     /// Whether a command resolves in the user's login shell — which is not the
     /// same as this process's PATH.
     static func hasCommand(_ name: String) -> Bool {
@@ -910,7 +919,7 @@ struct ContentView: View {
         .task {
             // Reclaim before reading state, so a crash's leftovers are gone
             // before anything is drawn rather than showing as a phantom run.
-            await Task.detached { Engine.reclaim() }.value
+            _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
         }
         .onChange(of: searchFocused) { _, focused in
@@ -1013,6 +1022,8 @@ struct ContentView: View {
                             Divider()
                         }
                     }
+                    Button("Add project…") { addProject() }
+                    Divider()
                     Button("Open logs in Finder") { openLogs() }
                     if let p = project {
                         Button("Reveal repository in Finder") {
@@ -1207,6 +1218,37 @@ struct ContentView: View {
     }
 
     private func cachedPaths(_ p: String) -> [String] { pathCache[p] ?? Engine.paths(p) }
+
+    /// Point it at a repo and it writes a config by reading what is already
+    /// there — lockfile, scripts, ports, compose services, toolchain pin. The
+    /// file opens straight away, because these are guesses and the point is
+    /// that you can see and correct them.
+    private func addProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add"
+        panel.message = "Choose a git repository"
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Development")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        Task {
+            let added = await Task.detached { Engine.add(url.path) }.value
+            guard let added else {
+                let a = NSAlert()
+                a.messageText = "Could not add that folder"
+                a.informativeText = "It needs to be a git repository, and not already declared."
+                a.runModal()
+                return
+            }
+            let found = await Task.detached { Engine.projects() }.value
+            projects = found
+            selectedProject = added.name
+            NSWorkspace.shared.open(URL(fileURLWithPath: added.file))
+            await reload()
+        }
+    }
 
     /// The engine reports the GitHub slug, so the app does not have to parse a
     /// remote URL of its own.

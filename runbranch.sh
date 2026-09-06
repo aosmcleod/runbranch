@@ -844,6 +844,183 @@ print_status() {
 }
 
 # ---------------------------------------------------------------------------
+# propose — read a repo and guess its config
+#
+# Nobody should face a blank config file. Almost everything a project needs is
+# already declared somewhere in the repo: the lockfile names the package
+# manager, package.json names the scripts, the dev script usually names its own
+# port, a Procfile names the processes, compose names the services, and .nvmrc
+# or mise.toml names the toolchain.
+#
+# It guesses. It says so, and the guesses are commented so they are easy to
+# correct. Better a wrong port you can see than a blank file you must research.
+# ---------------------------------------------------------------------------
+
+# A value out of package.json without pulling in a JSON parser as a dependency
+# for the whole engine. python3 ships with the command line tools, which are
+# already required to build the app.
+pkg_script() {
+  local dir="$1" key="$2"
+  [ -f "$dir/package.json" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$dir/package.json" "$key" <<'PYEOF' 2>/dev/null
+import json,sys
+try: print(json.load(open(sys.argv[1])).get("scripts",{}).get(sys.argv[2],""))
+except Exception: pass
+PYEOF
+}
+
+# --port 3000, -p 3000, --port=3000, PORT=3000
+port_from_command() {
+  printf '%s' "$1" | sed -nE 's/.*(--port[= ]|(^| )-p )([0-9]{2,5}).*/\3/p' | head -1
+}
+
+# Framework defaults, for when the script does not say.
+port_from_framework() {
+  case "$1" in
+    *next*)    printf '3000' ;;
+    *vite*)    printf '5173' ;;
+    *astro*)   printf '4321' ;;
+    *remix*)   printf '3000' ;;
+    *nuxt*)    printf '3000' ;;
+    *storybook*) printf '6006' ;;
+    *rails*|*puma*) printf '3000' ;;
+    *django*|*manage.py*) printf '8000' ;;
+    *) printf '' ;;
+  esac
+}
+
+propose_config() {
+  local dir="$1" name pm install dev port runtime defbr copy compose svc
+  dir="${dir%/}"
+  [ -d "$dir/.git" ] || die "$dir is not a git repository." "runbranch.sh propose <path-to-repo>"
+  name="$(basename "$dir" | tr 'A-Z' 'a-z' | sed -e 's/[^a-z0-9._-]/-/g')"
+
+  # Package manager, from the lockfile that is present.
+  if   [ -f "$dir/pnpm-lock.yaml" ];   then pm=pnpm;  install="pnpm install --frozen-lockfile"
+  elif [ -f "$dir/bun.lockb" ];        then pm=bun;   install="bun install --frozen-lockfile"
+  elif [ -f "$dir/yarn.lock" ];        then pm=yarn;  install="yarn install --immutable"
+  elif [ -f "$dir/package-lock.json" ];then pm=npm;   install="npm ci"
+  elif [ -f "$dir/Gemfile.lock" ];     then pm=bundle;install="bundle install"
+  elif [ -f "$dir/uv.lock" ];          then pm=uv;    install="uv sync"
+  elif [ -f "$dir/poetry.lock" ];      then pm=poetry;install="poetry install"
+  elif [ -f "$dir/Cargo.lock" ];       then pm=cargo; install=""
+  else pm=""; install=""; fi
+
+  # The script to run. Not every repo calls it `dev` — a component library is
+  # as likely to call it `docs` or `storybook` — and the target should be named
+  # after whichever one it actually is.
+  local key raw=""
+  for key in dev start docs storybook serve; do
+    raw="$(pkg_script "$dir" "$key")"
+    [ -n "$raw" ] && break
+  done
+  [ -n "$raw" ] || key="dev"
+  if [ -n "$raw" ] && [ -n "$pm" ]; then dev="$pm run $key"; else dev=""; fi
+
+  port="$(port_from_command "$raw")"
+  [ -n "$port" ] || port="$(port_from_framework "$raw")"
+  [ -n "$port" ] || port=3000
+
+  # Toolchain pin.
+  if   [ -f "$dir/mise.toml" ] || [ -f "$dir/.mise.toml" ]; then runtime=mise
+  elif [ -f "$dir/.tool-versions" ]; then runtime=asdf
+  elif [ -f "$dir/.nvmrc" ]; then runtime=fnm
+  else runtime=""; fi
+
+  defbr="$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  [ -n "$defbr" ] || defbr="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+  # Gitignored config a worktree would not get.
+  copy=""
+  for f in .env.local .env .env.development; do
+    if [ -f "$dir/$f" ] && git -C "$dir" check-ignore -q "$f" 2>/dev/null; then
+      copy="$copy $f"
+    fi
+  done
+  copy="${copy# }"
+
+  # Compose services worth waiting for.
+  compose=""; svc=""
+  for f in docker-compose.yml compose.yaml compose.yml docker-compose.yaml; do
+    [ -f "$dir/$f" ] || continue
+    compose="$f"
+    # Only the services: block. A naive grep also matches the volumes: block,
+    # where `postgres-data` sits at the same indent and is not a service.
+    svc="$(awk '
+      /^[a-z]+:/ { section = $1; next }
+      section == "services:" && /^  [a-zA-Z0-9_-]+:/ {
+        name = $1; sub(/:$/, "", name)
+        if (name ~ /^(postgres|postgresql|mysql|mariadb|redis|valkey|mongo|mongodb|elasticsearch|rabbitmq)/)
+          printf "%s ", name
+      }
+    ' "$dir/$f")"
+    svc="${svc% }"
+    break
+  done
+
+  printf '# Proposed by `runbranch propose` on %s.\n' "$(date '+%Y-%m-%d')"
+  printf '# Every value is a guess read out of the repo. Correct anything wrong,\n'
+  printf '# then check it with: runbranch.sh doctor %s\n\n' "$name"
+  printf 'NAME="%s"\n' "$(basename "$dir")"
+  printf 'REPO="%s"\n' "$(printf '%s' "$dir" | sed "s#^$HOME#~#")"
+  printf 'DEFAULT_BRANCH="%s"\n' "${defbr:-main}"
+  [ -n "$install" ] && printf 'INSTALL="%s"\n' "$install"
+  [ -n "$runtime" ] && printf 'RUNTIME="%s"          # pinned in the repo\n' "$runtime"
+  [ -n "$copy" ]    && printf 'COPY_FILES="%s"    # gitignored, so a worktree lacks it\n' "$copy"
+  if [ -n "$svc" ]; then
+    printf 'COMPOSE_FILE="%s"\n' "$compose"
+    printf 'COMPOSE_PROJECT="%s"\n' "$name"
+    printf 'COMPOSE_SERVICES="%s"\n' "$svc"
+  fi
+  if [ -f "$dir/Procfile" ]; then
+    printf '\n# This repo has a Procfile, which already lists what to run.\n'
+    printf 'PROCFILE=1\n'
+  else
+    printf '\n# port guessed from %s\n' \
+      "$( [ -n "$(port_from_command "$raw")" ] && echo 'the dev script' || echo 'the framework default' )"
+    if [ -n "$dev" ]; then
+      printf 'TARGETS="%s:%s:/:%s"\n' "$key" "$port" "$dev"
+    else
+      # Nothing in the repo said how to run it. Better an obvious blank than a
+      # plausible command that fails minutes later.
+      printf '# Nothing in this repo says how to run it -- no lockfile, no\n'
+      printf '# package.json script. Fill this in, then: runbranch.sh doctor %s\n' "$name"
+      printf 'TARGETS="dev:%s:/:REPLACE-ME"\n' "$port"
+    fi
+  fi
+  case "$raw" in *--open*) printf 'OPENS_ITSELF=1        # the dev server opens a browser itself\n' ;; esac
+  printf 'SYMBOL="shippingbox"\n'
+}
+
+# Write a proposed config. Never overwrites: a config you have corrected is
+# worth more than a fresh guess.
+add_project() {
+  local dir="$1" name out
+  dir="${dir%/}"
+  [ -d "$dir/.git" ] || die "$dir is not a git repository." "runbranch.sh add <path-to-repo>"
+  name="$(basename "$dir" | tr 'A-Z' 'a-z' | sed -e 's/[^a-z0-9._-]/-/g')"
+  out="$PROJECTS_DIR/$name.conf"
+  [ -e "$out" ] && die "$name is already declared." "open $out"
+  mkdir -p "$PROJECTS_DIR"
+  propose_config "$dir" >"$out" || { rm -f "$out"; die "Could not read $dir." "runbranch.sh propose '$dir'"; }
+  printf '%s\t%s\n' "$name" "$out"
+}
+
+# Git repos under a directory that are not already declared.
+scan_repos() {
+  local root="${1:-$HOME/Development}" d name
+  [ -d "$root" ] || die "$root does not exist." "runbranch.sh scan <directory>"
+  find "$root" -maxdepth 3 -type d -name .git -not -path "*/node_modules/*" 2>/dev/null \
+    | sed 's#/\.git$##' | sort | while IFS= read -r d; do
+    name="$(basename "$d" | tr 'A-Z' 'a-z' | sed -e 's/[^a-z0-9._-]/-/g')"
+    [ -f "$PROJECTS_DIR/$name.conf" ] && continue
+    grep -lF "\"$d\"" "$PROJECTS_DIR"/*.conf >/dev/null 2>&1 && continue
+    printf '%s\t%s\n' "$name" "$d"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # doctor — check a project's config before you need it
 #
 # Every one of these is something that would otherwise surface minutes into a
@@ -1101,6 +1278,9 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh status [<project>]
   runbranch.sh cleanup <project>
   runbranch.sh doctor [<project>]              check a project's config resolves
+  runbranch.sh scan [<dir>]                    git repos not yet declared
+  runbranch.sh propose <repo>                  guess a config by reading the repo
+  runbranch.sh add <repo>                      propose it and write projects/<name>.conf
 
   machine-readable, used by runbranch.app:
   runbranch.sh projects
@@ -1179,6 +1359,13 @@ EOF
       exit "$any"
       ;;
     cleanup) need_project "${2:-}"; cleanup_worktrees ;;
+    scan)    scan_repos "${2:-$HOME/Development}" ;;
+    add)
+      # Propose and write it, so the CLI and the app take the same path.
+      [ $# -ge 2 ] || { usage; exit 2; }
+      add_project "$2"
+      ;;
+    propose) [ $# -ge 2 ] || { usage; exit 2; }; propose_config "$2" ;;
     doctor)
       if [ $# -ge 2 ]; then load_project "$2"; doctor_project; exit $?; fi
       local n rc=0

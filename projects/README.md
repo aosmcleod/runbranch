@@ -31,6 +31,24 @@ URL" and should stay four lines long.
 Only the first three colons in a `TARGETS` line are separators, so commands
 may contain colons.
 
+You should not have to write one of these from nothing:
+
+```bash
+./runbranch.sh scan               # git repos not yet declared
+./runbranch.sh propose <repo>     # guess a config, print it
+./runbranch.sh add <repo>         # guess it and write projects/<name>.conf
+```
+
+`propose` reads the lockfile for the package manager, `package.json` for the
+script to run (`dev`, `start`, `docs`, `storybook`, `serve` — whichever exists),
+the script's own flags for the port, `.nvmrc` / `.tool-versions` / `mise.toml`
+for the toolchain, the compose file's `services:` block for what to bring up,
+and which env files are gitignored. Where the repo says nothing, it leaves an
+obvious blank rather than a plausible command that fails minutes later.
+
+In the app it is **Add project…** in the `•••` menu, which then opens the file
+so you can correct the guesses.
+
 Run `./runbranch.sh doctor` to check every project's config resolves — that
 each declared command exists, the branch resolves, `COPY_FILES` are present,
 and the compose file is where it says. All of those otherwise surface minutes
