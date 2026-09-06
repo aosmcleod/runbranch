@@ -361,6 +361,12 @@ struct Badge: View {
     let text: String
     var symbol: String? = nil
     var color: Color = .secondary
+    /// A selected row is painted in the accent colour, so a badge that paints
+    /// itself the accent colour disappears into it — which is exactly what
+    /// happened to `default`. On selection every badge drops its own colour
+    /// and becomes translucent white, which reads against any accent the user
+    /// has chosen, including the ones we cannot predict.
+    var onSelection: Bool = false
 
     var body: some View {
         HStack(spacing: 3) {
@@ -369,10 +375,11 @@ struct Badge: View {
             }
             Text(text).font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(color)
+        .foregroundStyle(onSelection ? AnyShapeStyle(.white) : AnyShapeStyle(color))
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(color.opacity(0.14), in: Capsule())
+        .background(onSelection ? Color.white.opacity(0.22) : color.opacity(0.14),
+                    in: Capsule())
     }
 }
 
@@ -435,6 +442,7 @@ struct BranchRow: View {
     /// Reserve the leading slot whenever ANY demo is up, so branch names stay
     /// on one vertical line instead of the live row shunting itself sideways.
     let showGutter: Bool
+    let isSelected: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -451,7 +459,8 @@ struct BranchRow: View {
                     if branch.isRemote {
                         Image(systemName: "cloud")
                             .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8))
+                                                        : AnyShapeStyle(.tertiary))
                             .help("Remote branch — selecting it builds a worktree at its tip")
                     }
                     Text(branch.display)
@@ -460,13 +469,13 @@ struct BranchRow: View {
                         .truncationMode(.middle)
 
                     if branch.isDefault {
-                        Badge(text: "default", color: .accentColor)
+                        Badge(text: "default", color: .accentColor, onSelection: isSelected)
                     } else if let l = branch.pr.label {
-                        Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
+                        Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color, onSelection: isSelected)
                     }
-                    Badge(text: branch.owner)
+                    Badge(text: branch.owner, onSelection: isSelected)
                     if !isLive && branch.ready {
-                        Badge(text: "ready", symbol: "bolt.fill", color: .green)
+                        Badge(text: "ready", symbol: "bolt.fill", color: .green, onSelection: isSelected)
                     }
                 }
 
@@ -674,12 +683,13 @@ struct LogViewer: View {
 struct ProjectRow: View {
     let project: Project
     let isLive: Bool
+    var isSelected: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: project.symbol)
                 .font(.system(size: 12))
-                .foregroundStyle(isLive ? Color.green : .secondary)
+                .foregroundStyle(isSelected ? Color.white : (isLive ? .green : .secondary))
                 .frame(width: 16)
             Text(project.name).font(.system(size: 13))
             Spacer(minLength: 0)
@@ -778,13 +788,15 @@ struct ContentView: View {
                 if !liveProjects.isEmpty {
                     Section("Running") {
                         ForEach(projects.filter { liveProjects.contains($0.id) }) { p in
-                            ProjectRow(project: p, isLive: true).tag(p.id)
+                            ProjectRow(project: p, isLive: true,
+                                       isSelected: selectedProject == p.id).tag(p.id)
                         }
                     }
                 }
                 Section("Projects") {
                     ForEach(projects.filter { !liveProjects.contains($0.id) }) { p in
-                        ProjectRow(project: p, isLive: false).tag(p.id)
+                        ProjectRow(project: p, isLive: false,
+                                   isSelected: selectedProject == p.id).tag(p.id)
                     }
                 }
             }
@@ -943,7 +955,8 @@ struct ContentView: View {
             List(visible, selection: $selection) { branch in
                 BranchRow(branch: branch,
                           isLive: state.running && state.ref == branch.ref,
-                          showGutter: state.running)
+                          showGutter: state.running,
+                          isSelected: selection == branch.ref)
                     .tag(branch.ref)
                     .contextMenu {
                         if branch.ready && state.ref != branch.ref, let p = selectedProject {
