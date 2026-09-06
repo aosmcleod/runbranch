@@ -431,8 +431,17 @@ struct RunStrip: View {
                     .font(.system(size: 13))
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(.quaternary.opacity(0.4))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        // A floating card rather than a full-width band: the band drew its own
+        // opaque background across the window and read as a second toolbar.
+        // This lets the branch list scroll under real material instead.
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 }
 
@@ -775,7 +784,6 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             if project == nil {
@@ -788,6 +796,12 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
+        // The toolbar paints an opaque band across the whole window width,
+        // including over the sidebar — which is what put a grey block above a
+        // translucent sidebar and a seam beside the title. Finder's sidebar
+        // material runs unbroken to the top because its toolbar has no
+        // background of its own.
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .task {
             // Reclaim before reading state, so a crash's leftovers are gone
             // before anything is drawn rather than showing as a phantom run.
@@ -906,16 +920,6 @@ struct ContentView: View {
 
     private var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if state.running {
-                RunStrip(state: state, health: health, uptime: uptime,
-                         onOpen: { NSWorkspace.shared.open($0) },
-                         onLogs: { showingLogs = true })
-            } else {
-                Text("Runs from a throwaway worktree. Your checkout is never touched.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
-            }
 
             if visible.isEmpty {
                 Spacer()
@@ -943,6 +947,13 @@ struct ContentView: View {
                     }
             }
             .listStyle(.inset)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if state.running {
+                    RunStrip(state: state, health: health, uptime: uptime,
+                             onOpen: { NSWorkspace.shared.open($0) },
+                             onLogs: { showingLogs = true })
+                }
+            }
             }
 
             Divider()
@@ -981,6 +992,10 @@ struct ContentView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .background(.background)
+        // Finder titles the folder, Mail titles the mailbox. The app's own name
+        // is already on the menu bar and does not need repeating here.
+        .navigationTitle(project?.name ?? "Runbranch")
+        .navigationSubtitle(state.running ? "\(state.ref) · \(state.preset)" : "")
     }
 
     private func run(_ args: [String], _ title: String) {
