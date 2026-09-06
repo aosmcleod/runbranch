@@ -200,7 +200,186 @@ The screenshots' actual lesson. No new capability, large perceived gain.
     Homebrew cask if it earns one.
 
 ### Naming
-`project-launcher` is generic and certainly taken. The tool puts a branch on
-stage without disturbing the real one, so the theatre metaphor fits:
-**Greenroom** (where a performer waits before going on) · **Understudy**
-(stands in for the real thing) · **Sidestage** · **Matinee**.
+
+**Decided: `runbranch`.** It says what the tool does in one word, it is a verb,
+and it does not collide with the theatre metaphors that were all either taken
+or too cute.
+
+---
+
+## 7. The icon
+
+### What Apple actually wants now
+
+macOS 26 changed app icons substantially, and the icon we have is built the
+*old* way — one flat image with gradients, highlights and shadow baked in.
+
+The current model is **layered**. You supply flat foreground and background
+layers with no lighting of your own, and the system applies specular
+highlights, blur and shadow. Layers are authored in **Icon Composer** (ships
+inside Xcode; it is at `Xcode.app/Contents/Applications/Icon Composer.app`) and
+exported as a `.icon` document. From those layers the system derives the
+appearance variants: **Default, Dark, Clear Light/Dark, Tinted Light/Dark**,
+plus Light/Dark Transparent new in macOS 26.
+
+Consequence for us: **stop baking gradients and shadows.** Everything the
+current icon does by hand is now the system's job, and doing it ourselves is
+what makes an icon look a version behind.
+
+### The blocker on your SF Symbols idea
+
+Apple's SF Symbols licence is explicit:
+
+> You may not use SF Symbols — or glyphs that are substantially or confusingly
+> similar — in your app icons, logos, or any other trademark-related use.
+
+So SF Symbols go everywhere in the **UI** — toolbar, sidebar, rows, that is
+what they are for — but the **app icon must be original artwork**. For a tool
+we intend to publish, this is not a nicety; shipping an SF Symbol as an icon is
+a licence violation.
+
+That does not kill the concept. A git branch and a play triangle are universal
+shapes, not Apple's. The rule is only that we draw them ourselves rather than
+tracing `arrow.trianglehead.branch`. The current glyph is already hand-drawn
+SVG, so we are clean today and must stay that way.
+
+### The concept
+
+Your traffic-light idea is the strongest part, because it can carry *meaning*
+rather than decoration. runbranch's whole job is state: stopped, starting,
+running.
+
+**Preferred — "branch with signal nodes".** A branch line diverging from a
+trunk, its three nodes coloured red · amber · green along its length, reading
+left to right as the run's own progression. At a glance it is a branch; on
+inspection it is a status. The green terminal node doubles as the "go" end.
+
+**Alternative — "play through the branch".** The trunk and branch in a neutral
+tone, with a single vivid play triangle at the branch's end. Simpler, reads
+smaller, but says nothing about state.
+
+Testing/demo glyphs (flask, beaker, checkmark-seal) are worth prototyping but I
+suspect they misdirect: this tool does not test anything, it *runs* things.
+
+### Plan
+
+1. Draw the layers flat — background and foreground as separate SVGs, **no
+   gradients, no shadow, no specular highlight**.
+2. Assemble in Icon Composer, set the appearance variants, export `.icon`.
+3. Test at 16/32/128/512 against a Dock full of real icons, in light, dark and
+   tinted.
+4. Keep the `.icns` path in `make-app.sh` as the fallback for anyone on an
+   older system.
+
+**Honest caveat:** step 2 is the one part of this build that is not
+scriptable. Icon Composer is a GUI app and the `.icon` format is undocumented —
+`actool` shows no flags for it. I can produce the layer artwork and a written
+assembly recipe, but somebody clicks through Icon Composer once. Everything
+else in the repo builds from a shell script.
+
+---
+
+## 8. Revisions from the runbranch vision
+
+Adopting most of it. Four things need a harder look before they go in.
+
+### Adopt
+
+| Idea | Why |
+|---|---|
+| **Orphan reclamation** on launch — reclaim ports and processes left by a crash, sleep or force quit | The best idea in the document. Nobody should hunt with `lsof` |
+| **`.runbranch` in the repo**, local file as override | Versioned, diffable, reviewable. Necessary for the open-source story |
+| **Config proposed from the repo** — read package manager, lockfile, scripts, Procfile, compose, version pins | Removes the blank page. Frame as *proposes*, not "you don't write the config" — detection will guess wrong often enough that overselling it will annoy people |
+| **`SEED`** | An empty app is not worth looking at. Cheap to add |
+| **Remote and fork branches**, fetched on selection | A colleague's PR is the whole use case, and today we only list local branches |
+| **The security note** about sourcing shell config | Correct, and better said up front than discovered |
+
+### Push back
+
+**1. Port stepping will silently break auth.** "Later runs step up from the
+port you named" is a good default in general and wrong for the app it was
+written for. Studio's Clerk dev instance accepts exactly **one** primary
+origin — `localhost:3000`. A second run on `:3001` gets a sign-in page that
+cannot complete. The same applies to any baked origin: `NEXT_PUBLIC_API_URL`,
+CORS allowlists, OAuth redirect URIs.
+
+→ Make it a declared property, `PORTS="fixed"` or `PORTS="stepping"`, defaulting
+to **fixed**. A project opts into parallel runs once it can survive them.
+
+**2. Per-run databases are a bigger feature than one bullet.** "Its own
+database, thrown away with the worktree" needs the launcher to know which
+environment variable carries the URL, how to create and drop, and what to seed
+from — and the answer differs per engine. It is genuinely the fix for the
+migration-drift problem, so it should exist, but as an explicit, Postgres-first
+feature (`DB_URL_VAR`, `DB_TEMPLATE`) in a late phase — not as an implied
+property of running two things at once.
+
+**3. "Nothing survives a quit that you didn't ask to keep" contradicts the
+current design,** where servers are deliberately detached and outlive the app.
+That is a real choice, not an oversight: you close the launcher and the demo
+keeps serving. The vision's version is tidier to reason about; ours is more
+useful. **Decision needed.** My recommendation: keep detached survival, make it
+explicit in the UI ("still running after quit"), and lean on orphan reclamation
+to stop that becoming litter.
+
+**4. "A new hire clones and runs"** is true only once they have installed
+runbranch and have whatever `COPY_FILES` names — which is gitignored and
+therefore not in the clone. Worth softening; the config being in-repo does not
+solve secret distribution, and implying it does will bite someone.
+
+---
+
+## 9. Implementation plan
+
+Each item is a commit-sized change. Ordered so nothing depends on something
+later.
+
+### Phase 1 — Native chrome
+| # | Change | Touches |
+|---|---|---|
+| 1.1 | Toolbar: search field, filter `Menu`, refresh, `•••` overflow. Delete the checkbox row | Swift |
+| 1.2 | SF Symbols across sidebar and menus; sectioned sidebar (`Running` / `Projects`) | Swift |
+| 1.3 | `ContentUnavailableView` for every empty state | Swift |
+| 1.4 | Shortcuts: `⌘R` `⌘.` `⌘F` `⌘1…9` `⌘⌫` | Swift |
+
+### Phase 2 — Say what is happening
+| # | Change | Touches |
+|---|---|---|
+| 2.1 | `state` reports per-target PID, port, health path, start epoch | engine |
+| 2.2 | Ticking uptime in sidebar and detail | Swift |
+| 2.3 | Health polling per target, coloured dot | Swift |
+| 2.4 | Stats strip in the running detail (the Stocks grid) | Swift |
+| 2.5 | Log viewer — tail, search, copy, reveal | Swift + engine |
+| 2.6 | Orphan reclamation: `reclaim` subcommand, run on launch | engine |
+
+### Phase 3 — Second line
+| # | Change | Touches |
+|---|---|---|
+| 3.1 | Cache PR **title** and author alongside state; fall back to commit subject | engine |
+| 3.2 | Two-line branch rows | Swift |
+| 3.3 | Remote and fork branches; fetch on selection | engine |
+| 3.4 | Open in editor / Terminal / Finder; copy and open URLs; open PR | both |
+
+### Phase 4 — Breadth
+| # | Change | Touches |
+|---|---|---|
+| 4.1 | `PROCFILE=1` derives targets | engine |
+| 4.2 | `RUNTIME="mise\|fnm\|asdf\|nvm"` activation inside the worktree | engine |
+| 4.3 | `SEED`; `PORTS=fixed\|stepping` | engine |
+| 4.4 | `doctor` — verify every declared command resolves | engine |
+| 4.5 | Repo scan and config proposal | engine + Swift |
+
+### Phase 5 — Isolation
+| # | Change | Touches |
+|---|---|---|
+| 5.1 | Per-run database: `DB_URL_VAR`, `DB_TEMPLATE`, create/drop with the worktree | engine |
+| 5.2 | Parallel runs of one project when `PORTS="stepping"` | engine + Swift |
+
+### Phase 6 — Ship
+| # | Change | Touches |
+|---|---|---|
+| 6.1 | Rename everything to `runbranch` | all |
+| 6.2 | Layered icon via Icon Composer | assets |
+| 6.3 | `.runbranch` in-repo config with local override | engine |
+| 6.4 | MIT licence, `docs/config.md`, screenshots, honest README | docs |
+| 6.5 | Release: signing and notarisation, or a documented right-click → Open | build |
