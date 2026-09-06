@@ -697,6 +697,8 @@ struct ContentView: View {
     @State private var showMerged = false
     @State private var showOlder = false
     @State private var query = ""
+    @State private var searchOpen = false
+    @FocusState private var searchFocused: Bool
     @State private var logDir = ""
 
     @State private var sheetTitle = ""
@@ -772,6 +774,8 @@ struct ContentView: View {
                     }
                 }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             if project == nil {
@@ -791,6 +795,9 @@ struct ContentView: View {
             loadProjects()
         }
         .onReceive(clock) { now = $0 }
+        .onChange(of: searchFocused) { _, focused in
+            if !focused && query.isEmpty { searchOpen = false }
+        }
         .onChange(of: selectedProject) { _, _ in reload() }
         .background {
             // Shortcuts with no visible control of their own.
@@ -805,22 +812,43 @@ struct ContentView: View {
                     }
                 }
                 .keyboardShortcut(".", modifiers: .command)
+
+                Button("") { searchOpen = true; searchFocused = true }
+                    .keyboardShortcut("f", modifiers: .command)
             }
             .opacity(0)
         }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search branches")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                // macOS has no .searchToolbarBehavior(.minimize) — that is
+                // iOS only — so the collapse is done by hand.
+                if searchOpen {
+                    TextField("Search branches", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                        .focused($searchFocused)
+                        .onSubmit { searchFocused = false }
+                        .onExitCommand { query = ""; searchOpen = false }
+                } else {
+                    Button {
+                        searchOpen = true
+                        searchFocused = true
+                    } label: { Image(systemName: "magnifyingglass") }
+                    .help("Search branches")
+                }
+
                 // Filters belong in the toolbar, not as checkboxes in the body:
                 // the body is content, the chrome is options.
                 Menu {
                     Toggle("Show merged", isOn: $showMerged)
                     Toggle("Show older than a week", isOn: $showOlder)
                 } label: {
-                    Image(systemName: filtersActive
-                          ? "line.3.horizontal.decrease.circle.fill"
-                          : "line.3.horizontal.decrease.circle")
+                    // A plain glyph: the chevron a Menu draws by default is
+                    // noise, and no native app shows one here.
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .foregroundStyle(filtersActive ? Color.accentColor : .primary)
                 }
+                .menuIndicator(.hidden)
                 .help("Filter branches")
 
                 Button {
@@ -859,7 +887,8 @@ struct ContentView: View {
                         }
                         Button("Edit project config") { editConfig(p.id) }
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis") }
+                .menuIndicator(.hidden)
                 .help("More actions")
             }
         }
@@ -951,6 +980,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
         }
+        .background(.background)
     }
 
     private func run(_ args: [String], _ title: String) {
