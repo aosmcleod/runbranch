@@ -379,8 +379,6 @@ struct RunStrip: View {
     let state: RunState
     let health: HealthMonitor
     let uptime: String
-    let onOpen: (URL) -> Void
-    let onLogs: () -> Void
 
     private var worst: HealthMonitor.Health {
         let all = state.targets.compactMap { health.status[$0.name] }
@@ -390,47 +388,39 @@ struct RunStrip: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(worst.color)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: worst.color.opacity(0.7), radius: 3)
+        HStack(spacing: 10) {
+            Circle()
+                .fill(worst.color)
+                .frame(width: 8, height: 8)
+                .shadow(color: worst.color.opacity(0.7), radius: 3)
 
-                Text(worst.label.capitalized)
-                    .font(.system(size: 13, weight: .medium))
+            Text(worst.label.capitalized)
+                .font(.system(size: 13, weight: .medium))
 
-                Text(uptime)
-                    .font(.system(size: 12).monospacedDigit())
-                    .foregroundStyle(.secondary)
+            Text(uptime)
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                ForEach(state.targets) { t in
-                    Button {
-                        if let u = t.url { onOpen(u) }
-                    } label: {
-                        Label("localhost:\(String(t.port))", systemImage: "arrow.up.right")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .help("Open \(t.name)")
+            // A label, not a button: Open already opens it, and two ways to do
+            // one thing is worse than one obvious way.
+            ForEach(state.targets) { t in
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill((health.status[t.name] ?? .unknown).color)
+                        .frame(width: 5, height: 5)
+                    Text("localhost:\(String(t.port))")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-
-                Button(action: onLogs) {
-                    Label("Logs", systemImage: "text.alignleft")
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
+                .help(t.name)
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 8)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 4)
     }
@@ -940,9 +930,7 @@ struct ContentView: View {
             .listStyle(.inset)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if state.running {
-                    RunStrip(state: state, health: health, uptime: uptime,
-                             onOpen: { NSWorkspace.shared.open($0) },
-                             onLogs: { showingLogs = true })
+                    RunStrip(state: state, health: health, uptime: uptime)
                 }
             }
             }
@@ -967,6 +955,10 @@ struct ContentView: View {
 
                 GlassEffectContainer(spacing: 10) {
                     HStack(spacing: 10) {
+                        if state.running {
+                            Button("Logs") { showingLogs = true }
+                                .buttonStyle(.glass).controlSize(.large)
+                        }
                         if state.running, let url = state.urls.first {
                             Button("Open") { NSWorkspace.shared.open(url) }
                                 .buttonStyle(.glass).controlSize(.large)
