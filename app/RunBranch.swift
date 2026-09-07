@@ -104,12 +104,14 @@ struct Project: Identifiable, Hashable {
     /// Sidebar glyph, named by the project's own config. SF Symbols are fine
     /// here — the licence only bars them from the app icon.
     let symbol: String
+    let favourite: Bool
 
     init?(tsv line: String) {
         let f = line.components(separatedBy: "\t")
         guard f.count >= 3 else { return nil }
         id = f[0]; name = f[1]; repo = f[2]
         symbol = f.count >= 5 && !f[4].isEmpty ? f[4] : "shippingbox"
+        favourite = f.count >= 6 && f[5] == "1"
     }
 }
 
@@ -236,6 +238,11 @@ enum Engine {
 
     @discardableResult
     static func reclaim() -> String { capture(["reclaim"]).out }
+
+    @discardableResult
+    static func favourite(_ project: String, _ on: Bool) -> Int32 {
+        capture(["favourite", project, on ? "on" : "off"]).code
+    }
 
     /// Reads a repo, writes a proposed config, returns (name, file).
     static func add(_ repoPath: String) -> (name: String, file: String)? {
@@ -994,6 +1001,7 @@ struct SymbolPicker: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     TextField("Search", text: $query)
                         .textFieldStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(.quaternary.opacity(0.5), in: Capsule())
@@ -1067,10 +1075,6 @@ struct ProjectEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: f["SYMBOL"]?.isEmpty == false ? f["SYMBOL"]! : "shippingbox")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
                 Text(f["NAME"] ?? projectID).font(.system(size: 14, weight: .semibold))
                 Spacer()
                 if !dirtyKeys.isEmpty {
@@ -1254,6 +1258,7 @@ struct ContentView: View {
     /// A String is not Identifiable, so `.sheet(item:)` needs a wrapper.
     private struct EditTarget: Identifiable { let id: String }
     @State private var editingProject: EditTarget?
+    @State private var hoveredSection: String?
     @StateObject private var runner = Runner()
     @StateObject private var health = HealthMonitor()
 
@@ -1652,23 +1657,61 @@ struct ContentView: View {
     }
 
     private var live: [Project] { projects.filter { liveProjects.contains($0.id) } }
-    private var idle: [Project] { projects.filter { !liveProjects.contains($0.id) } }
+    /// Favourites and Running are both promotions, so a project appears in the
+    /// higher one only — listing it twice would be worse than either.
+    private var favourites: [Project] {
+        projects.filter { $0.favourite && !liveProjects.contains($0.id) }
+    }
+    private var others: [Project] {
+        projects.filter { !$0.favourite && !liveProjects.contains($0.id) }
+    }
 
     @ViewBuilder
     private var sidebar: some View {
         List(selection: $selectedProject) {
-            // Running first, the way Finder puts Recents above Favorites.
             if !live.isEmpty {
-                Section("Running") {
+                Section {
                     ForEach(live) { projectRow($0, isLive: true) }
+                } header: {
+                    sectionHeader("Running", showsAdd: false)
                 }
             }
-            Section("Projects") {
-                ForEach(idle) { projectRow($0, isLive: false) }
+            if !favourites.isEmpty {
+                Section {
+                    ForEach(favourites) { projectRow($0, isLive: false) }
+                } header: {
+                    sectionHeader("Favourites", showsAdd: false)
+                }
+            }
+            Section {
+                ForEach(others) { projectRow($0, isLive: false) }
+            } header: {
+                sectionHeader("Projects", showsAdd: true)
             }
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+    }
+
+    /// A header whose add button appears on hover, the way Finder reveals its
+    /// sidebar affordances rather than showing them permanently.
+    @ViewBuilder
+    private func sectionHeader(_ title: String, showsAdd: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+            Spacer(minLength: 0)
+            if showsAdd {
+                Button(action: addProject) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .opacity(hoveredSection == title ? 1 : 0)
+                .help("Add a project")
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hoveredSection = $0 ? title : nil }
     }
 
     @ViewBuilder
@@ -1680,11 +1723,22 @@ struct ContentView: View {
 
     @ViewBuilder
     private func projectMenu(_ p: Project) -> some View {
+        Button(p.favourite ? "Remove from Favourites" : "Add to Favourites") {
+            toggleFavourite(p)
+        }
+        Divider()
         Button("Project settings…") { editingProject = .init(id: p.id) }
         Button("Reveal repository in Finder") {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.repo)
         }
         Button("Open config in a text editor") { editConfig(p.id) }
+    }
+
+    private func toggleFavourite(_ p: Project) {
+        Task {
+            _ = await Task.detached { Engine.favourite(p.id, !p.favourite) }.value
+            projects = await Task.detached { Engine.projects() }.value
+        }
     }
 
     private func cachedPaths(_ p: String) -> [String] { cache[p]?.paths ?? Engine.paths(p) }

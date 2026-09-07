@@ -55,6 +55,14 @@ obvious blank rather than a plausible command that fails minutes later.
 In the app it is **Add project…** in the `•••` menu, which then opens the file
 so you can correct the guesses.
 
+### Favourites
+
+Pinning a project puts it above the others in the sidebar. It is stored in
+`~/.runbranch/favourites`, not in the project's config, because pinning is a
+personal preference rather than a property of the project the way a port or an
+install command is — and a `.runbranch` committed to a repo should not carry
+one person's sidebar order.
+
 ### Filtering, in the app
 
 The filter menu hides by default: merged branches, anything older than a week,

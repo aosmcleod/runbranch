@@ -93,6 +93,15 @@ echo "==> presets and targets"
 "$ENGINE" set fixture ALWAYS "" >/dev/null 2>&1
 is "one target, one preset"    "$("$ENGINE" presets fixture | tr -d '\n')" "web"
 
+echo "==> favourites"
+is "not favourite by default"  "$("$ENGINE" projects | awk -F'\t' '$1=="fixture"{print $6}')" "0"
+"$ENGINE" favourite fixture on >/dev/null 2>&1
+is "pinning sticks"            "$("$ENGINE" projects | awk -F'\t' '$1=="fixture"{print $6}')" "1"
+"$ENGINE" favourite fixture on >/dev/null 2>&1
+is "pinning twice is idempotent" "$(grep -c fixture "$RB_HOME/favourites")" "1"
+"$ENGINE" favourite fixture off >/dev/null 2>&1
+is "unpinning sticks"          "$("$ENGINE" projects | awk -F'\t' '$1=="fixture"{print $6}')" "0"
+
 echo "==> paths"
 is "paths reports five fields" "$("$ENGINE" paths fixture | awk -F'\t' '{print NF}')" "5"
 is "and six with a ref"        "$("$ENGINE" paths fixture main | awk -F'\t' '{print NF}')" "6"

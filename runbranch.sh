@@ -138,6 +138,26 @@ So $1 is either genuinely missing, or installed somewhere unusual." "$2"
 PROJECT=''
 IN_REPO_CONFIG=''
 
+# Favourites are a personal preference rather than a property of the project,
+# so they live in RB_HOME and not in a .conf that might be committed.
+FAVOURITES_FILE="$RB_HOME/favourites"
+
+is_favourite() {
+  [ -f "$FAVOURITES_FILE" ] || return 1
+  grep -qxF "$1" "$FAVOURITES_FILE"
+}
+
+set_favourite() {
+  local name="$1" on="$2" tmp
+  mkdir -p "$(dirname "$FAVOURITES_FILE")"
+  touch "$FAVOURITES_FILE"
+  tmp="$FAVOURITES_FILE.$$"
+  grep -vxF "$name" "$FAVOURITES_FILE" > "$tmp" 2>/dev/null || true
+  [ "$on" = on ] && printf '%s\n' "$name" >> "$tmp"
+  mv "$tmp" "$FAVOURITES_FILE"
+  ok "$name $( [ "$on" = on ] && echo added to || echo removed from ) favourites"
+}
+
 expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
 
 # Reset on every load so a second load cannot inherit the first, and so the
@@ -234,8 +254,9 @@ list_projects() {
     name="$(basename "$f" .conf)"
     ( load_project "$name" >/dev/null 2>&1 || exit 0
       [ -n "$PROJECT" ] || exit 0
-      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$NAME" "$REPO" \
-        "$( [ -f "$STATE_FILE" ] && echo 1 || echo 0 )" "${SYMBOL:-shippingbox}" )
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$NAME" "$REPO" \
+        "$( [ -f "$STATE_FILE" ] && echo 1 || echo 0 )" "${SYMBOL:-shippingbox}" \
+        "$( is_favourite "$name" && echo 1 || echo 0 )" )
   done
 }
 
@@ -1362,6 +1383,26 @@ pick_project() {
   PICKED_PROJECT=''
 IN_REPO_CONFIG=''
 
+# Favourites are a personal preference rather than a property of the project,
+# so they live in RB_HOME and not in a .conf that might be committed.
+FAVOURITES_FILE="$RB_HOME/favourites"
+
+is_favourite() {
+  [ -f "$FAVOURITES_FILE" ] || return 1
+  grep -qxF "$1" "$FAVOURITES_FILE"
+}
+
+set_favourite() {
+  local name="$1" on="$2" tmp
+  mkdir -p "$(dirname "$FAVOURITES_FILE")"
+  touch "$FAVOURITES_FILE"
+  tmp="$FAVOURITES_FILE.$$"
+  grep -vxF "$name" "$FAVOURITES_FILE" > "$tmp" 2>/dev/null || true
+  [ "$on" = on ] && printf '%s\n' "$name" >> "$tmp"
+  mv "$tmp" "$FAVOURITES_FILE"
+  ok "$name $( [ "$on" = on ] && echo added to || echo removed from ) favourites"
+}
+
 expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
 
 # Reset on every load so a second load cannot inherit the first, and so the
@@ -1502,6 +1543,7 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh projects
   runbranch.sh branches <project>
   runbranch.sh presets <project>
+  runbranch.sh favourite <project> on|off      pin it to the top of the sidebar
   runbranch.sh get <project>                   every editable field
   runbranch.sh set <project> <KEY> [value]     rewrite one key in the local conf
   runbranch.sh paths <project> [<ref>]
@@ -1581,6 +1623,10 @@ main() {
           "$(target_field "$t" port)" "$(target_field "$t" health)" \
           "${pid:-0}" "$(alive "${pid:-}" && echo 1 || echo 0)"
       done
+      ;;
+    favourite)
+      [ $# -eq 3 ] || { usage; exit 2; }
+      set_favourite "$2" "$3"
       ;;
     refresh) need_project "${2:-}"; refresh_pr_cache && echo "refreshed" || echo "refresh failed" >&2 ;;
     reclaim)
