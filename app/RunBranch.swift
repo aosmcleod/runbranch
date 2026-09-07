@@ -246,6 +246,34 @@ enum Engine {
         return (f[0], f[1])
     }
 
+    /// Every editable field of a project. TARGETS arrives with \u{1}
+    /// separating its lines, since it is the one multi-line value.
+    static func get(_ project: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for line in capture(["get", project]).out.components(separatedBy: "\n") where !line.isEmpty {
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count >= 2 else { continue }
+            out[parts[0]] = parts.dropFirst().joined(separator: "\t")
+                .replacingOccurrences(of: "\u{1}", with: "\n")
+        }
+        return out
+    }
+
+    /// Writes one key. Returns nil on success, or what went wrong.
+    static func set(_ project: String, _ key: String, _ value: String) -> String? {
+        let wire = value.replacingOccurrences(of: "\n", with: "\u{1}")
+        let p = process(["set", project, key, wire])
+        let err = Pipe()
+        p.standardOutput = Pipe()
+        p.standardError = err
+        do { try p.run() } catch { return "could not run the engine" }
+        let data = err.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        if p.terminationStatus == 0 { return nil }
+        let msg = String(data: data, encoding: .utf8) ?? ""
+        return msg.isEmpty ? "writing \(key) failed" : msg
+    }
+
     /// Whether a command resolves in the user's login shell — which is not the
     /// same as this process's PATH.
     static func hasCommand(_ name: String) -> Bool {
@@ -890,6 +918,188 @@ enum Screenshot {
     }
 }
 
+/// Editing a project's config without opening a text editor.
+///
+/// The engine owns the file: this reads `get` and writes changed keys through
+/// `set`, which keeps comments, backs the file up and reverts anything that
+/// will not load. So the worst a mistake here can do is show an error.
+struct ProjectEditor: View {
+    let projectID: String
+    let onClose: (_ changed: Bool) -> Void
+
+    @State private var f: [String: String] = [:]
+    @State private var original: [String: String] = [:]
+    @State private var loading = true
+    @State private var saving = false
+    @State private var problem: String?
+
+    /// A short list rather than every SF Symbol: enough to cover the kinds of
+    /// project people have, and pickable without a search field.
+    private static let symbols = [
+        "shippingbox", "building.2", "server.rack", "globe", "cart",
+        "paintpalette", "books.vertical", "building.columns", "hammer",
+        "wrench.and.screwdriver", "cube", "square.stack.3d.up", "terminal",
+        "chart.line.uptrend.xyaxis", "envelope", "bubble.left.and.bubble.right",
+    ]
+    private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
+
+    private func bind(_ key: String) -> Binding<String> {
+        Binding(get: { f[key] ?? "" }, set: { f[key] = $0 })
+    }
+    private func boolBind(_ key: String) -> Binding<Bool> {
+        Binding(get: { f[key] == "1" }, set: { f[key] = $0 ? "1" : "0" })
+    }
+    private var dirtyKeys: [String] {
+        f.keys.filter { f[$0] != original[$0] }.sorted()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: f["SYMBOL"]?.isEmpty == false ? f["SYMBOL"]! : "shippingbox")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(f["NAME"] ?? projectID).font(.system(size: 14, weight: .semibold))
+                Spacer()
+                if !dirtyKeys.isEmpty {
+                    Text("\(dirtyKeys.count) unsaved")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 13)
+
+            Divider()
+
+            if loading {
+                ProgressView().controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Form {
+                    Section("Project") {
+                        TextField("Name", text: bind("NAME"))
+                        Picker("Sidebar icon", selection: bind("SYMBOL")) {
+                            ForEach(Self.symbols, id: \.self) { s in
+                                Label(s, systemImage: s).tag(s)
+                            }
+                        }
+                        TextField("Default branch", text: bind("DEFAULT_BRANCH"))
+                        LabeledContent("Repository") {
+                            Text(f["REPO"] ?? "").font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+
+                    Section("Run") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Targets — one per line: name:port:health:command")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                            TextEditor(text: bind("TARGETS"))
+                                .font(.system(size: 11, design: .monospaced))
+                                .frame(minHeight: 64)
+                        }
+                        TextField("Always started", text: bind("ALWAYS"),
+                                  prompt: Text("e.g. api"))
+                        TextField("Presets", text: bind("PRESETS"),
+                                  prompt: Text("web=web  both=web,admin"))
+                        Toggle("Targets come from a Procfile", isOn: boolBind("PROCFILE"))
+                        Toggle("The server opens a browser itself", isOn: boolBind("OPENS_ITSELF"))
+                    }
+
+                    Section("Setup") {
+                        TextField("Install", text: bind("INSTALL"),
+                                  prompt: Text("pnpm install --frozen-lockfile"))
+                        Picker("Runtime", selection: bind("RUNTIME")) {
+                            ForEach(Self.runtimes, id: \.self) { r in
+                                Text(r.isEmpty ? "None" : r).tag(r)
+                            }
+                        }
+                        TextField("Copy into the worktree", text: bind("COPY_FILES"),
+                                  prompt: Text(".env.local"))
+                    }
+
+                    Section("Infrastructure") {
+                        TextField("Compose services", text: bind("COMPOSE_SERVICES"),
+                                  prompt: Text("postgres valkey"))
+                        TextField("Compose project", text: bind("COMPOSE_PROJECT"))
+                        TextField("Migrate", text: bind("MIGRATE"))
+                        TextField("Seed", text: bind("SEED"))
+                        TextField("Database URL variables", text: bind("DB_URL_VARS"),
+                                  prompt: Text("DATABASE_URL"))
+                    }
+
+                    if let repo = f["IN_REPO"], !repo.isEmpty {
+                        Section {
+                            Label("This project also has a .runbranch in its repository. Values here override it.",
+                                  systemImage: "doc.badge.gearshape")
+                                .font(.system(size: 11))
+                        }
+                    }
+                }
+                .formStyle(.grouped)
+            }
+
+            if let problem {
+                Divider()
+                Label(problem, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 11)).foregroundStyle(.red)
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+            }
+
+            Divider()
+            HStack {
+                Button("Reveal config") { revealConfig() }
+                    .buttonStyle(.glass).controlSize(.large)
+                Spacer()
+                Button("Cancel") { onClose(false) }
+                    .buttonStyle(.glass).controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+                Button(saving ? "Saving…" : "Save") { save() }
+                    .buttonStyle(.glassProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(dirtyKeys.isEmpty || saving)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 12)
+        }
+        .frame(width: 560, height: 620)
+        .task {
+            let loaded = await Task.detached { Engine.get(projectID) }.value
+            f = loaded; original = loaded; loading = false
+        }
+    }
+
+    private func revealConfig() {
+        let paths = Engine.paths(projectID)
+        guard paths.count >= 3 else { return }
+        NSWorkspace.shared.selectFile(paths[2], inFileViewerRootedAtPath:
+            (paths[2] as NSString).deletingLastPathComponent)
+    }
+
+    /// Writes only what changed, and stops at the first failure rather than
+    /// carrying on and leaving the file half-updated.
+    private func save() {
+        saving = true
+        problem = nil
+        let keys = dirtyKeys
+        let values = f
+        Task {
+            let failure = await Task.detached { () -> String? in
+                for k in keys {
+                    if let err = Engine.set(projectID, k, values[k] ?? "") { return err }
+                }
+                return nil
+            }.value
+            saving = false
+            if let failure {
+                problem = failure.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .components(separatedBy: "\n").first ?? failure
+            } else {
+                onClose(true)
+            }
+        }
+    }
+}
+
 // MARK: - Main
 
 struct ProjectRow: View {
@@ -932,6 +1142,9 @@ struct ContentView: View {
     @State private var sheetTitle = ""
     @State private var showingRun = false
     @State private var showingLogs = false
+    /// A String is not Identifiable, so `.sheet(item:)` needs a wrapper.
+    private struct EditTarget: Identifiable { let id: String }
+    @State private var editingProject: EditTarget?
     @StateObject private var runner = Runner()
     @StateObject private var health = HealthMonitor()
 
@@ -1005,25 +1218,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedProject) {
-                // Running first, the way Finder puts Recents above Favorites.
-                if !liveProjects.isEmpty {
-                    Section("Running") {
-                        ForEach(projects.filter { liveProjects.contains($0.id) }) { p in
-                            ProjectRow(project: p, isLive: true,
-                                       isSelected: selectedProject == p.id).tag(p.id)
-                        }
-                    }
-                }
-                Section("Projects") {
-                    ForEach(projects.filter { !liveProjects.contains($0.id) }) { p in
-                        ProjectRow(project: p, isLive: false,
-                                   isSelected: selectedProject == p.id).tag(p.id)
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+            sidebar
         } detail: {
             if project == nil {
                 ContentUnavailableView(
@@ -1070,6 +1265,9 @@ struct ContentView: View {
                     }
                 }
                 .keyboardShortcut(".", modifiers: .command)
+
+                Button("") { if let p = selectedProject { editingProject = .init(id: p) } }
+                    .keyboardShortcut(",", modifiers: .command)
 
             }
             .opacity(0)
@@ -1148,7 +1346,9 @@ struct ContentView: View {
                         Button("Reveal repository in Finder") {
                             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.repo)
                         }
-                        Button("Edit project config") { editConfig(p.id) }
+                        Divider()
+                        Button("Project settings…") { editingProject = .init(id: p.id) }
+                        Button("Open config in a text editor") { editConfig(p.id) }
                     }
                 } label: { Image(systemName: "ellipsis") }
                 .menuIndicator(.hidden)
@@ -1161,6 +1361,17 @@ struct ContentView: View {
                 showingRun = false
                 if let p = selectedProject { cache[p] = nil }
                 Task { await reload(); await refreshLive() }
+            }
+        }
+        .sheet(item: $editingProject) { target in
+            ProjectEditor(projectID: target.id) { changed in
+                editingProject = nil
+                guard changed else { return }
+                cache[target.id] = nil
+                Task {
+                    projects = await Task.detached { Engine.projects() }.value
+                    await reload()
+                }
             }
         }
         .sheet(isPresented: $showingLogs) {
@@ -1184,6 +1395,7 @@ struct ContentView: View {
                          ? "Merged branches and anything older than a week are hidden. Change that in the filter menu."
                          : "No branch matches “\(query)”.")
                 }
+                .frame(maxWidth: .infinity)
                 Spacer()
             } else {
             List(rows, selection: $selection) { branch in
@@ -1328,6 +1540,42 @@ struct ContentView: View {
             selection = snap.branches.first(where: { $0.mine && $0.pr != .merged })?.ref
                      ?? snap.branches.first(where: { $0.isDefault })?.ref
         }
+    }
+
+    private var live: [Project] { projects.filter { liveProjects.contains($0.id) } }
+    private var idle: [Project] { projects.filter { !liveProjects.contains($0.id) } }
+
+    @ViewBuilder
+    private var sidebar: some View {
+        List(selection: $selectedProject) {
+            // Running first, the way Finder puts Recents above Favorites.
+            if !live.isEmpty {
+                Section("Running") {
+                    ForEach(live) { projectRow($0, isLive: true) }
+                }
+            }
+            Section("Projects") {
+                ForEach(idle) { projectRow($0, isLive: false) }
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+    }
+
+    @ViewBuilder
+    private func projectRow(_ p: Project, isLive: Bool) -> some View {
+        ProjectRow(project: p, isLive: isLive, isSelected: selectedProject == p.id)
+            .tag(p.id)
+            .contextMenu { projectMenu(p) }
+    }
+
+    @ViewBuilder
+    private func projectMenu(_ p: Project) -> some View {
+        Button("Project settings…") { editingProject = .init(id: p.id) }
+        Button("Reveal repository in Finder") {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.repo)
+        }
+        Button("Open config in a text editor") { editConfig(p.id) }
     }
 
     private func cachedPaths(_ p: String) -> [String] { cache[p]?.paths ?? Engine.paths(p) }

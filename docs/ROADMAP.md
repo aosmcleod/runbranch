@@ -16,7 +16,7 @@ demo a colleague's branch without reading anything.
 
 | | Item | Why |
 |---|---|---|
-| 1.1 | **Project editing in the app** — name, symbol, and every config key, with validation | Editing a `.conf` by hand is the largest remaining gap. Everything else in this table assumes it |
+| 1.1 | ✅ **Project editing in the app** — every config key, in a sheet, via engine `get`/`set` | Editing a `.conf` by hand was the largest remaining gap |
 | 1.2 | **Onboarding** — first-run splash, then a scan with progress that proposes projects | The blank first launch is the worst moment in the app. `propose` already does the hard part |
 | 1.3 | **Sidebar sections** — Favourites, then projects; hover `+` to add; drag to pin | Four projects fit in one list. Twenty do not |
 | 1.4 | **Menus** — About, Preferences, Scan for projects, Reveal config | An app with no menu bar items reads as unfinished, and About is where the licence and version belong |
