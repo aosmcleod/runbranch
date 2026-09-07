@@ -261,32 +261,44 @@ smaller, but says nothing about state.
 Testing/demo glyphs (flask, beaker, checkmark-seal) are worth prototyping but I
 suspect they misdirect: this tool does not test anything, it *runs* things.
 
-### The non-GUI path — verified
+### The `.icon` bundle — hand-authored, no GUI
 
-Icon Composer is a GUI app and `.icon` is undocumented, but it turns out we do
-not need either. `actool` — which ships with Xcode — compiles a hand-written
-asset catalogue straight from the command line, **including appearance
-variants**:
+macOS 26 does not want a bitmap per appearance. It wants a **`.icon` bundle**,
+from which the system derives Default, Dark, Clear and Tinted and applies its
+own lighting, specular highlight and shadow. An asset catalogue carrying
+light/dark bitmaps is the older mechanism and is largely ignored for the Dock
+icon — which is why our icon looked hardwired to one appearance even though
+`actool` had happily compiled both variants.
+
+Icon Composer is a GUI app, but the format it writes turns out to be plainly
+hand-authorable. Read from a shipping `.icon` on this machine:
 
 ```
-assets/AppIcon.appiconset/
-  Contents.json          # hand-written; images tagged with appearances
-  light-512x512@2x.png   # generated from SVG by sips
-  dark-512x512@2x.png
+AppIcon.icon/
+  icon.json          manifest
+  Assets/mark.png    one image per layer
 ```
 
-```bash
-xcrun actool assets/Icons.xcassets --compile "$APP/Contents/Resources" \
-  --platform macosx --minimum-deployment-target 14.0 --app-icon AppIcon \
-  --output-partial-info-plist /tmp/icon.plist
+```json
+{
+  "fill-specializations": [
+    { "value": "system-light" },
+    { "appearance": "dark", "value": "system-dark" }
+  ],
+  "groups": [{ "lighting": "individual",
+               "shadow": { "kind": "layer-color", "opacity": 0.5 },
+               "layers": [{ "image-name": "mark.png", "name": "Mark" }] }],
+  "supported-platforms": { "squares": ["macOS"] }
+}
 ```
 
-Verified: this emits `Assets.car` carrying the light and dark variants, plus an
-`AppIcon.icns` fallback. `Info.plist` needs `CFBundleIconName` alongside the
-existing `CFBundleIconFile`. Everything stays a shell script and a diffable SVG.
+`actool` compiles it into `Assets.car`, and emits an `AppIcon.icns` alongside
+so older systems still get an icon. Verified compiling with no errors.
 
-*Dark is confirmed working. `tinted` uses the same mechanism and is untested —
-worth trying, not worth promising.*
+**The consequence for the artwork:** it must carry no background, gradient or
+drop shadow of its own. `system-light` and `system-dark` mean the system draws
+the tile and lights it, so anything we bake in arrives twice. The two hand-made
+tiles are gone, and with them the WebKit render step they needed.
 
 ### The graphic set
 
