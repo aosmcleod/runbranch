@@ -12,6 +12,7 @@
 
 import SwiftUI
 import AppKit
+import ScreenCaptureKit
 
 // MARK: - Model
 
@@ -812,50 +813,80 @@ struct ProjectSnapshot {
 /// -l`, which already has the permission. The window number is the piece only
 /// the app knows.
 enum Screenshot {
-    static var holdSeconds: Double? {
+    static var path: String? {
         let a = ProcessInfo.processInfo.arguments
-        guard let i = a.firstIndex(of: "--hold"), i + 1 < a.count else { return nil }
-        return Double(a[i + 1])
+        guard let i = a.firstIndex(of: "--screenshot"), i + 1 < a.count else { return nil }
+        return a[i + 1]
     }
 
+    /// Photographs its own window through ScreenCaptureKit, which captures what
+    /// the window server actually composited — glass, vibrancy and all.
+    ///
+    /// Two earlier approaches failed and are worth not repeating. `cacheDisplay`
+    /// draws the view tree but cannot composite vibrancy or SwiftUI's layers,
+    /// so the sidebar came back blank. `CGWindowListCreateImage` is gone in
+    /// macOS 26. This route needs Screen Recording permission, which macOS does
+    /// not prompt for on an ad-hoc-signed binary launched from a terminal — it
+    /// has to be added by hand in System Settings.
     @MainActor
-    static func announceAndHold(_ seconds: Double) async {
+    static func captureAndQuit(to path: String) async {
+        defer { NSApp.terminate(nil) }
+        guard let window = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first
+        else { return }
+
+        // A window belongs to one Space, and a fullscreen app's Space excludes
+        // it — which is why every earlier capture caught whatever was
+        // fullscreen instead. This was the real cause, not the capture API.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.level = .floating
+        if let screen = NSScreen.main {
+            let size = NSSize(width: 1000, height: 620)
+            let vf = screen.visibleFrame
+            window.setFrame(NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
+                                   width: size.width, height: size.height), display: true)
+        }
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        if let w = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first {
-            // A window belongs to one Space, and a fullscreen app's Space
-            // excludes it — which is why every capture caught whatever was
-            // fullscreen instead. canJoinAllSpaces puts it on whichever Space
-            // is active, so it is composited and can be photographed.
-            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            w.level = .floating
-            // Place it deliberately. Launched from a shell the window landed
-            // mostly off the right edge, so the rect to capture ran past the
-            // display and screencapture refused it.
-            if let screen = NSScreen.main {
-                let size = NSSize(width: 1000, height: 620)
-                let vf = screen.visibleFrame
-                w.setFrame(NSRect(x: vf.midX - size.width / 2,
-                                  y: vf.midY - size.height / 2,
-                                  width: size.width, height: size.height),
-                           display: true)
+        try? await Task.sleep(for: .seconds(2.5))     // layout, health poll, glass
+
+        do {
+            let id = CGWindowID(window.windowNumber)
+            // The window does not appear in the shareable list immediately, so
+            // poll rather than assume. Without this the capture succeeded only
+            // sometimes, which is worse than failing.
+            var target: SCWindow?
+            for _ in 0..<12 {
+                let content = try await SCShareableContent.excludingDesktopWindows(
+                    false, onScreenWindowsOnly: true)
+                if let w = content.windows.first(where: { $0.windowID == id }) { target = w; break }
+                try? await Task.sleep(for: .milliseconds(400))
             }
-            w.makeKeyAndOrderFront(nil)
-        }
-        try? await Task.sleep(for: .seconds(1.5))          // let it lay out
-        if let w = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first,
-           let screen = w.screen ?? NSScreen.main {
-            // Report the frame in screencapture's coordinates: points, origin
-            // top-left. Cocoa's origin is bottom-left, hence the flip. A
-            // window-specific capture needs window-list access the caller may
-            // not have, but a full-screen grab cropped to this rect does not.
-            let f = w.frame
-            let top = screen.frame.height - f.origin.y - f.height
+            guard let target else {
+                FileHandle.standardError.write("window never became visible to the capture API\n"
+                    .data(using: .utf8)!)
+                return
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let cfg = SCStreamConfiguration()
+            cfg.width = Int(target.frame.width * 2)
+            cfg.height = Int(target.frame.height * 2)
+            cfg.showsCursor = false
+            cfg.scalesToFit = true
+            let shot = try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: cfg)
+            guard let png = NSBitmapImageRep(cgImage: shot)
+                    .representation(using: .png, properties: [:]) else { return }
+            try png.write(to: URL(fileURLWithPath: path))
             FileHandle.standardError.write(
-              "WINDOW \(w.windowNumber)\nRECT \(Int(f.origin.x)),\(Int(top)),\(Int(f.width)),\(Int(f.height))\nSCALE \(screen.backingScaleFactor)\n"
-                .data(using: .utf8)!)
+              "wrote \(path) (\(shot.width)x\(shot.height))\n".data(using: .utf8)!)
+        } catch {
+            let msg = """
+            capture failed: \(error.localizedDescription)
+            add Runbranch.app under System Settings > Privacy & Security > Screen Recording
+
+            """
+            FileHandle.standardError.write(msg.data(using: .utf8)!)
         }
-        try? await Task.sleep(for: .seconds(seconds))
-        NSApp.terminate(nil)
     }
 }
 
@@ -1025,8 +1056,8 @@ struct ContentView: View {
             // before anything is drawn rather than showing as a phantom run.
             _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
-            if let hold = Screenshot.holdSeconds {
-                await Screenshot.announceAndHold(hold)
+            if let path = Screenshot.path {
+                await Screenshot.captureAndQuit(to: path)
             }
         }
         .onChange(of: searchFocused) { _, focused in
@@ -1273,7 +1304,15 @@ struct ContentView: View {
         Task {
             let found = await Task.detached { Engine.projects() }.value
             projects = found
-            if selectedProject == nil { selectedProject = found.first?.id }
+            if selectedProject == nil {
+                // For a screenshot, show a project that is actually running —
+                // the status strip is the most informative thing on screen and
+                // an idle project hides it.
+                let live = Screenshot.path != nil
+                    ? found.first(where: { Engine.state($0.id).running })
+                    : nil
+                selectedProject = live?.id ?? found.first?.id
+            }
             await refreshLive()
             await reload()
             // Warm every other project in the background so the second switch,

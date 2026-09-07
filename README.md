@@ -7,6 +7,8 @@ your work, without touching your checkout.
 
 A native macOS app for the thing every developer improvises badly.
 
+<img src="docs/img/screenshot.png" width="760" alt="Runbranch showing a running branch with its uptime, health and port">
+
 ---
 
 ## Why
