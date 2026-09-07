@@ -1084,8 +1084,10 @@ struct ContentView: View {
             .opacity(0)
         }
         .toolbar {
-            // Its own item, so it reads as a separate control rather than part
-            // of the filter/refresh cluster.
+            // macOS 26 gives toolbar items in one logical grouping a SHARED
+            // glass background, which is why search kept being drawn into the
+            // filter cluster even as its own ToolbarItem with a spacer beside
+            // it. sharedBackgroundVisibility(.hidden) is the explicit opt-out.
             ToolbarItem(placement: .primaryAction) {
                 // macOS has no .searchToolbarBehavior(.minimize) — that is iOS
                 // only — so the collapse is done by hand.
@@ -1114,10 +1116,9 @@ struct ContentView: View {
                     .help("Search branches")
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
 
-            // A real spacer, so search reads as its own control instead of
-            // being drawn into the filter/refresh group beside it.
-            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarSpacer(.flexible, placement: .primaryAction)
 
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
