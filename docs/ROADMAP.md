@@ -20,7 +20,9 @@ demo a colleague's branch without reading anything.
 | 1.2 | **Onboarding** — first-run splash, then a scan with progress that proposes projects | The blank first launch is the worst moment in the app. `propose` already does the hard part |
 | 1.3 | **Sidebar sections** — Favourites, then projects; hover `+` to add; drag to pin | Four projects fit in one list. Twenty do not |
 | 1.4 | **Menus** — About, Preferences, Scan for projects, Reveal config | An app with no menu bar items reads as unfinished, and About is where the licence and version belong |
-| 1.5 | **Docs** — README with the logo and screenshot, config reference, contributing | It is going public |
+| 1.5 | **Docs** — README with the logo and screenshot, config reference | It is going public |
+| 1.7 | ✅ **Tests** — `tests/engine.sh`, 34 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
+| 1.8 | ✅ **Open-source guidelines** — CONTRIBUTING, CODE_OF_CONDUCT, TESTING, issue and PR templates | A repo without them asks every contributor to guess |
 | 1.6 | **Design and code review** — commonise, refactor, delete | Two months of accreted decisions want one pass |
 
 ---

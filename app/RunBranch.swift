@@ -918,6 +918,125 @@ enum Screenshot {
     }
 }
 
+/// A searchable grid of symbols, the way the SF Symbols picker works: icons
+/// only, no names. A `Picker` listing names was unreadable — you scan icons by
+/// shape, and the label just gets in the way.
+///
+/// The list is curated rather than exhaustive. There is no public API to
+/// enumerate SF Symbols, and a few hundred relevant ones beat ten thousand
+/// unsearchable ones.
+struct SymbolPicker: View {
+    @Binding var selection: String
+    @State private var query = ""
+    @State private var open = false
+
+    private static let all: [String] = [
+        // projects and things
+        "shippingbox", "cube", "cube.transparent", "square.stack.3d.up", "square.stack",
+        "folder", "folder.badge.gearshape", "tray.full", "archivebox", "briefcase",
+        // web and network
+        "globe", "globe.americas", "network", "antenna.radiowaves.left.and.right",
+        "wifi", "link", "cloud", "icloud", "point.3.connected.trianglepath.dotted",
+        // servers and data
+        "server.rack", "externaldrive", "internaldrive", "cylinder.split.1x2",
+        "chart.bar.doc.horizontal", "tablecells", "list.bullet.rectangle",
+        // building and business
+        "building.2", "building.columns", "storefront", "cart", "creditcard",
+        "banknote", "chart.line.uptrend.xyaxis", "chart.pie", "percent",
+        // design
+        "paintpalette", "paintbrush", "swatchpalette", "eyedropper", "ruler",
+        "square.on.circle", "circle.hexagongrid", "wand.and.stars", "sparkles",
+        // code and tools
+        "terminal", "curlybraces", "chevron.left.forwardslash.chevron.right",
+        "hammer", "wrench.and.screwdriver", "gearshape.2", "cpu", "memorychip",
+        "ladybug", "testtube.2", "flask",
+        // documents and writing
+        "doc.text", "doc.richtext", "book", "books.vertical", "text.book.closed",
+        "newspaper", "pencil.and.outline", "signature",
+        // communication
+        "envelope", "bubble.left.and.bubble.right", "megaphone", "bell",
+        "phone", "video", "person.2", "person.3",
+        // media
+        "photo", "photo.stack", "film", "music.note", "waveform", "mic",
+        "play.rectangle", "camera",
+        // navigation and places
+        "map", "location", "signpost.right", "airplane", "car", "tram",
+        // nature and misc
+        "leaf", "tree", "flame", "drop", "bolt", "sun.max", "moon.stars",
+        "star", "heart", "flag", "tag", "bookmark", "pin", "key", "lock",
+        "shield", "checkmark.seal", "target", "scope", "puzzlepiece",
+        "gamecontroller", "dice", "crown", "gift", "cup.and.saucer", "fork.knife",
+    ]
+
+    private var matches: [String] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return Self.all }
+        return Self.all.filter { $0.contains(q) }
+    }
+
+    var body: some View {
+        Button {
+            open = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: selection.isEmpty ? "shippingbox" : selection)
+                    .font(.system(size: 14))
+                    .frame(width: 20)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.bordered)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    TextField("Search", text: $query)
+                        .textFieldStyle(.plain)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(.quaternary.opacity(0.5), in: Capsule())
+                .padding(10)
+
+                Divider()
+
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4),
+                                             count: 8), spacing: 4) {
+                        ForEach(matches, id: \.self) { name in
+                            Button {
+                                selection = name
+                                open = false
+                                query = ""
+                            } label: {
+                                Image(systemName: name)
+                                    .font(.system(size: 15))
+                                    .frame(width: 34, height: 30)
+                                    .background(name == selection
+                                                ? AnyShapeStyle(Color.accentColor.opacity(0.25))
+                                                : AnyShapeStyle(.clear),
+                                                in: RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .help(name)      // the name is there if you want it
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(height: 240)
+
+                if matches.isEmpty {
+                    Text("Nothing matches “\(query)”")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .padding(.bottom, 10)
+                }
+            }
+            .frame(width: 330)
+        }
+    }
+}
+
 /// Editing a project's config without opening a text editor.
 ///
 /// The engine owns the file: this reads `get` and writes changed keys through
@@ -933,14 +1052,6 @@ struct ProjectEditor: View {
     @State private var saving = false
     @State private var problem: String?
 
-    /// A short list rather than every SF Symbol: enough to cover the kinds of
-    /// project people have, and pickable without a search field.
-    private static let symbols = [
-        "shippingbox", "building.2", "server.rack", "globe", "cart",
-        "paintpalette", "books.vertical", "building.columns", "hammer",
-        "wrench.and.screwdriver", "cube", "square.stack.3d.up", "terminal",
-        "chart.line.uptrend.xyaxis", "envelope", "bubble.left.and.bubble.right",
-    ]
     private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
 
     private func bind(_ key: String) -> Binding<String> {
@@ -978,10 +1089,8 @@ struct ProjectEditor: View {
                 Form {
                     Section("Project") {
                         TextField("Name", text: bind("NAME"))
-                        Picker("Sidebar icon", selection: bind("SYMBOL")) {
-                            ForEach(Self.symbols, id: \.self) { s in
-                                Label(s, systemImage: s).tag(s)
-                            }
+                        LabeledContent("Sidebar icon") {
+                            SymbolPicker(selection: bind("SYMBOL"))
                         }
                         TextField("Default branch", text: bind("DEFAULT_BRANCH"))
                         LabeledContent("Repository") {

@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# Engine tests. Every case here corresponds to a bug that actually happened
+# during development, which is the only reason a test earns its keep.
+#
+#   ./tests/engine.sh          run them
+#   ./tests/engine.sh -v       show each assertion
+#
+# They run against a throwaway fixture repo and a throwaway state directory,
+# never against real projects.
+
+set -uo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENGINE="$REPO/runbranch.sh"
+VERBOSE="${1:-}"
+
+TMP="$(mktemp -d)"
+export RB_HOME="$TMP/state"
+export RB_PROJECTS_DIR="$TMP/projects"
+export RB_MY_EMAILS="tester@example.com"
+mkdir -p "$RB_PROJECTS_DIR" "$RB_HOME"
+trap 'rm -rf "$TMP"' EXIT
+
+PASS=0; FAIL=0
+ok()   { PASS=$((PASS+1)); [ "$VERBOSE" = -v ] && printf '  ok    %s\n' "$1"; return 0; }
+bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && printf '        %s\n' "$2"; return 0; }
+is()   { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$3] got [$2]"; }
+has()  { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "[$2] does not contain [$3]" ;; esac; }
+
+# --- fixture ---------------------------------------------------------------
+FIX="$TMP/fixture"
+mkdir -p "$FIX/public"
+git -C "$FIX" init -q -b main
+git -C "$FIX" config user.email tester@example.com
+git -C "$FIX" config user.name Tester
+echo hi > "$FIX/public/index.html"
+git -C "$FIX" add -A
+git -C "$FIX" commit -q -m "feat: the first commit"
+git -C "$FIX" checkout -q -b feature/one
+echo more >> "$FIX/public/index.html"
+git -C "$FIX" commit -qam "feat(one): a second commit on a branch"
+git -C "$FIX" checkout -q main
+
+cat > "$RB_PROJECTS_DIR/fixture.conf" <<CONF
+# A comment that must survive every write.
+NAME="Fixture"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4321:/:python3 -m http.server 4321 --directory public"
+SYMBOL="cube"
+CONF
+
+echo "==> projects and config"
+is "lists the fixture"         "$("$ENGINE" projects | cut -f1)" "fixture"
+is "reads the display name"    "$("$ENGINE" get fixture | awk -F'\t' '$1=="NAME"{print $2}')" "Fixture"
+is "reads the symbol"          "$("$ENGINE" get fixture | awk -F'\t' '$1=="SYMBOL"{print $2}')" "cube"
+is "doctor passes"             "$("$ENGINE" doctor fixture >/dev/null 2>&1; echo $?)" "0"
+
+echo "==> branch data"
+is "finds both branches"       "$("$ENGINE" branches fixture | wc -l | tr -d ' ')" "2"
+is "marks the default branch"  "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $8}')" "1"
+is "attributes them to me"     "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $4}')" "me"
+# Regression: `git for-each-ref` does not interpret \t, so the row used to
+# collapse into a single field.
+is "row has every column"      "$("$ENGINE" branches fixture | head -1 | awk -F'\t' '{print NF}')" "12"
+has "carries the commit subject" "$("$ENGINE" branches fixture | awk -F'\t' '$1=="feature/one"{print $11}')" "a second commit"
+
+echo "==> set preserves the file"
+BEFORE_COMMENTS=$(grep -c '^#' "$RB_PROJECTS_DIR/fixture.conf")
+"$ENGINE" set fixture SYMBOL "globe" >/dev/null 2>&1
+is "writes a simple key"       "$("$ENGINE" get fixture | awk -F'\t' '$1=="SYMBOL"{print $2}')" "globe"
+is "keeps the comments"        "$(grep -c '^#' "$RB_PROJECTS_DIR/fixture.conf")" "$BEFORE_COMMENTS"
+"$ENGINE" set fixture NEWKEY "added" >/dev/null 2>&1
+is "appends an absent key"     "$(grep -c '^NEWKEY=' "$RB_PROJECTS_DIR/fixture.conf")" "1"
+
+# Regression: the first version passed the value through `awk -v`, which cannot
+# carry a newline, and emptied the file.
+echo "==> set survives a multi-line value"
+MULTI="$(printf 'web:4321:/:python3 -m http.server 4321\001api:4322:/:python3 -m http.server 4322')"
+"$ENGINE" set fixture TARGETS "$MULTI" >/dev/null 2>&1
+is "both targets present"      "$("$ENGINE" presets fixture | wc -l | tr -d ' ')" "3"
+is "file is not empty"         "$([ -s "$RB_PROJECTS_DIR/fixture.conf" ] && echo yes)" "yes"
+is "still loads"               "$("$ENGINE" doctor fixture >/dev/null 2>&1; echo $?)" "0"
+
+# Regression: a bad write used to leave a broken config behind.
+echo "==> set reverts a config that will not load"
+cp "$RB_PROJECTS_DIR/fixture.conf" "$TMP/before.conf"
+"$ENGINE" set fixture REPO "" >/dev/null 2>&1
+is "refuses the write"         "$(diff -q "$TMP/before.conf" "$RB_PROJECTS_DIR/fixture.conf" >/dev/null; echo $?)" "0"
+
+echo "==> presets and targets"
+"$ENGINE" set fixture TARGETS "web:4321:/:true" >/dev/null 2>&1
+"$ENGINE" set fixture ALWAYS "" >/dev/null 2>&1
+is "one target, one preset"    "$("$ENGINE" presets fixture | tr -d '\n')" "web"
+
+echo "==> paths"
+is "paths reports five fields" "$("$ENGINE" paths fixture | awk -F'\t' '{print NF}')" "5"
+is "and six with a ref"        "$("$ENGINE" paths fixture main | awk -F'\t' '{print NF}')" "6"
+
+echo "==> state when nothing runs"
+is "reports idle"              "$("$ENGINE" state fixture)" "idle"
+is "status exits non-zero"     "$("$ENGINE" status fixture >/dev/null 2>&1; echo $?)" "1"
+
+# The presets case above left TARGETS pointing at `true`, which exits at once.
+# Put a real server back before testing a real run.
+"$ENGINE" set fixture TARGETS "web:4321:/:python3 -m http.server 4321 --directory public" >/dev/null 2>&1
+
+echo "==> worktree lifecycle"
+"$ENGINE" run fixture feature/one web >/dev/null 2>&1
+is "state says running"        "$("$ENGINE" state fixture | head -1 | cut -f1)" "run"
+is "the branch is recorded"    "$("$ENGINE" state fixture | head -1 | cut -f2)" "feature/one"
+is "the target answers"        "$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://localhost:4321/)" "200"
+is "the worktree is detached"  "$(git -C "$FIX" worktree list | grep -c 'detached HEAD')" "1"
+is "the checkout did not move" "$(git -C "$FIX" rev-parse --abbrev-ref HEAD)" "main"
+"$ENGINE" stop fixture >/dev/null 2>&1
+sleep 1
+is "stops cleanly"             "$("$ENGINE" state fixture)" "idle"
+is "the port is released"      "$(lsof -nP -iTCP:4321 -sTCP:LISTEN -t 2>/dev/null | head -1)" ""
+
+echo "==> reclaim clears stale state"
+"$ENGINE" run fixture main web >/dev/null 2>&1
+PGID=$("$ENGINE" state fixture | awk -F'\t' '$1=="target"{print $5}')
+kill -KILL -"$PGID" 2>/dev/null
+sleep 1
+# `state` already reports idle once the pids are gone -- it checks liveness,
+# not the file. What is stale is the state FILE, which is what reclaim removes.
+is "the state file lingers"    "$([ -f "$RB_HOME/fixture/state" ] && echo yes)" "yes"
+is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
+"$ENGINE" reclaim fixture >/dev/null 2>&1
+is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
+
+echo "==> propose reads a repo"
+has "detects the default branch" "$("$ENGINE" propose "$FIX")" 'DEFAULT_BRANCH="main"'
+has "names the repo"             "$("$ENGINE" propose "$FIX")" "REPO="
+# Regression: with no lockfile the guess used to be a command that does not
+# exist, which failed minutes into a run instead of immediately.
+has "admits when it cannot tell" "$("$ENGINE" propose "$FIX")" "REPLACE-ME"
+
+echo
+printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" = 0 ] || exit 1
