@@ -1,4 +1,4 @@
-<img src="docs/img/mark-256.png" width="72" alt="">
+<img src="docs/img/mark-256.png" width="84" alt="">
 
 # Runbranch
 
@@ -178,7 +178,8 @@ runbranch.sh          the engine: git, install, infra, servers. No UI of its own
 app/RunBranch.swift   the front end
 projects/*.conf       one file per project
 make-app.sh           builds Runbranch.app
-make-icons.sh         the graphic set, from two SVGs
+make-icons.sh         the graphic set, from assets/mark-source.png
+tools/                two small Swift helpers: trim/centre, and WebKit rendering
 docs/config.md        every config key
 docs/PLAN.md          design notes and roadmap
 ```

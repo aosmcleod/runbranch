@@ -31,7 +31,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # --- icon -----------------------------------------------------------------
-# See make-icons.sh: two SVG sources, appearance variants via actool, no GUI.
+# See make-icons.sh: one PNG source, cleaned and optically centred, tiles
+# rendered through WebKit, appearance variants via actool. No GUI, no design tool.
 "$REPO/make-icons.sh" "$APP"
 
 # --- binary ---------------------------------------------------------------
