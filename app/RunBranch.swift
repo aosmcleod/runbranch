@@ -1084,42 +1084,10 @@ struct ContentView: View {
             .opacity(0)
         }
         .toolbar {
-            // macOS 26 gives toolbar items in one logical grouping a SHARED
-            // glass background, which is why search kept being drawn into the
-            // filter cluster even as its own ToolbarItem with a spacer beside
-            // it. sharedBackgroundVisibility(.hidden) is the explicit opt-out.
-            ToolbarItem(placement: .primaryAction) {
-                // macOS has no .searchToolbarBehavior(.minimize) — that is iOS
-                // only — so the collapse is done by hand.
-                if searchOpen {
-                    HStack(spacing: 4) {
-                        TextField("Search branches", text: $query)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 170)
-                            .focused($searchFocused)
-                            .onExitCommand { closeSearch() }
-                        // An explicit way out. Relying on focus alone left the
-                        // field stuck open, because a toolbar TextField does
-                        // not reliably report losing focus.
-                        Button(action: closeSearch) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Close search")
-                    }
-                } else {
-                    Button {
-                        searchOpen = true
-                        searchFocused = true
-                    } label: { Image(systemName: "magnifyingglass") }
-                    .help("Search branches")
-                }
-            }
-            .sharedBackgroundVisibility(.hidden)
-
-            ToolbarSpacer(.flexible, placement: .primaryAction)
-
+            // Finder's order: the action group, then a gap, then search on its
+            // own. Items in one logical grouping SHARE a glass background, and
+            // a ToolbarSpacer is what splits them into separate pills — search
+            // keeps its glass, it just stops sharing the group's.
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     Toggle("Only my branches", isOn: $mineOnly)
@@ -1191,6 +1159,37 @@ struct ContentView: View {
                 } label: { Image(systemName: "ellipsis") }
                 .menuIndicator(.hidden)
                 .help("More actions")
+            }
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItem(placement: .primaryAction) {
+                // macOS has no .searchToolbarBehavior(.minimize) — that is iOS
+                // only — so the collapse is done by hand.
+                if searchOpen {
+                    HStack(spacing: 4) {
+                        TextField("Search branches", text: $query)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 170)
+                            .focused($searchFocused)
+                            .onExitCommand { closeSearch() }
+                        // An explicit way out. Relying on focus alone left the
+                        // field stuck open, because a toolbar TextField does
+                        // not reliably report losing focus.
+                        Button(action: closeSearch) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Close search")
+                    }
+                } else {
+                    Button {
+                        searchOpen = true
+                        searchFocused = true
+                    } label: { Image(systemName: "magnifyingglass") }
+                    .help("Search branches")
+                }
             }
         }
         .sheet(isPresented: $showingRun) {
