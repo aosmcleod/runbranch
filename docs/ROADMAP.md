@@ -17,7 +17,7 @@ demo a colleague's branch without reading anything.
 | | Item | Why |
 |---|---|---|
 | 1.1 | ✅ **Project editing in the app** — every config key, in a sheet, via engine `get`/`set` | Editing a `.conf` by hand was the largest remaining gap |
-| 1.2 | **Onboarding** — first-run splash, then a scan with progress that proposes projects | The blank first launch is the worst moment in the app. `propose` already does the hard part |
+| 1.2 | ✅ **Onboarding** — welcome screen when nothing is declared, then a scan that proposes projects with progress | The blank first launch was the worst moment in the app |
 | 1.3 | ✅ **Sidebar sections** — Running, Favourites, Projects; hover `+` to add; pin from the context menu | Four projects fit in one list. Twenty do not |
 | 1.4 | **Menus** — About, Preferences, Scan for projects, Reveal config | An app with no menu bar items reads as unfinished, and About is where the licence and version belong |
 | 1.5 | **Docs** — README with the logo and screenshot, config reference | It is going public |
@@ -36,7 +36,8 @@ demo a colleague's branch without reading anything.
 | 2.3 | **Notifications** — ready, failed, and "still running after an hour" | The run outlives the window on purpose; it should be able to say so |
 | 2.4 | **Log improvements** — follow toggle, wrap toggle, jump to first error | The viewer works; it does not yet help you read |
 | 2.5 | **Disk usage panel** — size per worktree, total reclaimable, merged-branch prune | 1.2GB each, and nothing currently tells you the total |
-| 2.6 | **Quick Look the diff** — space on a branch shows what changed against the default | Deciding whether to run a branch is the step before running it |
+| 2.6 | **Remove a project** — from the right-click menu, with a confirmation that says what it does and does not delete: the config goes, the repository does not | Adding is in the app; removing still means deleting a file by hand |
+| 2.7 | **Quick Look the diff** — space on a branch shows what changed against the default | Deciding whether to run a branch is the step before running it |
 
 ---
 
