@@ -801,6 +801,64 @@ struct ProjectSnapshot {
     }
 }
 
+/// Screenshots of this window kept catching whatever was on the active Space
+/// instead. Two dead ends before this worked: `cacheDisplay` draws the view
+/// tree but cannot composite vibrancy or SwiftUI's layers, so the sidebar came
+/// back blank; and ScreenCaptureKit needs Screen Recording permission, which
+/// an ad-hoc-signed binary launched from a terminal is never prompted for.
+///
+/// So the app does not photograph itself. `--hold <seconds>` opens the window,
+/// prints its window number, and waits — and the caller uses `screencapture
+/// -l`, which already has the permission. The window number is the piece only
+/// the app knows.
+enum Screenshot {
+    static var holdSeconds: Double? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "--hold"), i + 1 < a.count else { return nil }
+        return Double(a[i + 1])
+    }
+
+    @MainActor
+    static func announceAndHold(_ seconds: Double) async {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first {
+            // A window belongs to one Space, and a fullscreen app's Space
+            // excludes it — which is why every capture caught whatever was
+            // fullscreen instead. canJoinAllSpaces puts it on whichever Space
+            // is active, so it is composited and can be photographed.
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            w.level = .floating
+            // Place it deliberately. Launched from a shell the window landed
+            // mostly off the right edge, so the rect to capture ran past the
+            // display and screencapture refused it.
+            if let screen = NSScreen.main {
+                let size = NSSize(width: 1000, height: 620)
+                let vf = screen.visibleFrame
+                w.setFrame(NSRect(x: vf.midX - size.width / 2,
+                                  y: vf.midY - size.height / 2,
+                                  width: size.width, height: size.height),
+                           display: true)
+            }
+            w.makeKeyAndOrderFront(nil)
+        }
+        try? await Task.sleep(for: .seconds(1.5))          // let it lay out
+        if let w = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first,
+           let screen = w.screen ?? NSScreen.main {
+            // Report the frame in screencapture's coordinates: points, origin
+            // top-left. Cocoa's origin is bottom-left, hence the flip. A
+            // window-specific capture needs window-list access the caller may
+            // not have, but a full-screen grab cropped to this rect does not.
+            let f = w.frame
+            let top = screen.frame.height - f.origin.y - f.height
+            FileHandle.standardError.write(
+              "WINDOW \(w.windowNumber)\nRECT \(Int(f.origin.x)),\(Int(top)),\(Int(f.width)),\(Int(f.height))\nSCALE \(screen.backingScaleFactor)\n"
+                .data(using: .utf8)!)
+        }
+        try? await Task.sleep(for: .seconds(seconds))
+        NSApp.terminate(nil)
+    }
+}
+
 // MARK: - Main
 
 struct ProjectRow: View {
@@ -963,6 +1021,9 @@ struct ContentView: View {
             // before anything is drawn rather than showing as a phantom run.
             _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
+            if let hold = Screenshot.holdSeconds {
+                await Screenshot.announceAndHold(hold)
+            }
         }
         .onChange(of: searchFocused) { _, focused in
             if !focused && query.isEmpty { searchOpen = false }
