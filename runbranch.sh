@@ -1140,6 +1140,75 @@ add_project() {
   printf '%s\t%s\n' "$name" "$out"
 }
 
+# Rewrite one key in a project's local conf, preserving everything else --
+# including comments, which are usually the only explanation of why a value is
+# what it is.
+#
+# Done in python rather than awk. The first version passed the value through
+# `awk -v`, which cannot carry a newline, so writing a multi-line TARGETS
+# emptied the file. A config is not something to be clever with, so it is also
+# backed up before writing and restored if the result will not parse.
+set_project_key() {
+  local name="$1" key="$2" value="$3"
+  local file="$PROJECTS_DIR/$name.conf"
+  [ -f "$file" ] || die "No config at $file." "runbranch.sh add <repo>"
+  case "$key" in
+    [A-Z][A-Z_]*) ;;
+    *) die "\"$key\" is not a config key." "runbranch.sh get $name" ;;
+  esac
+
+  cp "$file" "$file.bak"
+  if ! KEY="$key" VALUE="$value" python3 - "$file" <<'PYEOF'
+import os, re, sys
+
+path  = sys.argv[1]
+key   = os.environ["KEY"]
+# \001 stands in for a newline on the way through the shell.
+value = os.environ["VALUE"].replace("\001", "\n")
+
+lines = open(path).read().split("\n")
+out, i, replaced = [], 0, False
+assign = re.compile(rf'^{re.escape(key)}=')
+
+while i < len(lines):
+    line = lines[i]
+    if assign.match(line):
+        out.append(f'{key}="{value}"')
+        replaced = True
+        # Skip any continuation lines: a value whose opening quote is not
+        # closed on the same line runs on until one is.
+        rest = line[len(key) + 1:]
+        if rest.startswith('"') and not re.search(r'"\s*$', rest[1:] or '"'):
+            i += 1
+            while i < len(lines) and not re.search(r'"\s*$', lines[i]):
+                i += 1
+        i += 1
+        continue
+    out.append(line)
+    i += 1
+
+if not replaced:
+    while out and out[-1] == "":
+        out.pop()
+    out.append(f'{key}="{value}"')
+    out.append("")
+
+open(path, "w").write("\n".join(out))
+PYEOF
+  then
+    mv "$file.bak" "$file"
+    die "Could not rewrite $key; the config is unchanged." "edit $file"
+  fi
+
+  # Prove it still parses before believing the write.
+  if ! ( load_project "$name" >/dev/null 2>&1 ); then
+    mv "$file.bak" "$file"
+    die "Setting $key produced a config that will not load; reverted." "edit $file"
+  fi
+  rm -f "$file.bak"
+  ok "$key set in $file"
+}
+
 # Git repos under a directory that are not already declared.
 scan_repos() {
   local root="${1:-$HOME/Development}" d name
@@ -1433,6 +1502,8 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh projects
   runbranch.sh branches <project>
   runbranch.sh presets <project>
+  runbranch.sh get <project>                   every editable field
+  runbranch.sh set <project> <KEY> [value]     rewrite one key in the local conf
   runbranch.sh paths <project> [<ref>]
   runbranch.sh reclaim [<project>]     reclaim ports and clear state a crash left
   runbranch.sh state <project>
@@ -1454,6 +1525,38 @@ main() {
   case "${1:-menu}" in
     projects) list_projects ;;
     branches) need_project "${2:-}"; collect_branch_data /dev/stdout ;;
+    get)
+      # Every editable field of a project, as key<TAB>value lines. The app reads
+      # this rather than parsing .conf itself, so the file stays the engine's
+      # business and stays plain shell.
+      need_project "${2:-}"
+      printf 'NAME\t%s\n'            "$NAME"
+      printf 'REPO\t%s\n'            "$REPO"
+      printf 'DEFAULT_BRANCH\t%s\n'  "$DEFAULT_BRANCH"
+      printf 'SYMBOL\t%s\n'          "${SYMBOL:-shippingbox}"
+      printf 'INSTALL\t%s\n'         "$INSTALL"
+      printf 'COPY_FILES\t%s\n'      "$COPY_FILES"
+      printf 'COMPOSE_SERVICES\t%s\n' "$COMPOSE_SERVICES"
+      printf 'COMPOSE_PROJECT\t%s\n' "$COMPOSE_PROJECT"
+      printf 'MIGRATE\t%s\n'         "$MIGRATE"
+      printf 'SEED\t%s\n'            "$SEED"
+      printf 'RUNTIME\t%s\n'         "$RUNTIME"
+      printf 'DB_URL_VARS\t%s\n'     "$DB_URL_VARS"
+      printf 'ALWAYS\t%s\n'          "$ALWAYS"
+      printf 'PRESETS\t%s\n'         "$PRESETS"
+      printf 'OPENS_ITSELF\t%s\n'    "$OPENS_ITSELF"
+      printf 'PROCFILE\t%s\n'        "$PROCFILE"
+      printf 'IN_REPO\t%s\n'         "$IN_REPO_CONFIG"
+      # TARGETS last: it is the only multi-line value, so nothing follows it.
+      printf 'TARGETS\t%s\n'         "$(printf '%s' "$TARGETS" | tr '\n' '\001')"
+      ;;
+    set)
+      # Rewrite one key in the LOCAL conf. The in-repo .runbranch is never
+      # touched: it belongs to the repo and may be someone else's to change.
+      [ $# -ge 3 ] || { usage; exit 2; }
+      load_project "$2"
+      set_project_key "$2" "$3" "${4:-}"
+      ;;
     paths)
       # Where things live, so the app never hardcodes the layout.
       #   worktrees <TAB> logs <TAB> config <TAB> repo <TAB> owner/repo [<TAB> worktree-for-ref]
