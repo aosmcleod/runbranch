@@ -1045,12 +1045,10 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
-        // The toolbar paints an opaque band across the whole window width,
-        // including over the sidebar — which is what put a grey block above a
-        // translucent sidebar and a seam beside the title. Finder's sidebar
-        // material runs unbroken to the top because its toolbar has no
-        // background of its own.
-        .toolbarBackground(.hidden, for: .windowToolbar)
+        // Hiding the toolbar background removed the seam above the sidebar but
+        // left content scrolling visibly under the title. `.automatic` gives
+        // both: nothing at rest, a material once something scrolls beneath it.
+        .toolbarBackgroundVisibility(.automatic, for: .windowToolbar)
         .task {
             // Reclaim before reading state, so a crash's leftovers are gone
             // before anything is drawn rather than showing as a phantom run.
@@ -1116,6 +1114,10 @@ struct ContentView: View {
                     .help("Search branches")
                 }
             }
+
+            // A real spacer, so search reads as its own control instead of
+            // being drawn into the filter/refresh group beside it.
+            ToolbarSpacer(.fixed, placement: .primaryAction)
 
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {

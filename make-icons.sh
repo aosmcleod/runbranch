@@ -36,7 +36,7 @@ ICON="$REPO/assets/AppIcon.icon"
 SRC="$REPO/assets/mark-source.png"
 
 ALPHA_CUTOFF=0.22     # below this, a pixel is fringe rather than soft edge
-ICON_FRACTION=0.60    # the glyph inside the system's tile. Apple's own icons put
+ICON_FRACTION=0.72    # the glyph inside the system's tile. Apple's own icons put
                       # roughly this much glyph inside a tile that fills the
                       # canvas; 86% left almost no margin at all
 MARK_FRACTION=0.94    # the standalone mark keeps a little breathing room, and

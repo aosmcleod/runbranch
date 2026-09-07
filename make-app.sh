@@ -58,6 +58,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconName</key>          <string>AppIcon</string>
   <key>NSHighResolutionCapable</key>   <true/>
   <key>LSMinimumSystemVersion</key>    <string>14.0</string>
+  <!-- Health checks talk to http://localhost. Without this, App Transport
+       Security blocks them and every target sits at "starting" forever, while
+       the engine (which uses curl) reports it healthy. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>  <true/>
+  </dict>
   <key>FLScriptPath</key>              <string>$SCRIPT</string>
 </dict>
 </plist>
