@@ -928,8 +928,6 @@ struct ContentView: View {
     @State private var showAllRemote = false
     @State private var mineOnly = false
     @State private var query = ""
-    @State private var searchOpen = false
-    @FocusState private var searchFocused: Bool
 
     @State private var sheetTitle = ""
     @State private var showingRun = false
@@ -1058,11 +1056,6 @@ struct ContentView: View {
                 await Screenshot.captureAndQuit(to: path)
             }
         }
-        .onChange(of: searchFocused) { _, focused in
-            // Best effort: collapse an empty field that has lost focus. The
-            // close button is what actually guarantees a way out.
-            if !focused && query.isEmpty { searchOpen = false }
-        }
         .onChange(of: selectedProject) { _, _ in Task { await reload() } }
         .background {
             // Shortcuts with no visible control of their own.
@@ -1078,16 +1071,17 @@ struct ContentView: View {
                 }
                 .keyboardShortcut(".", modifiers: .command)
 
-                Button("") { searchOpen = true; searchFocused = true }
-                    .keyboardShortcut("f", modifiers: .command)
             }
             .opacity(0)
         }
+        // Native search. On macOS this becomes an NSSearchToolbarItem, which
+        // collapses to a magnifying glass in its own glass pill and expands
+        // when clicked — Finder's behaviour, and the system's job. I hand-rolled
+        // a replica for three rounds on the wrong belief that it would not
+        // collapse; the replica needed its own close button and could never sit
+        // in the right place.
+        .searchable(text: $query, placement: .toolbar, prompt: "Search branches")
         .toolbar {
-            // Finder's order: the action group, then a gap, then search on its
-            // own. Items in one logical grouping SHARE a glass background, and
-            // a ToolbarSpacer is what splits them into separate pills — search
-            // keeps its glass, it just stops sharing the group's.
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
                     Toggle("Only my branches", isOn: $mineOnly)
@@ -1161,36 +1155,6 @@ struct ContentView: View {
                 .help("More actions")
             }
 
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-
-            ToolbarItem(placement: .primaryAction) {
-                // macOS has no .searchToolbarBehavior(.minimize) — that is iOS
-                // only — so the collapse is done by hand.
-                if searchOpen {
-                    HStack(spacing: 4) {
-                        TextField("Search branches", text: $query)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 170)
-                            .focused($searchFocused)
-                            .onExitCommand { closeSearch() }
-                        // An explicit way out. Relying on focus alone left the
-                        // field stuck open, because a toolbar TextField does
-                        // not reliably report losing focus.
-                        Button(action: closeSearch) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Close search")
-                    }
-                } else {
-                    Button {
-                        searchOpen = true
-                        searchFocused = true
-                    } label: { Image(systemName: "magnifyingglass") }
-                    .help("Search branches")
-                }
-            }
         }
         .sheet(isPresented: $showingRun) {
             RunSheet(runner: runner, title: sheetTitle) {
@@ -1364,12 +1328,6 @@ struct ContentView: View {
             selection = snap.branches.first(where: { $0.mine && $0.pr != .merged })?.ref
                      ?? snap.branches.first(where: { $0.isDefault })?.ref
         }
-    }
-
-    private func closeSearch() {
-        query = ""
-        searchFocused = false
-        searchOpen = false
     }
 
     private func cachedPaths(_ p: String) -> [String] { cache[p]?.paths ?? Engine.paths(p) }
