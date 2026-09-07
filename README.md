@@ -179,10 +179,15 @@ app/RunBranch.swift   the front end
 projects/*.conf       one file per project
 make-app.sh           builds Runbranch.app
 make-icons.sh         the graphic set, from assets/mark-source.png
-tools/                two small Swift helpers: trim/centre, and WebKit rendering
+tools/                trim/centre, WebKit render, crop, demo data, screenshots
 docs/config.md        every config key
 docs/PLAN.md          design notes and roadmap
 ```
+
+Nothing generated is committed. `Runbranch.app`, `build/` and `demo/` are all
+produced by the scripts and gitignored — the repo carries source, one logo
+source PNG, and the one mark size the README displays.
+
 
 ## Licence
 

@@ -839,16 +839,6 @@ demo_running() {
   return 1
 }
 
-# Every live target's URL, comma separated — what "Open" offers.
-running_urls() {
-  local t port out=''
-  for t in $S_TARGETS; do
-    port="$(target_field "$t" port)"
-    [ -n "$port" ] && out="$out,http://localhost:$port"
-  done
-  printf '%s' "${out#,}"
-}
-
 start_run() {
   local wt="$1" ref="$2" preset="$3" targets="$4"
   local t pids='' named='' rc url health port first=''

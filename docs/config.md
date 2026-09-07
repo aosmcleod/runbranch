@@ -55,6 +55,15 @@ obvious blank rather than a plausible command that fails minutes later.
 In the app it is **Add project…** in the `•••` menu, which then opens the file
 so you can correct the guesses.
 
+### Filtering, in the app
+
+The filter menu hides by default: merged branches, anything older than a week,
+and remote branches without an open pull request. It can also show **only your
+branches**, judged by the addresses in `RB_MY_EMAILS`.
+
+The default branch and whatever is currently running are never filtered out —
+hiding the thing on screen would be worse than a wide filter.
+
 ### Per-run databases
 
 Two branches with divergent migrations sharing one database is the oldest

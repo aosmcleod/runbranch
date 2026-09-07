@@ -68,7 +68,17 @@ if optical {
     // Shift by the opposite of the mass offset, in output pixels.
     ox = -(sx / sa - Double(minX + maxX) / 2) * scale
     oy =  (sy / sa - Double(minY + maxY) / 2) * scale   // CG y is flipped
-    FileHandle.standardError.write(String(format: "optical nudge %+.1f, %+.1f px\n", ox, oy).data(using: .utf8)!)
+
+    // Clamp to the margin that actually exists. At fraction 1.0 the artwork
+    // fills the canvas edge to edge, so ANY nudge pushes it off and clips it —
+    // which is exactly what happened to the standalone mark. Optical centring
+    // is only meaningful when there is somewhere to move to.
+    let marginX = (Double(size) - dw) / 2, marginY = (Double(size) - dh) / 2
+    ox = min(max(ox, -marginX), marginX)
+    oy = min(max(oy, -marginY), marginY)
+    FileHandle.standardError.write(
+      String(format: "optical nudge %+.1f, %+.1f px (margin %.0f, %.0f)\n",
+             ox, oy, marginX, marginY).data(using: .utf8)!)
 }
 out.draw(cropped, in: CGRect(x: (Double(size) - dw) / 2 + ox, y: (Double(size) - dh) / 2 + oy,
                              width: dw, height: dh))

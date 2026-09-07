@@ -895,6 +895,7 @@ struct ContentView: View {
     @State private var showMerged = false
     @State private var showOlder = false
     @State private var showAllRemote = false
+    @State private var mineOnly = false
     @State private var query = ""
     @State private var searchOpen = false
     @FocusState private var searchFocused: Bool
@@ -929,7 +930,10 @@ struct ContentView: View {
             if !q.isEmpty {
                 return b.ref.lowercased().contains(q) || b.subject.lowercased().contains(q)
             }
+            // The default branch and whatever is running are always shown:
+            // hiding the thing on screen would be worse than a wide filter.
             if b.isDefault || b.ref == state.ref { return true }
+            if mineOnly && !b.mine { return false }
             // A repo can carry hundreds of remote branches and almost none of
             // them are worth looking at. The ones with an open pull request
             // are exactly the reviewable set, so those show by default and
@@ -941,7 +945,7 @@ struct ContentView: View {
         }
     }
 
-    private var filtersActive: Bool { showMerged || showOlder || showAllRemote }
+    private var filtersActive: Bool { showMerged || showOlder || showAllRemote || mineOnly }
 
     /// ⌘1…9. Precomputed because building the key equivalents inline defeated
     /// the type checker.
@@ -1026,6 +1030,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: searchFocused) { _, focused in
+            // Best effort: collapse an empty field that has lost focus. The
+            // close button is what actually guarantees a way out.
             if !focused && query.isEmpty { searchOpen = false }
         }
         .onChange(of: selectedProject) { _, _ in Task { await reload() } }
@@ -1049,16 +1055,28 @@ struct ContentView: View {
             .opacity(0)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                // macOS has no .searchToolbarBehavior(.minimize) — that is
-                // iOS only — so the collapse is done by hand.
+            // Its own item, so it reads as a separate control rather than part
+            // of the filter/refresh cluster.
+            ToolbarItem(placement: .primaryAction) {
+                // macOS has no .searchToolbarBehavior(.minimize) — that is iOS
+                // only — so the collapse is done by hand.
                 if searchOpen {
-                    TextField("Search branches", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
-                        .focused($searchFocused)
-                        .onSubmit { searchFocused = false }
-                        .onExitCommand { query = ""; searchOpen = false }
+                    HStack(spacing: 4) {
+                        TextField("Search branches", text: $query)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 170)
+                            .focused($searchFocused)
+                            .onExitCommand { closeSearch() }
+                        // An explicit way out. Relying on focus alone left the
+                        // field stuck open, because a toolbar TextField does
+                        // not reliably report losing focus.
+                        Button(action: closeSearch) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Close search")
+                    }
                 } else {
                     Button {
                         searchOpen = true
@@ -1066,13 +1084,14 @@ struct ContentView: View {
                     } label: { Image(systemName: "magnifyingglass") }
                     .help("Search branches")
                 }
+            }
 
-                // Filters belong in the toolbar, not as checkboxes in the body:
-                // the body is content, the chrome is options.
+            ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
+                    Toggle("Only my branches", isOn: $mineOnly)
+                    Divider()
                     Toggle("Show merged", isOn: $showMerged)
                     Toggle("Show older than a week", isOn: $showOlder)
-                    Divider()
                     Toggle("Show all remote branches", isOn: $showAllRemote)
                 } label: {
                     // A plain glyph: the chevron a Menu draws by default is
@@ -1304,6 +1323,12 @@ struct ContentView: View {
             selection = snap.branches.first(where: { $0.mine && $0.pr != .merged })?.ref
                      ?? snap.branches.first(where: { $0.isDefault })?.ref
         }
+    }
+
+    private func closeSearch() {
+        query = ""
+        searchFocused = false
+        searchOpen = false
     }
 
     private func cachedPaths(_ p: String) -> [String] { cache[p]?.paths ?? Engine.paths(p) }

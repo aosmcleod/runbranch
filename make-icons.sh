@@ -33,7 +33,9 @@ SET="$BUILD/Icons.xcassets/AppIcon.appiconset"
 SRC="$REPO/assets/mark-source.png"
 
 ALPHA_CUTOFF=0.22     # below this, a pixel is fringe rather than soft edge
-TILE_FRACTION=0.68    # how much of the tile the mark occupies
+TILE_FRACTION=0.68    # how much of the app tile the mark occupies
+MARK_FRACTION=0.94    # the standalone mark keeps a little breathing room, which
+                      # also leaves the optical nudge somewhere to move to
 
 [ -f "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
 command -v swiftc >/dev/null 2>&1 || { echo "swiftc missing: xcode-select --install" >&2; exit 1; }
@@ -49,7 +51,7 @@ done
 
 echo "==> mark"
 # The canonical mark: cleaned, trimmed, optically centred, transparent.
-"$BIN/trim" "$SRC" "$REPO/assets/mark.png" 1024 1.0 "$ALPHA_CUTOFF" optical 2>&1 | sed 's/^/    /'
+"$BIN/trim" "$SRC" "$REPO/assets/mark.png" 1024 "$MARK_FRACTION" "$ALPHA_CUTOFF" optical 2>&1 | sed 's/^/    /'
 # The same, inset for use inside a tile.
 "$BIN/trim" "$SRC" "$BUILD/tile-mark.png" 1024 "$TILE_FRACTION" "$ALPHA_CUTOFF" optical >/dev/null 2>&1
 
@@ -101,10 +103,11 @@ if [ -n "$DEST" ]; then
   echo "    Assets.car + AppIcon.icns compiled into the bundle"
 fi
 
-# --- images for the README and anywhere that is not the Dock ---------------
-for px in 256 512 1024; do
-  sips -z "$px" "$px" "$REPO/assets/mark.png" --out "$REPO/docs/img/mark-$px.png" >/dev/null
-done
-sips -z 512 512 "$BUILD/icon-light.png" --out "$REPO/docs/img/icon-light-512.png" >/dev/null
-sips -z 512 512 "$BUILD/icon-dark.png"  --out "$REPO/docs/img/icon-dark-512.png"  >/dev/null
-echo "    docs/img written"
+# --- images the README actually uses --------------------------------------
+# Only these are committed. assets/mark.png is the full-size clean mark, and
+# everything else is a resize of it, so committing several sizes was storing
+# the same picture four times.
+sips -z 256 256 "$REPO/assets/mark.png" --out "$REPO/docs/img/mark-256.png" >/dev/null
+sips -z 512 512 "$BUILD/icon-light.png" --out "$BUILD/icon-light-512.png" >/dev/null
+sips -z 512 512 "$BUILD/icon-dark.png"  --out "$BUILD/icon-dark-512.png"  >/dev/null
+echo "    docs/img/mark-256.png written; tile previews in build/"
