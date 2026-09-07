@@ -55,6 +55,17 @@ obvious blank rather than a plausible command that fails minutes later.
 In the app it is **Add project…** in the `•••` menu, which then opens the file
 so you can correct the guesses.
 
+### Environment
+
+| variable | effect |
+|---|---|
+| `RB_PROJECTS_DIR` | where the `.conf` files live |
+| `RB_HOME` | where worktrees, logs, state and the PR cache live |
+| `RB_MY_EMAILS` | space-separated addresses that count as yours |
+| `RB_PR_TTL` | seconds before the pull request cache is refreshed (default 900) |
+| `RB_NO_OPEN` | set to anything to stop a run opening a browser — for tests and scripts |
+| `RB_OTHER_LIMIT` | how many of everyone else's branches to list (default 80) |
+
 ### Favourites
 
 Pinning a project puts it above the others in the sidebar. It is stored in

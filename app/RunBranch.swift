@@ -866,6 +866,17 @@ enum Screenshot {
         return a[i + 1]
     }
 
+    /// Which screen to photograph. The docs need more than one, and opening a
+    /// sheet by hand before every capture is not automation.
+    enum Scene: String { case main, settings, scan, logs }
+
+    static var scene: Scene {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "--scene"), i + 1 < a.count,
+              let s = Scene(rawValue: a[i + 1]) else { return .main }
+        return s
+    }
+
     /// Photographs its own window through ScreenCaptureKit, which captures what
     /// the window server actually composited — glass, vibrancy and all.
     ///
@@ -1472,7 +1483,6 @@ struct ContentView: View {
     /// A String is not Identifiable, so `.sheet(item:)` needs a wrapper.
     private struct EditTarget: Identifiable { let id: String }
     @State private var editingProject: EditTarget?
-    @State private var hoveredSection: String?
     @State private var scanning = false
     @State private var loadingProjects = true
     @StateObject private var runner = Runner()
@@ -1584,6 +1594,14 @@ struct ContentView: View {
             _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
             if let path = Screenshot.path {
+                // Open whatever the requested scene needs, then let it settle.
+                switch Screenshot.scene {
+                case .main:     break
+                case .settings: if let p = selectedProject { editingProject = .init(id: p) }
+                case .scan:     scanning = true
+                case .logs:     showingLogs = true
+                }
+                if Screenshot.scene != .main { try? await Task.sleep(for: .seconds(1.2)) }
                 await Screenshot.captureAndQuit(to: path)
             }
         }
@@ -1905,57 +1923,38 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selectedProject) {
             if !live.isEmpty {
-                Section {
+                Section("Running") {
                     ForEach(live) { projectRow($0, isLive: true) }
-                } header: {
-                    sectionHeader("Running", showsAdd: false)
                 }
             }
             if !favourites.isEmpty {
-                Section {
+                Section("Favourites") {
                     ForEach(favourites) { projectRow($0, isLive: false) }
-                } header: {
-                    sectionHeader("Favourites", showsAdd: false)
                 }
             }
-            Section {
+            Section("Projects") {
                 ForEach(others) { projectRow($0, isLive: false) }
-            } header: {
-                sectionHeader("Projects", showsAdd: true)
             }
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
-    }
-
-    /// A header whose add button appears on hover, the way Finder reveals its
-    /// sidebar affordances rather than showing them permanently.
-    @ViewBuilder
-    private func sectionHeader(_ title: String, showsAdd: Bool) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-            Spacer(minLength: 0)
-            if showsAdd {
+        // A toolbar attached to the SIDEBAR lands above the sidebar, which is
+        // where macOS puts sidebar-scoped actions — Finder's new-folder button,
+        // Xcode's. The system sizes, insets and colours it; a hand-built
+        // accessory on a section header did none of that correctly, and fought
+        // the header's own collapse affordance besides.
+        .toolbar {
+            ToolbarItem {
                 Menu {
-                    Button("Add a project…") { addProject() }
-                    Button("Scan for projects…") { scanning = true }
+                    Button("Add a Project…") { addProject() }
+                    Button("Scan for Projects…") { scanning = true }
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 20, height: 20)
-                        .background(.quaternary, in: Circle())
+                    Image(systemName: "folder.badge.plus")
                 }
-                .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
-                .fixedSize()
-                .opacity(hoveredSection == title ? 1 : 0)
                 .help("Add or scan for projects")
             }
         }
-        .padding(.trailing, 2)
-        .frame(height: 22)
-        .contentShape(Rectangle())
-        .onHover { hoveredSection = $0 ? title : nil }
     }
 
     @ViewBuilder

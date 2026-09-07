@@ -18,6 +18,9 @@ TMP="$(mktemp -d)"
 export RB_HOME="$TMP/state"
 export RB_PROJECTS_DIR="$TMP/projects"
 export RB_MY_EMAILS="tester@example.com"
+# Do not hijack the browser. A suite that steals focus is a suite people stop
+# running, and this one starts a real server on purpose.
+export RB_NO_OPEN=1
 mkdir -p "$RB_PROJECTS_DIR" "$RB_HOME"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -92,6 +95,11 @@ echo "==> presets and targets"
 "$ENGINE" set fixture TARGETS "web:4321:/:true" >/dev/null 2>&1
 "$ENGINE" set fixture ALWAYS "" >/dev/null 2>&1
 is "one target, one preset"    "$("$ENGINE" presets fixture | tr -d '\n')" "web"
+
+# Not tested: that RB_NO_OPEN suppresses the browser. Whether `open` ran is not
+# observable from here, and a test that greps output text for it would assert
+# on the wording rather than the behaviour. RB_NO_OPEN is exported at the top
+# of this file, which is what stops the suite hijacking a browser tab.
 
 echo "==> favourites"
 is "not favourite by default"  "$("$ENGINE" projects | awk -F'\t' '$1=="fixture"{print $6}')" "0"

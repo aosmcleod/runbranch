@@ -899,8 +899,9 @@ start_run() {
     [ -n "$port" ] && info "$(printf '%-8s' "$t") http://localhost:$port"
   done
   # Some dev servers (vite --open) open a browser themselves; opening a second
-  # one is just a duplicate tab.
-  if [ "$OPENS_ITSELF" != 1 ] && [ -n "$first" ]; then
+  # one is just a duplicate tab. RB_NO_OPEN exists for tests and scripts —
+  # a suite that steals focus every time it runs is a suite people stop running.
+  if [ "$OPENS_ITSELF" != 1 ] && [ -z "${RB_NO_OPEN:-}" ] && [ -n "$first" ]; then
     open "$first" >/dev/null 2>&1
   fi
 }
