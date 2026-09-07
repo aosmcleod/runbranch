@@ -35,6 +35,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # rendered through WebKit, appearance variants via actool. No GUI, no design tool.
 "$REPO/make-icons.sh" "$APP"
 
+# The bare glyph on transparency, for in-app use. Inside the window the rounded
+# app tile is redundant and its light backing sits badly on a dark splash.
+cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
+
 # --- binary ---------------------------------------------------------------
 swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/RunBranch"
 echo "    binary built"

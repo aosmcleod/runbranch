@@ -888,6 +888,13 @@ enum Screenshot {
     /// has to be added by hand in System Settings.
     @MainActor
     static func captureAndQuit(to path: String) async {
+        // Hard deadline. NSApp.terminate can be refused and a stuck await never
+        // reaches the defer, so this exits the process outright.
+        Task.detached {
+            try? await Task.sleep(for: .seconds(30))
+            FileHandle.standardError.write("capture timed out after 30s\n".data(using: .utf8)!)
+            exit(2)
+        }
         defer { NSApp.terminate(nil) }
         guard let window = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first
         else { return }
@@ -898,7 +905,9 @@ enum Screenshot {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.level = .floating
         if let screen = NSScreen.main {
-            let size = NSSize(width: 1000, height: 620)
+            // Whatever size the mode asked for — onboarding is deliberately
+            // small — just centred so every capture is framed the same way.
+            let size = window.frame.size
             let vf = screen.visibleFrame
             window.setFrame(NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
                                    width: size.width, height: size.height), display: true)
@@ -920,8 +929,24 @@ enum Screenshot {
                 try? await Task.sleep(for: .milliseconds(400))
             }
             guard let target else {
-                FileHandle.standardError.write("window never became visible to the capture API\n"
-                    .data(using: .utf8)!)
+                // A granted call lists every on-screen window on the machine.
+                // A short list owned only by system processes means the grant
+                // is missing; owner names alone do not prove it is present.
+                let content = try? await SCShareableContent.excludingDesktopWindows(
+                    false, onScreenWindowsOnly: true)
+                let seen = content?.windows.count ?? -1
+                let owners = Set((content?.windows ?? []).compactMap {
+                    $0.owningApplication?.applicationName
+                }).sorted().joined(separator: ", ")
+                let ours = NSApp.windows.map {
+                    "#\($0.windowNumber) visible=\($0.isVisible) frame=\($0.frame)"
+                }.joined(separator: " | ")
+                let msg = "window \(id) never became visible to the capture API. "
+                    + "Capture API sees \(seen) windows owned by [\(owners)]; "
+                    + "a short, system-only list means this build lacks the Screen "
+                    + "Recording grant — see the header of tools/screenshot.sh.\n"
+                    + "Our windows: \(ours)\n"
+                FileHandle.standardError.write(msg.data(using: .utf8)!)
                 return
             }
             let filter = SCContentFilter(desktopIndependentWindow: target)
@@ -1400,41 +1425,94 @@ struct ScanSheet: View {
 
 /// Shown when no projects are declared. The alternative was an empty sidebar
 /// beside an empty pane, which tells a first-time user nothing at all.
+/// The bare glyph on transparency, not the app icon. Inside the app the
+/// rounded tile is redundant — the window already is the app — and the tile's
+/// light background sits badly on a dark splash.
+enum Mark {
+    static let image: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "Mark", withExtension: "png") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }()
+}
+
 struct WelcomeView: View {
     let onScan: () -> Void
     let onAdd: () -> Void
 
+    /// Both buttons get the same width so neither looks like the runt. Sizing
+    /// to the longer label and letting the shorter one match is the usual fix.
+    private let buttonWidth: CGFloat = 124
+
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
-            if let icon = NSImage(named: "AppIcon") {
-                Image(nsImage: icon)
-                    .resizable().frame(width: 96, height: 96)
-                    .padding(.bottom, 18)
+            if let mark = Mark.image {
+                Image(nsImage: mark)
+                    .resizable().frame(width: 84, height: 84)
+                    .padding(.bottom, 16)
             }
-            Text("Runbranch").font(.system(size: 26, weight: .semibold))
+            Text("Runbranch").font(.system(size: 24, weight: .semibold))
             Text("Run a branch that isn't the one you're working on.")
-                .font(.system(size: 13)).foregroundStyle(.secondary)
+                .font(.system(size: 12.5)).foregroundStyle(.secondary)
                 .padding(.top, 4)
             Text("On a real port, beside your work, without touching your checkout.")
-                .font(.system(size: 12)).foregroundStyle(.tertiary)
+                .font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
                 .padding(.top, 2)
 
             HStack(spacing: 10) {
-                Button("Scan for projects…", action: onScan)
-                    .buttonStyle(.glassProminent).controlSize(.large)
-                Button("Add one…", action: onAdd)
-                    .buttonStyle(.glass).controlSize(.large)
+                Button(action: onScan) {
+                    Text("Scan…").frame(width: buttonWidth)
+                }
+                .buttonStyle(.glassProminent)
+                Button(action: onAdd) {
+                    Text("Add a project…").frame(width: buttonWidth)
+                }
+                .buttonStyle(.glass)
             }
-            .padding(.top, 26)
+            .controlSize(.large)
+            .padding(.top, 24)
 
-            Spacer()
             Text("Projects are plain config files you can commit to the repository.")
                 .font(.system(size: 11)).foregroundStyle(.tertiary)
-                .padding(.bottom, 18)
+                .padding(.top, 22)
         }
+        .padding(.horizontal, 40)
+        .padding(.vertical, 36)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+    }
+}
+
+/// Sets the window's content size when the app crosses between onboarding and
+/// the browser. Onboarding needs a fraction of the room the branch list does,
+/// and a splash floating in a half-empty 1000pt window reads as a bug.
+///
+/// Only acts on a transition, so a window the user has resized by hand is left
+/// alone until the mode actually changes.
+struct WindowSizer: NSViewRepresentable {
+    let compact: Bool
+    static let compactSize = NSSize(width: 520, height: 400)
+    static let fullSize = NSSize(width: 1000, height: 620)
+
+    final class Coordinator { var applied: Bool? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard context.coordinator.applied != compact else { return }
+        context.coordinator.applied = compact
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            let size = compact ? Self.compactSize : Self.fullSize
+            window.setContentSize(size)
+            window.styleMask = compact
+                ? window.styleMask.subtracting(.resizable)
+                : window.styleMask.union(.resizable)
+            window.center()
+        }
     }
 }
 
@@ -1581,9 +1659,10 @@ struct ContentView: View {
                     .navigationSubtitle("")
             }
         }
-        }
-        }
         .frame(minWidth: 780, idealWidth: 820, minHeight: 440, idealHeight: 540)
+        }
+        }
+        .background(WindowSizer(compact: projects.isEmpty && !loadingProjects))
         // Hiding the toolbar background removed the seam above the sidebar but
         // left content scrolling visibly under the title. `.automatic` gives
         // both: nothing at rest, a material once something scrolls beneath it.

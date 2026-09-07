@@ -29,10 +29,19 @@ EMPTY="$(mktemp -d)"
 trap 'rm -rf "$EMPTY"' EXIT
 mkdir -p "$EMPTY/projects" "$EMPTY/state"
 
+# macOS ships no timeout(1), and a wedged capture must not wedge the pipeline.
+run_limited() {
+  local secs="$1"; shift
+  perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
+}
+
 shoot() {  # file, scene, projects-dir, state-dir
   local file="$1" scene="$2" pdir="$3" sdir="$4"
+  # A previous instance still holding a window makes the next capture fail.
+  pkill -f 'RunBranch --screenshot' 2>/dev/null
+  rm -f "$OUT/$file"
   RB_PROJECTS_DIR="$pdir" RB_HOME="$sdir" RB_MY_EMAILS="dana@example.com" \
-  RB_NO_OPEN=1 "$APP" --screenshot "$OUT/$file" --scene "$scene" 2>&1 \
+  RB_NO_OPEN=1 run_limited 45 "$APP" --screenshot "$OUT/$file" --scene "$scene" 2>&1 \
     | grep -v AttributeGraph | sed 's/^/    /'
   if [ -s "$OUT/$file" ]; then
     printf '  %-22s %s\n' "$file" "$(sips -g pixelWidth -g pixelHeight "$OUT/$file" \
