@@ -1864,7 +1864,7 @@ struct ContentView: View {
                 guard let p = selectedProject else { return }
                 run(["stop", p], "Stopping")
             }
-            bar.apply(Presentation.current)
+            bar.apply(Presentation.current, initial: true)
 
             let bridge = MenuBridge.shared
             bridge.addProject = { addProject() }
@@ -2435,7 +2435,10 @@ final class MenuBarController: NSObject, ObservableObject {
     var onOpenWindow: (() -> Void)?
     var onStop: (() -> Void)?
 
-    func apply(_ next: Presentation) {
+    /// `initial` is the application of the saved setting at launch, which must
+    /// not summon a window: SwiftUI has already made one, and asking for
+    /// another opens a duplicate.
+    func apply(_ next: Presentation, initial: Bool = false) {
         mode = next
         Presentation.current = next
         NSApp.setActivationPolicy(next.policy)
@@ -2450,7 +2453,7 @@ final class MenuBarController: NSObject, ObservableObject {
         // Leaving .accessory does not bring the window back on its own, and
         // entering it hides one that was open. Either way the user asked for a
         // change of where the app lives, not for their window to vanish.
-        if next != .menuBar {
+        if next != .menuBar && !initial {
             NSApp.activate(ignoringOtherApps: true)
             onOpenWindow?()
         }
