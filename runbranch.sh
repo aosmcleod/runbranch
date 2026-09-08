@@ -163,6 +163,7 @@ expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
 # Reset on every load so a second load cannot inherit the first, and so the
 # in-repo file and the local one both start from the same place.
 reset_project_defaults() {
+  PORT_OFFSET=0
   NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
   MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
@@ -258,6 +259,28 @@ list_projects() {
         "$( [ -f "$STATE_FILE" ] && echo 1 || echo 0 )" "${SYMBOL:-shippingbox}" \
         "$( is_favourite "$name" && echo 1 || echo 0 )" )
   done
+}
+
+# An offset added to every declared port for this run.
+#
+# Ports are declared in the config and that is deliberate — a stack that bakes
+# its origins in (an OAuth origin, a CORS allowlist, an API URL compiled into
+# the client) has to stay where it was told. But framework defaults collide
+# across projects, so a run can be shifted wholesale when the user asks for it.
+#
+# Every target moves by the same amount, so the relative layout a stack may
+# depend on survives: api 4000 and web 3000 become 4001 and 3001, not 4001 and
+# 4002.
+PORT_OFFSET=0
+
+# The port a target actually listens on, as opposed to the one it declares.
+# Runtime paths use this; `doctor` reports the declared one, since that is what
+# is written in the file.
+target_port() {
+  local declared
+  declared="$(target_field "$1" port)" || return 1
+  [ -n "$declared" ] || return 1
+  printf '%s' "$((declared + PORT_OFFSET))"
 }
 
 # --- target parsing ---------------------------------------------------------
@@ -820,11 +843,52 @@ cannot run at the same time:"
   return 0
 }
 
+# What stands between a preset and starting, in a form the front end can act on.
+#
+# One line per conflicted target:
+#   target <TAB> declared <TAB> owner <TAB> pid <TAB> overridable
+# `owner` is the project whose run holds the port, or empty for something the
+# user started. `overridable` is 1 when the command contains {port}, meaning the
+# run can be shifted; 0 when shifting it would just health-check an empty port.
+#
+# A trailing OFFSET line gives the smallest shift that clears every conflict.
+check_ports() {
+  local targets="$1"
+  local t port pid owner cmd overridable found=0
+  for t in $targets; do
+    port="$(target_port "$t")"
+    [ -n "$port" ] || continue
+    pid=$(port_holder "$port")
+    [ -n "$pid" ] || continue
+    found=1
+    owner="$(port_holder_project "$pid")"
+    cmd="$(target_field "$t" command)"
+    case "$cmd" in *'{port}'*) overridable=1 ;; *) overridable=0 ;; esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$port" "$owner" "$pid" "$overridable"
+  done
+  [ "$found" = 0 ] && return 0
+
+  # Walk up until every port in the preset is free. Same shift for all of them.
+  local try=1 clash
+  while [ "$try" -le 200 ]; do
+    clash=0
+    for t in $targets; do
+      port="$(target_field "$t" port)"
+      [ -n "$port" ] || continue
+      [ -n "$(port_holder "$((port + try))")" ] && { clash=1; break; }
+    done
+    [ "$clash" = 0 ] && break
+    try=$((try + 1))
+  done
+  printf 'OFFSET\t%s\n' "$try"
+  return 1
+}
+
 ensure_ports_free() {
   local targets="$1"
   local t port pid owner busy='' owners=''
   for t in $targets; do
-    port="$(target_field "$t" port)"
+    port="$(target_port "$t")"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
@@ -881,6 +945,12 @@ start_server() {
   local wt="$1" name="$2"
   local cmd log pid
   cmd="$(target_field "$name" command)"
+  # A framework will not discover the offset on its own. `{port}` in the command
+  # is how a config says where to put it — without one, a shifted run would
+  # health-check a port nothing is listening on.
+  local actual
+  actual="$(target_port "$name")"
+  cmd="${cmd//\{port\}/$actual}"
   log="$LOG_DIR/$name.log"
   mkdir -p "$LOG_DIR"
   : >"$log"
@@ -929,6 +999,7 @@ write_state() {
     printf 'PRESET=%s\n'   "$3"
     printf 'TARGETS=%s\n'  "$4"
     printf 'PIDS=%s\n'     "$5"
+    printf 'PORT_OFFSET=%s\n' "$PORT_OFFSET"
     printf 'STARTED=%s\n'  "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'EPOCH=%s\n'    "$(date +%s)"
   } >"$STATE_FILE"
@@ -936,6 +1007,10 @@ write_state() {
 
 load_state() {
   S_REF=''; S_WORKTREE=''; S_PRESET=''; S_TARGETS=''; S_PIDS=''; S_STARTED=''; S_EPOCH=0
+  # PORT_OFFSET is deliberately NOT reset here. load_project already zeroes it,
+  # and do_run reads state (through demo_running) AFTER the caller has asked for
+  # an offset — resetting it here silently discarded the request and the run
+  # then checked, and started on, the declared ports.
   [ -f "$STATE_FILE" ] || return 1
   local line key val
   while IFS= read -r line || [ -n "$line" ]; do
@@ -944,6 +1019,9 @@ load_state() {
       REF) S_REF="$val" ;; WORKTREE) S_WORKTREE="$val" ;;
       PRESET) S_PRESET="$val" ;; TARGETS) S_TARGETS="$val" ;;
       PIDS) S_PIDS="$val" ;; STARTED) S_STARTED="$val" ;; EPOCH) S_EPOCH="$val" ;;
+      # Restore the offset the run was started with, so stop, status and health
+      # look at the ports it is really on rather than the declared ones.
+      PORT_OFFSET) PORT_OFFSET="$val" ;;
     esac
   done <"$STATE_FILE"
   return 0
@@ -974,7 +1052,7 @@ start_run() {
   local i=0
   for t in $targets; do
     i=$((i + 1))
-    port="$(target_field "$t" port)"
+    port="$(target_port "$t")"
     health="$(target_field "$t" health)"
     [ -n "$port" ] || continue
     local pid; pid="$(printf '%s' "$named" | tr ' ' '\n' | grep "^$t:" | cut -d: -f2)"
@@ -993,7 +1071,7 @@ start_run() {
 
   step "Ready"
   for t in $targets; do
-    port="$(target_field "$t" port)"
+    port="$(target_port "$t")"
     [ -n "$port" ] && info "$(printf '%-8s' "$t") http://localhost:$port"
   done
   # Some dev servers (vite --open) open a browser themselves; opening a second
@@ -1032,7 +1110,7 @@ stop_run() {
   # clearly ours — a process whose command line points into this project's
   # worktrees. Never touch the user's own dev server.
   for t in $S_TARGETS; do
-    port="$(target_field "$t" port)"
+    port="$(target_port "$t")"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
@@ -1086,7 +1164,7 @@ print_status() {
     printf '  since     %s\n'  "$S_STARTED"
     local t port
     for t in $S_TARGETS; do
-      port="$(target_field "$t" port)"
+      port="$(target_port "$t")"
       [ -n "$port" ] && printf '  %-9s http://localhost:%s\n' "$t" "$port"
     done
     printf '  logs      %s\n\n' "$LOG_DIR"
@@ -1459,7 +1537,7 @@ reclaim_project() {
 
   while IFS= read -r t; do
     [ -n "$t" ] || continue
-    port="$(target_field "$t" port)"
+    port="$(target_port "$t")"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
@@ -1642,6 +1720,10 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh get <project>                   every editable field
   runbranch.sh set <project> <KEY> [value]     rewrite one key in the local conf
   runbranch.sh paths <project> [<ref>]
+  runbranch.sh run <p> <ref> <preset> [offset]
+                                       offset shifts every port in the run
+  runbranch.sh check-ports <p> <preset>
+                                       what holds the ports, and a free offset
   runbranch.sh remove <project>        delete a project's config and state, never its repo
   runbranch.sh reclaim [<project>]     reclaim ports and clear state a crash left
   runbranch.sh state <project>
@@ -1734,8 +1816,27 @@ main() {
       load_project "$2"; remove_worktree_for "$3"
       ;;
     run)
-      [ $# -eq 4 ] || { usage; exit 2; }
-      load_project "$2"; do_run "$3" "$4"
+      # An optional fifth argument shifts every port in the run by that much,
+      # for when the declared ones are taken by another project.
+      [ $# -eq 4 ] || [ $# -eq 5 ] || { usage; exit 2; }
+      load_project "$2"
+      if [ $# -eq 5 ]; then
+        case "$5" in
+          ''|*[!0-9]*) die "Port offset must be a number, got \"$5\"." \
+            "$SELF run $2 $3 $4 1" ;;
+        esac
+        PORT_OFFSET="$5"
+      fi
+      do_run "$3" "$4"
+      ;;
+    check-ports)
+      [ $# -eq 3 ] || { usage; exit 2; }
+      load_project "$2"
+      local ct
+      ct="$(preset_targets "$3")"
+      [ -n "$ct" ] || die "Unknown preset \"$3\" for $NAME." "$SELF presets $2"
+      check_ports "$ct"
+      exit $?
       ;;
     stop) need_project "${2:-}"; stop_run ;;
     status)

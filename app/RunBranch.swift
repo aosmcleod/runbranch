@@ -177,6 +177,162 @@ extension String {
     }
 }
 
+/// What to do about a port that is already taken.
+///
+/// Three ways out, in the order they are usually wanted: take the port from our
+/// own run, go somewhere else, or think again. "Switch" is primary because the
+/// common case is wanting to look at this branch instead of the one running —
+/// and because it keeps the URL where the user expects it.
+struct PortConflictSheet: View {
+    let pending: PendingRun
+    let onSwitch: () -> Void
+    let onShift: () -> Void
+    let onCancel: () -> Void
+
+    private var conflict: PortConflict { pending.conflict }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ports already in use").font(.system(size: 14, weight: .semibold))
+                    Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(conflict.clashes) { c in
+                    HStack(spacing: 8) {
+                        Text(c.target)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 64, alignment: .leading)
+                        Text("port \(c.port)")
+                            .font(.system(size: 12, design: .monospaced))
+                        Spacer()
+                        Text(c.owner.isEmpty ? "another app (pid \(c.pid))" : c.owner)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if !conflict.canShift {
+                    // Saying why the option is missing beats showing a disabled
+                    // button with no explanation.
+                    Text("""
+                         Running alongside needs the command to accept a port. \
+                         Put {port} in this project's target and Runbranch will \
+                         substitute it.
+                         """)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+
+            Spacer(minLength: 0)
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .buttonStyle(.glass).controlSize(.large)
+                Spacer()
+                if conflict.canShift {
+                    Button("Run on Port \(shiftedFirstPort)", action: onShift)
+                        .buttonStyle(.glass).controlSize(.large)
+                }
+                if !conflict.owners.isEmpty {
+                    Button(switchLabel, action: onSwitch)
+                        .buttonStyle(.glassProminent).controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 12)
+        }
+        .frame(width: 460, height: 300)
+    }
+
+    private var subtitle: String {
+        let owners = conflict.owners
+        if owners.isEmpty { return "Something outside Runbranch is using them." }
+        if owners.count == 1 { return "Runbranch is running \(owners[0]) on them." }
+        return "Runbranch is running \(owners.joined(separator: " and ")) on them."
+    }
+
+    /// The port the first target would move to, so the button names a number
+    /// rather than an offset nobody asked to think about.
+    private var shiftedFirstPort: Int {
+        (conflict.clashes.first?.port ?? 0) + conflict.freeOffset
+    }
+
+    private var switchLabel: String {
+        let owners = conflict.owners
+        return owners.count == 1 ? "Stop \(owners[0]) and Switch" : "Stop Them and Switch"
+    }
+}
+
+/// A start that is waiting on the user to resolve a port conflict.
+struct PendingRun: Identifiable {
+    let project: String
+    let ref: String
+    let preset: String
+    let title: String
+    let conflict: PortConflict
+    var id: String { project + ref + preset }
+}
+
+/// A port a run needs that something else is already listening on.
+///
+/// Parsed from `runbranch.sh check-ports`, which is asked BEFORE starting so
+/// the user gets a choice rather than a failure. `owner` is the project whose
+/// run holds the port, empty when it is something they started themselves;
+/// `overridable` says whether the command can be told a different port, which
+/// it can only do if the config uses {port}.
+struct PortClash: Identifiable {
+    let target: String
+    let port: Int
+    let owner: String
+    let pid: Int
+    let overridable: Bool
+    var id: String { target }
+}
+
+struct PortConflict {
+    let clashes: [PortClash]
+    /// The smallest shift that clears every port in the preset.
+    let freeOffset: Int
+
+    /// Only worth offering when every clashing target can actually be moved.
+    var canShift: Bool { !clashes.isEmpty && clashes.allSatisfy(\.overridable) }
+    /// The projects of ours holding these ports, in order, without repeats.
+    var owners: [String] {
+        var seen: [String] = []
+        for c in clashes where !c.owner.isEmpty && !seen.contains(c.owner) {
+            seen.append(c.owner)
+        }
+        return seen
+    }
+
+    static func parse(_ text: String) -> PortConflict? {
+        var clashes: [PortClash] = []
+        var offset = 1
+        for line in text.split(separator: "\n") {
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            if f.first == "OFFSET", f.count >= 2 { offset = Int(f[1]) ?? 1; continue }
+            guard f.count >= 5, let port = Int(f[1]), let pid = Int(f[3]) else { continue }
+            clashes.append(PortClash(target: f[0], port: port, owner: f[2],
+                                     pid: pid, overridable: f[4] == "1"))
+        }
+        return clashes.isEmpty ? nil : PortConflict(clashes: clashes, freeOffset: offset)
+    }
+}
+
 // MARK: - Engine
 
 /// Runs runbranch.sh.
@@ -1763,6 +1919,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var presentation = Presentation.current
     @State private var removing: Project?
+    @State private var pendingRun: PendingRun?
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -1827,9 +1984,9 @@ struct ContentView: View {
         if state.running {
             // do_run stops whatever this project has running first, and says
             // so as it goes.
-            return ("Switch", false, { run(["run", p, ref, preset], "Switching to \(ref)") })
+            return ("Switch", false, { startChecking(p, ref, preset, "Switching to \(ref)") })
         }
-        return ("Start", false, { run(["run", p, ref, preset], "Starting \(ref)") })
+        return ("Start", false, { startChecking(p, ref, preset, "Starting \(ref)") })
     }
 
     var body: some View {
@@ -2094,6 +2251,13 @@ struct ContentView: View {
                  is not touched.
                  """)
         }
+        .sheet(item: $pendingRun) { pending in
+            PortConflictSheet(
+                pending: pending,
+                onSwitch: { resolveBySwitching(pending) },
+                onShift: { resolveByShifting(pending) },
+                onCancel: { pendingRun = nil })
+        }
         .sheet(isPresented: $scanning) {
             ScanSheet { added in
                 scanning = false
@@ -2201,6 +2365,49 @@ struct ContentView: View {
         // is already on the menu bar and does not need repeating here.
         .navigationTitle(projects.first { $0.id == snap.id }?.name ?? "")
         .navigationSubtitle(state.running ? "\(state.ref) · \(state.preset)" : "")
+    }
+
+    /// Ask the engine what holds the ports before starting anything.
+    ///
+    /// The alternative is starting and failing, which is what used to happen —
+    /// and the failure could not offer to fix itself because by then it was
+    /// just text in a log.
+    private func startChecking(_ project: String, _ ref: String, _ preset: String,
+                               _ title: String) {
+        Task {
+            let result = await Task.detached {
+                Engine.capture(["check-ports", project, preset])
+            }.value
+            if result.code != 0, let conflict = PortConflict.parse(result.out) {
+                pendingRun = PendingRun(project: project, ref: ref,
+                                        preset: preset, title: title,
+                                        conflict: conflict)
+            } else {
+                run(["run", project, ref, preset], title)
+            }
+        }
+    }
+
+    /// Stop whatever of ours holds the ports, then start. The engine refuses to
+    /// remove a running project's config for the same reason: leaving servers
+    /// with nothing that knows how to stop them is worse than not starting.
+    private func resolveBySwitching(_ pending: PendingRun) {
+        let owners = pending.conflict.owners
+        pendingRun = nil
+        Task {
+            for owner in owners {
+                _ = await Task.detached { Engine.capture(["stop", owner]) }.value
+            }
+            await syncProjectList()
+            run(["run", pending.project, pending.ref, pending.preset], pending.title)
+        }
+    }
+
+    private func resolveByShifting(_ pending: PendingRun) {
+        let offset = pending.conflict.freeOffset
+        pendingRun = nil
+        run(["run", pending.project, pending.ref, pending.preset, String(offset)],
+            pending.title)
     }
 
     private func run(_ args: [String], _ title: String) {

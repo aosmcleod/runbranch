@@ -178,6 +178,51 @@ pkill -f "http.server 4399" 2>/dev/null || true
 rm -f "$RB_PROJECTS_DIR/holder.conf" "$RB_PROJECTS_DIR/wants.conf"
 rm -rf "$RB_HOME/holder"
 
+echo "==> a run can be shifted onto free ports"
+cat > "$RB_PROJECTS_DIR/shift.conf" <<CONF
+NAME="Shift"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4601:/:python3 -m http.server {port} --directory public"
+CONF
+# Hold the declared port, so the shift is the only way to start.
+python3 -m http.server 4601 --directory "$FIX/public" >/dev/null 2>&1 &
+BLOCKER=$!
+sleep 2
+
+CHECK="$("$ENGINE" check-ports shift web 2>&1)" || true
+has "check-ports names the target"     "$CHECK" "web"
+has "check-ports reports the port"     "$CHECK" "4601"
+has "check-ports says overridable"     "$CHECK" "	1"
+has "check-ports suggests an offset"   "$CHECK" "OFFSET"
+
+# Without an offset it must refuse rather than start something broken.
+"$ENGINE" run shift main web >/dev/null 2>&1
+is "refuses while the port is held" "$?" "1"
+
+# With one, {port} carries the shift into the command, so the server really
+# listens where the health check is looking.
+"$ENGINE" run shift main web 1 >/dev/null 2>&1
+is "starts on the shifted port" "$?" "0"
+SHIFTED="$("$ENGINE" status shift 2>&1)"
+has "status shows the shifted port"  "$SHIFTED" "4602"
+is  "the shifted port answers"       "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4602/ 2>/dev/null)" "200"
+RECORDED="$(grep -c '^PORT_OFFSET=1$' "$RB_HOME/shift/state" 2>/dev/null)" || RECORDED=0
+is  "the offset is recorded"         "$RECORDED" "1"
+
+# And stop has to look at the real port, not the declared one.
+"$ENGINE" stop shift >/dev/null 2>&1
+sleep 1
+is "stop clears the shifted run" "$([ -f "$RB_HOME/shift/state" ] && echo yes || echo no)" "no"
+# curl writes the code even when it fails, so `|| echo` appends to it rather
+# than replacing it. Ask about the exit status instead.
+curl -sfo /dev/null http://localhost:4602/ 2>/dev/null
+is  "the shifted port is free"    "$?" "7"
+
+kill "$BLOCKER" 2>/dev/null || true
+pkill -f "http.server 4601" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/shift.conf"; rm -rf "$RB_HOME/shift"
+
 echo "==> doctor reports ports claimed by more than one project"
 cat > "$RB_PROJECTS_DIR/twinA.conf" <<CONF
 NAME="Twin A"
