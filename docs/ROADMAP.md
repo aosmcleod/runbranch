@@ -28,6 +28,7 @@ demo a colleague's branch without reading anything.
 | 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 38 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
 | 1.8 | ✅ **Open-source guidelines** — CONTRIBUTING, CODE_OF_CONDUCT, TESTING, issue and PR templates | A repo without them asks every contributor to guess |
 | 1.6 | **Design and code review** — commonise, refactor, delete | Two months of accreted decisions want one pass |
+| 1.10 | **Decompose ContentView** — 716 lines and 23 state properties in one view, in a 2,700-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
 | 1.9 | **A UI smoke test** — launch the app against the demo config, assert the window renders, a project loads, health resolves to healthy, and exactly one window exists | See below. This is the one item the original list got wrong |
 
 ### Why 1.9
@@ -53,6 +54,27 @@ were in that wiring rather than in logic a unit test would reach. A smoke test
 that launches the real app against the demo config and asserts four things
 about the result would have caught both, and the screenshot pipeline already
 does the hard part — it launches the app unattended and knows when it failed.
+
+### Why 1.10
+
+The review found the engine in reasonable shape — one duplicated block, since
+removed, and no dead functions. The app is the imbalance:
+
+- `ContentView` is 716 lines with 23 state properties, in a file of 2,700.
+- `Screenshot` (217 lines) and `Engine` (204) are cohesive and would move out
+  cleanly; `ProjectEditor` (173) and `ScanSheet` (164) are already separate
+  types sharing one file only by habit.
+
+Nothing here is broken, which is why it is 1.10 and not urgent. But it is the
+same place both bugs behind 1.9 lived — a view holding 23 pieces of state has
+no way to make an invalid combination unrepresentable, and the fix for the
+earlier "mixed data while switching projects" bug was exactly that: collapsing
+six independent properties into one atomically-swapped `ProjectSnapshot`.
+
+The remaining state wants the same treatment, and the file wants splitting on
+the boundaries the MARK comments already draw. Doing it needs a quiet session
+rather than the end of a long one, because a mechanical-looking SwiftUI
+refactor is precisely the kind of change that silently alters behaviour.
 
 ---
 

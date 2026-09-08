@@ -166,6 +166,17 @@ struct RunState {
     var urls: [URL] { targets.compactMap(\.url) }
 }
 
+extension String {
+    /// `/Users/someone/code` → `~/code`.
+    ///
+    /// Not cosmetic: a full path in the UI puts the account name into any
+    /// screenshot of it, and this was inlined at three call sites where a
+    /// fourth would have missed it.
+    var abbreviatingHome: String {
+        replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+}
+
 // MARK: - Engine
 
 /// Runs runbranch.sh.
@@ -1328,8 +1339,7 @@ struct ProjectEditor: View {
                             // Abbreviated, like Finder and the rest of the app.
                             // A full path here also puts the account name into
                             // any screenshot of this sheet.
-                            Text((f["REPO"] ?? "").replacingOccurrences(
-                                of: NSHomeDirectory(), with: "~"))
+                            Text((f["REPO"] ?? "").abbreviatingHome)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
@@ -1518,8 +1528,7 @@ struct ScanSheet: View {
                             )) {
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(repo.name).font(.system(size: 12))
-                                    Text(repo.path.replacingOccurrences(
-                                            of: NSHomeDirectory(), with: "~"))
+                                    Text(repo.path.abbreviatingHome)
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
@@ -2076,8 +2085,8 @@ struct ContentView: View {
                  Deletes this project's config file and any worktrees, logs and \
                  ports Runbranch created for it.
 
-                 The repository at \(removing?.repo.replacingOccurrences(
-                     of: NSHomeDirectory(), with: "~") ?? "") is not touched.
+                 The repository at \(removing?.repo.abbreviatingHome ?? "") \
+                 is not touched.
                  """)
         }
         .sheet(isPresented: $scanning) {
@@ -2427,11 +2436,7 @@ struct ContentView: View {
     }
 
     /// "2026-09-04 23:32:59" -> "23:32".
-    private func shortTime(_ s: String) -> String {
-        let parts = s.components(separatedBy: " ")
-        guard parts.count == 2 else { return s }
-        return parts[1].components(separatedBy: ":").prefix(2).joined(separator: ":")
-    }
+
 }
 
 /// Where the app appears: Dock, menu bar, or both.
