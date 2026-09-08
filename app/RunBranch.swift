@@ -1853,6 +1853,16 @@ struct ContentView: View {
             // before anything is drawn rather than showing as a phantom run.
             _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
+
+            let bridge = MenuBridge.shared
+            bridge.addProject = { addProject() }
+            bridge.scanForProjects = { scanning = true }
+            bridge.refresh = { Task { await reload() } }
+            bridge.hasSelection = { selectedProject != nil }
+            bridge.editProject = {
+                guard let p = selectedProject else { return }
+                editingProject = .init(id: p)
+            }
             if let path = Screenshot.path {
                 // Open whatever the requested scene needs, then let it settle.
                 switch Screenshot.scene {
@@ -2353,12 +2363,93 @@ struct ContentView: View {
     }
 }
 
+/// Lets the main menu drive the window's actions.
+///
+/// Menu commands are built at the App level, where none of ContentView's state
+/// is reachable. Rather than duplicate the work behind each command, the view
+/// registers what it can do and the menu items call through.
+@MainActor
+final class MenuBridge: ObservableObject {
+    static let shared = MenuBridge()
+    var addProject: (() -> Void)?
+    var scanForProjects: (() -> Void)?
+    var editProject: (() -> Void)?
+    var refresh: (() -> Void)?
+    /// Nil when nothing is selected, so the menu can disable what needs one.
+    var hasSelection: () -> Bool = { false }
+}
+
 @main
 struct RunBranchApp: App {
+    init() {
+        // No window tabbing. It fills View and Window with items — Show Tab
+        // Bar, Merge All Windows, Move Tab to New Window — that do nothing
+        // useful for a single-window utility whose whole state is one project.
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     var body: some Scene {
         WindowGroup("Runbranch") {
             ContentView()
         }
         .windowResizability(.contentMinSize)
+        .commands {
+            // Toggle Sidebar, which View otherwise lacks entirely.
+            SidebarCommands()
+            CommandGroup(replacing: .help) {
+                Button("Runbranch on GitHub") {
+                    if let url = URL(string: "https://github.com/aosmcleod/runbranch") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+            CommandGroup(replacing: .appInfo) {
+                Button("About Runbranch") { showAbout() }
+            }
+            // Replacing .newItem drops "New Window" with it, which is the
+            // right call: a second window on the same projects would show the
+            // same state twice and offer no way to tell them apart.
+            CommandGroup(replacing: .newItem) {
+                Button("Add a Project…") { MenuBridge.shared.addProject?() }
+                    .keyboardShortcut("n")
+                Button("Scan for Projects…") { MenuBridge.shared.scanForProjects?() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .newItem) {
+                Divider()
+                Button("Project Settings…") { MenuBridge.shared.editProject?() }
+                    .keyboardShortcut(",")
+                    .disabled(!MenuBridge.shared.hasSelection())
+                Button("Reveal Projects Folder in Finder") {
+                    NSWorkspace.shared.selectFile(
+                        nil, inFileViewerRootedAtPath: Engine.projectsDir)
+                }
+                Divider()
+                Button("Refresh") { MenuBridge.shared.refresh?() }
+                    .keyboardShortcut("r")
+            }
+        }
+    }
+
+    /// The standard panel, which already knows how to lay out the icon, name
+    /// and version. A hand-built window would only be a worse copy of it.
+    private func showAbout() {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let credits = NSMutableAttributedString(
+            string: "Run a branch that isn't the one you're working on, "
+                + "on a real port, beside your work, without touching your checkout.\n\n"
+                + "Projects are plain config files. MIT licensed.",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Runbranch",
+            .applicationVersion: version,
+            .credits: credits,
+        ])
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
+
