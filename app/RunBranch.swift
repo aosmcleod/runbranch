@@ -2540,10 +2540,14 @@ final class MenuBarController: NSObject, ObservableObject {
             // A template image is tinted by the system for light and dark menu
             // bars and inverted while the menu is open. Anything else looks
             // wrong in at least one of those states.
-            if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
+            // NSImage(named:) resolves MenuBarIcon@2x.png alongside the 1x file
+            // and builds one image with both, so the item is sharp on Retina.
+            // Loading the 1x by URL got that representation only.
+            if let image = NSImage(named: "MenuBarIcon") {
                 image.isTemplate = true
-                image.size = NSSize(width: 18, height: 18)
+                // Its own size, deliberately. The mark is wider than it is
+                // tall and a status item is variable-width; forcing a square
+                // was what made the glyph small.
                 button.image = image
             } else {
                 button.title = "RB"
