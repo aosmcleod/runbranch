@@ -168,10 +168,19 @@ struct RunState {
 
 // MARK: - Engine
 
-/// Runs frankly-launcher.sh. Always through a login+interactive zsh: an app
-/// launched from the Dock inherits launchd's PATH, which has neither docker
-/// (/usr/local/bin) nor pnpm (/opt/homebrew/bin) nor node (fnm mints its bin
-/// directory per shell session), and the script would report them all missing.
+/// Runs runbranch.sh.
+///
+/// An app launched from the Dock inherits launchd's environment, which has
+/// neither docker (/usr/local/bin) nor pnpm (/opt/homebrew/bin) nor node (fnm
+/// mints its bin directory per shell session), so the script would report them
+/// all missing. The fix used to be running every single call through a
+/// login+interactive zsh, which was wrong twice over: each call paid full
+/// shell startup — sourcing .zshrc, and whatever that runs — and any hang in
+/// the user's shell config hung the app with it, with no way to tell from the
+/// outside what it was waiting for.
+///
+/// So resolve the login environment exactly once, with a deadline, and run the
+/// script directly from then on.
 enum Engine {
     static var scriptPath: String {
         if let p = Bundle.main.object(forInfoDictionaryKey: "FLScriptPath") as? String,
@@ -181,10 +190,77 @@ enum Engine {
         return NSHomeDirectory() + "/Development/runbranch/runbranch.sh"
     }
 
-    static func process(_ args: [String]) -> Process {
+    /// The user's login shell environment, read once. Interactive, because
+    /// PATH additions like fnm's live in .zshrc rather than .zprofile, but
+    /// bounded: a shell that does not answer in time must not take the app
+    /// down with it.
+    static let loginEnvironment: [String: String] = {
+        var resolved: [String: String] = [:]
+
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lic", "exec \"$0\" \"$@\"", scriptPath] + args
+        // NUL-separated, so values containing newlines survive the round trip.
+        p.arguments = ["-lic", "env -0"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        // A shell reading from an inherited stdin would wait forever.
+        p.standardInput = FileHandle.nullDevice
+
+        guard (try? p.run()) != nil else { return resolved }
+
+        // Read on a background queue: a full pipe blocks the writer, and a
+        // blocked writer never exits, which would deadlock the deadline below.
+        var data = Data()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            done.signal()
+        }
+        if done.wait(timeout: .now() + 5) == .timedOut {
+            p.terminate()
+            FileHandle.standardError.write(
+                "login shell did not answer within 5s; falling back to a default PATH. "
+                    .data(using: .utf8)!)
+            FileHandle.standardError.write(
+                "Run `runbranch.sh doctor` to see what is missing.\n".data(using: .utf8)!)
+            return resolved
+        }
+        p.waitUntilExit()
+
+        for entry in data.split(separator: 0) {
+            guard let text = String(data: Data(entry), encoding: .utf8),
+                  let eq = text.firstIndex(of: "=") else { continue }
+            resolved[String(text[text.startIndex..<eq])] = String(text[text.index(after: eq)...])
+        }
+        return resolved
+    }()
+
+    /// What the script actually runs with. The login shell supplies PATH and
+    /// anything else only it knows about; this process's own variables win
+    /// where both have a value, so a caller can still override with RB_*.
+    static let environment: [String: String] = {
+        let own = ProcessInfo.processInfo.environment
+        var env = loginEnvironment
+        for (k, v) in own where k != "PATH" { env[k] = v }
+        if env["PATH"]?.isEmpty ?? true {
+            // Last resort. Deliberately explicit rather than silent: doctor
+            // will name whatever is still missing.
+            env["PATH"] = [own["PATH"], "/opt/homebrew/bin", "/usr/local/bin",
+                           "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+                .compactMap { $0 }.joined(separator: ":")
+        }
+        return env
+    }()
+
+    static func process(_ args: [String]) -> Process {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: scriptPath)
+        p.arguments = args
+        p.environment = environment
+        // Nothing here ever wants input, and an inherited stdin is how a child
+        // ends up waiting on a terminal that is not there.
+        p.standardInput = FileHandle.nullDevice
         return p
     }
 
@@ -293,16 +369,15 @@ enum Engine {
         return msg.isEmpty ? "writing \(key) failed" : msg
     }
 
-    /// Whether a command resolves in the user's login shell — which is not the
-    /// same as this process's PATH.
+    /// Whether a command resolves on the engine's PATH — which is the login
+    /// shell's, not this process's. A direct lookup, since spawning a shell to
+    /// answer it cost more than every other check put together.
     static func hasCommand(_ name: String) -> Bool {
         if let cached = commandCache[name] { return cached }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lic", "command -v \(name) >/dev/null 2>&1"]
-        p.standardOutput = Pipe(); p.standardError = Pipe()
-        try? p.run(); p.waitUntilExit()
-        let found = p.terminationStatus == 0
+        let fm = FileManager.default
+        let found = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .contains { fm.isExecutableFile(atPath: "\($0)/\(name)") }
         commandCache[name] = found
         return found
     }
