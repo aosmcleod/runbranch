@@ -125,6 +125,7 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh doctor                   # check every config resolves
 ./runbranch.sh scan                     # repos not yet declared
 ./runbranch.sh add <repo>               # propose a config and write it
+./runbranch.sh remove studio            # delete its config and state, never its repo
 ./runbranch.sh cleanup studio           # remove worktrees
 ```
 

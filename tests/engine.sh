@@ -146,6 +146,49 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> remove"
+# A second project, so removing it cannot disturb the fixture the rest of the
+# suite depends on.
+cat > "$RB_PROJECTS_DIR/spare.conf" <<CONF
+NAME="Spare"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4322:/:python3 -m http.server 4322 --directory public"
+CONF
+mkdir -p "$RB_HOME/spare/logs"
+: > "$RB_HOME/spare/logs/web.log"
+echo spare >> "$RB_HOME/favourites"
+
+REMOVE_OUT="$("$ENGINE" remove spare 2>&1)"
+has "says the repository was untouched" "$REMOVE_OUT" "repository was not touched"
+is  "deletes the config"      "$([ -f "$RB_PROJECTS_DIR/spare.conf" ] && echo yes || echo no)" "no"
+is  "deletes the state"       "$([ -d "$RB_HOME/spare" ] && echo yes || echo no)" "no"
+is  "leaves the repo alone"   "$([ -d "$FIX/.git" ] && echo yes || echo no)" "yes"
+# grep -c prints 0 and still exits 1 when it matches nothing, so a `|| echo 0`
+# here appends a second line rather than supplying a default.
+FAV_LEFT="$(grep -cxF spare "$RB_HOME/favourites" 2>/dev/null)" || FAV_LEFT=0
+is  "unpins the favourite"    "$FAV_LEFT" "0"
+is  "the fixture survives"    "$([ -f "$RB_PROJECTS_DIR/fixture.conf" ] && echo yes || echo no)" "yes"
+
+# Removing the config from under a live run would orphan the servers, leaving
+# nothing that knows how to stop them.
+cat > "$RB_PROJECTS_DIR/busy.conf" <<CONF
+NAME="Busy"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4323:/:python3 -m http.server 4323 --directory public"
+CONF
+mkdir -p "$RB_HOME/busy"
+printf 'REF=main\nPIDS=1\n' > "$RB_HOME/busy/current"
+BUSY_OUT="$("$ENGINE" remove busy 2>&1)"; BUSY_RC=$?
+is  "refuses while running"    "$BUSY_RC" "1"
+is  "keeps a running project"  "$([ -f "$RB_PROJECTS_DIR/busy.conf" ] && echo yes || echo no)" "yes"
+has "names the command to fix it" "$BUSY_OUT" "stop busy"
+rm -rf "$RB_HOME/busy" "$RB_PROJECTS_DIR/busy.conf"
+
+UNKNOWN_OUT="$("$ENGINE" remove nosuchproject 2>&1)"
+has "rejects an unknown project" "$UNKNOWN_OUT" "No such project"
+
 echo "==> propose reads a repo"
 has "detects the default branch" "$("$ENGINE" propose "$FIX")" 'DEFAULT_BRANCH="main"'
 has "names the repo"             "$("$ENGINE" propose "$FIX")" "REPO="

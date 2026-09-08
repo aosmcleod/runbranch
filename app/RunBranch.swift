@@ -471,11 +471,16 @@ final class HealthMonitor: ObservableObject {
             URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
                 Task { @MainActor in
                     guard let self else { return }
-                    if error != nil {
+                    if let http = response as? HTTPURLResponse {
+                        self.status[t.name] = http.statusCode < 500 ? .healthy : .failing
+                    } else {
+                        // Covers both an error and the case of no error and no
+                        // HTTP response, which the previous version assigned
+                        // nothing for at all — leaving the status on whatever
+                        // it already held, which for a starting run meant
+                        // "Starting" forever with nothing to say why.
                         // Not answering yet is not the same as broken.
                         self.status[t.name] = self.status[t.name] == .healthy ? .failing : .starting
-                    } else if let http = response as? HTTPURLResponse {
-                        self.status[t.name] = http.statusCode < 500 ? .healthy : .failing
                     }
                 }
             }.resume()
@@ -1748,6 +1753,7 @@ struct ContentView: View {
     @StateObject private var health = HealthMonitor()
     @Environment(\.openWindow) private var openWindow
     @State private var presentation = Presentation.current
+    @State private var removing: Project?
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -2031,7 +2037,15 @@ struct ContentView: View {
             RunSheet(runner: runner, title: sheetTitle) {
                 showingRun = false
                 if let p = selectedProject { cache[p] = nil }
-                Task { await reload(); await refreshLive() }
+                Task {
+                    // An engine operation can change the project set — removal
+                    // does — and a selection pointing at something that no
+                    // longer exists leaves the detail pane describing a project
+                    // that is gone.
+                    await syncProjectList()
+                    await reload()
+                    await refreshLive()
+                }
             }
         }
         .sheet(item: $editingProject) { target in
@@ -2044,6 +2058,27 @@ struct ContentView: View {
                     await reload()
                 }
             }
+        }
+        .confirmationDialog(
+            "Remove \(removing?.name ?? "")?",
+            isPresented: Binding(get: { removing != nil },
+                                 set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Project", role: .destructive) {
+                guard let p = removing else { return }
+                removing = nil
+                run(["remove", p.id], "Removing \(p.name)")
+            }
+            Button("Cancel", role: .cancel) { removing = nil }
+        } message: {
+            Text("""
+                 Deletes this project's config file and any worktrees, logs and \
+                 ports Runbranch created for it.
+
+                 The repository at \(removing?.repo.replacingOccurrences(
+                     of: NSHomeDirectory(), with: "~") ?? "") is not touched.
+                 """)
         }
         .sheet(isPresented: $scanning) {
             ScanSheet { added in
@@ -2158,6 +2193,17 @@ struct ContentView: View {
         sheetTitle = title
         showingRun = true
         runner.start(args)
+    }
+
+    /// Re-read the project list and drop a selection that no longer resolves.
+    private func syncProjectList() async {
+        let found = await Task.detached { Engine.projects() }.value
+        projects = found
+        if let sel = selectedProject, !found.contains(where: { $0.id == sel }) {
+            cache[sel] = nil
+            snapshot = nil
+            selectedProject = found.first?.id
+        }
     }
 
     private func loadProjects() {
@@ -2296,6 +2342,8 @@ struct ContentView: View {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.repo)
         }
         Button("Open config in a text editor") { editConfig(p.id) }
+        Divider()
+        Button("Remove Project…", role: .destructive) { removing = p }
     }
 
     private func toggleFavourite(_ p: Project) {

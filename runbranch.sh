@@ -1150,6 +1150,34 @@ propose_config() {
 
 # Write a proposed config. Never overwrites: a config you have corrected is
 # worth more than a fresh guess.
+# Remove a project's declaration, and the state Runbranch created for it.
+#
+# Deliberately never touches the repository. That is the user's actual work and
+# it is not ours to delete; a project is a config file plus whatever we put in
+# RB_HOME, and both of those we made.
+remove_project() {
+  local name="$1"
+  local conf="$PROJECTS_DIR/$name.conf"
+  [ -f "$conf" ] || die "No such project: $name" "runbranch.sh projects"
+
+  # Refuse while it is running. Removing the config underneath a live run would
+  # orphan the servers with nothing left that knows how to stop them.
+  local state="$RB_HOME/$name/current"
+  if [ -f "$state" ]; then
+    die "$name is running." "runbranch.sh stop $name"
+  fi
+
+  rm -f "$conf"
+  # Worktrees, logs and metadata. Anything here was created by us.
+  [ -d "$RB_HOME/$name" ] && rm -rf "$RB_HOME/$name"
+  # And the favourite pin, which lives outside the config on purpose.
+  if [ -f "$FAVOURITES_FILE" ]; then
+    grep -vxF "$name" "$FAVOURITES_FILE" > "$FAVOURITES_FILE.tmp" 2>/dev/null || true
+    mv "$FAVOURITES_FILE.tmp" "$FAVOURITES_FILE"
+  fi
+  info "Removed $name. Its repository was not touched."
+}
+
 add_project() {
   local dir="$1" name out
   dir="${dir%/}"
@@ -1548,6 +1576,7 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh get <project>                   every editable field
   runbranch.sh set <project> <KEY> [value]     rewrite one key in the local conf
   runbranch.sh paths <project> [<ref>]
+  runbranch.sh remove <project>        delete a project's config and state, never its repo
   runbranch.sh reclaim [<project>]     reclaim ports and clear state a crash left
   runbranch.sh state <project>
   runbranch.sh remove-worktree <project> <ref>
@@ -1661,6 +1690,10 @@ EOF
       # Propose and write it, so the CLI and the app take the same path.
       [ $# -ge 2 ] || { usage; exit 2; }
       add_project "$2"
+      ;;
+    remove)
+      [ $# -ge 2 ] || { usage; exit 2; }
+      remove_project "$2"
       ;;
     propose) [ $# -ge 2 ] || { usage; exit 2; }; propose_config "$2" ;;
     doctor)
