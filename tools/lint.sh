@@ -34,5 +34,28 @@ for i, d, st in bad:
     print(f"    {st}")
 sys.exit(1 if bad else 0)
 PY
+# A function defined twice is silently the second one. Two identical copies of
+# the favourites block sat 1,200 lines apart in this file and nothing complained
+# — harmless only because they had not yet diverged.
+echo "==> duplicate definitions"
+python3 - "$REPO/runbranch.sh" <<'DUP' || FAIL=1
+import re, sys
+from collections import defaultdict
+seen = defaultdict(list)
+for i, line in enumerate(open(sys.argv[1]), 1):
+    m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{', line)
+    if m:
+        seen[m.group(1)].append(i)
+        continue
+    m = re.match(r'^([A-Z_][A-Z0-9_]*)=', line)
+    if m:
+        seen[m.group(1)].append(i)
+dupes = {k: v for k, v in seen.items() if len(v) > 1}
+for name, lines in sorted(dupes.items()):
+    print("  %s defined %d times: lines %s"
+          % (name, len(lines), ", ".join(map(str, lines))))
+sys.exit(1 if dupes else 0)
+DUP
+
 [ "$FAIL" = 0 ] && echo "==> clean"
 exit "$FAIL"

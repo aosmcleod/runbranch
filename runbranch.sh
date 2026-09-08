@@ -1410,39 +1410,7 @@ EOF
 
 pick_project() {
   PICKED_PROJECT=''
-IN_REPO_CONFIG=''
 
-# Favourites are a personal preference rather than a property of the project,
-# so they live in RB_HOME and not in a .conf that might be committed.
-FAVOURITES_FILE="$RB_HOME/favourites"
-
-is_favourite() {
-  [ -f "$FAVOURITES_FILE" ] || return 1
-  grep -qxF "$1" "$FAVOURITES_FILE"
-}
-
-set_favourite() {
-  local name="$1" on="$2" tmp
-  mkdir -p "$(dirname "$FAVOURITES_FILE")"
-  touch "$FAVOURITES_FILE"
-  tmp="$FAVOURITES_FILE.$$"
-  grep -vxF "$name" "$FAVOURITES_FILE" > "$tmp" 2>/dev/null || true
-  [ "$on" = on ] && printf '%s\n' "$name" >> "$tmp"
-  mv "$tmp" "$FAVOURITES_FILE"
-  ok "$name $( [ "$on" = on ] && echo added to || echo removed from ) favourites"
-}
-
-expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
-
-# Reset on every load so a second load cannot inherit the first, and so the
-# in-repo file and the local one both start from the same place.
-reset_project_defaults() {
-  NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
-  COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
-  MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
-  PROCFILE=0; PORT_BASE=5000; RUNTIME=""; PORTS="fixed"
-  DB_URL_VARS=""; DB_TEMPLATE=""; DB_ADMIN_USER=""
-}
   local i=0 name disp repo has line reply
   PROJ_NAMES=()
   printf '\n%sProjects%s\n\n' "$C_BLD" "$C_OFF"
