@@ -213,7 +213,7 @@ struct PortConflictSheet: View {
                         Text(c.target)
                             .font(.system(size: 12, weight: .medium))
                             .frame(width: 64, alignment: .leading)
-                        Text("port \(c.port)")
+                        Text("port \(String(c.port))")
                             .font(.system(size: 12, design: .monospaced))
                         Spacer()
                         Text(c.owner.isEmpty ? "another app (pid \(c.pid))" : c.owner)
@@ -244,12 +244,15 @@ struct PortConflictSheet: View {
                     .buttonStyle(.glass).controlSize(.large)
                 Spacer()
                 if conflict.canShift {
-                    Button("Run on Port \(shiftedFirstPort)", action: onShift)
+                    Button("Run on \(String(shiftedFirstPort))", action: onShift)
                         .buttonStyle(.glass).controlSize(.large)
                 }
                 if !conflict.owners.isEmpty {
-                    Button(switchLabel, action: onSwitch)
+                    // Stopping someone else's running server is the
+                    // destructive option here, whatever else it also is.
+                    Button("Stop and Switch", action: onSwitch)
                         .buttonStyle(.glassProminent).controlSize(.large)
+                        .tint(.red)
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -271,10 +274,6 @@ struct PortConflictSheet: View {
         (conflict.clashes.first?.port ?? 0) + conflict.freeOffset
     }
 
-    private var switchLabel: String {
-        let owners = conflict.owners
-        return owners.count == 1 ? "Stop \(owners[0]) and Switch" : "Stop Them and Switch"
-    }
 }
 
 /// A start that is waiting on the user to resolve a port conflict.
@@ -1196,6 +1195,11 @@ enum Screenshot {
         // controls — which reads as a broken app rather than a screenshot.
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Raising the main window buries any panel the scene opened, which is
+        // how the About shot came back showing the window behind it.
+        // The panel opens over the main window, so it needs raising after the
+        // window above has taken focus.
+        if Screenshot.scene == .about { AboutPanel.shared.show() }
         try? await Task.sleep(for: .milliseconds(600))
 
         do {
@@ -1217,13 +1221,6 @@ enum Screenshot {
                 }
                 if !ours.isEmpty { break }
                 try? await Task.sleep(for: .milliseconds(400))
-            }
-            // The About scene wants only the panel, not the panel plus the
-            // window behind it — the union of both is mostly empty space.
-            if Screenshot.scene == .about, ours.count > 1 {
-                ours = [ours.min(by: {
-                    $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
-                })!]
             }
 
             guard let target = ours.max(by: {
@@ -2877,6 +2874,10 @@ final class MenuBridge: ObservableObject {
 final class AboutPanel {
     static let shared = AboutPanel()
     private var panel: NSPanel?
+    /// So a capture can target this window rather than guessing at it by size.
+    /// Guessing picked an invisible 500x500 window AppKit keeps around and
+    /// cropped the main window instead.
+    nonisolated(unsafe) static var windowNumber: Int?
 
     func show() {
         if panel == nil {
@@ -2895,6 +2896,7 @@ final class AboutPanel {
             p.setContentSize(host.fittingSize)
             p.center()
             panel = p
+            AboutPanel.windowNumber = p.windowNumber
         }
         panel?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -2926,15 +2928,10 @@ struct AboutView: View {
                 .font(.system(size: 22, weight: .semibold))
                 .padding(.top, 14)
 
-            Text("Run a branch that isn't the one you're working on")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
-
             Text("Version \(version)")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .padding(.top, 10)
+                .padding(.top, 6)
 
             Spacer(minLength: 14)
 
