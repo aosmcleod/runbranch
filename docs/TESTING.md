@@ -2,7 +2,7 @@
 
 ## What is tested, and why those things
 
-`tests/engine.sh` — 34 assertions against a throwaway fixture repo and a
+`tests/engine.sh` — 48 assertions against a throwaway fixture repo and a
 throwaway state directory. Never against real projects.
 
 ```bash
@@ -23,12 +23,24 @@ bugs live, and this project has better evidence than guesses. Examples:
 | `the checkout did not move` | the whole premise of the tool; worth asserting rather than trusting |
 | `admits when it cannot tell` | `propose` used to emit a plausible command that did not exist, failing minutes into a run |
 | `reclaim removes the file` | a crash left state behind that read as a phantom run |
+| `refuses while running` | removal would have deleted the config from under a live run, orphaning servers with nothing left that knew how to stop them |
 
 ## What is not tested, honestly
 
-- **The SwiftUI layer.** No tests. Every UI bug this project has had was found
-  by looking at it, and several of my "fixes" were wrong until someone did.
-  `swiftc` catching zero warnings is the only automated check.
+- **The SwiftUI layer.** No tests, and this is the real gap rather than an
+  acceptable one. On 2026-09-08 it cost two bugs that both nearly shipped: the
+  run strip held the health monitor as a plain property instead of an
+  `@ObservedObject`, so a healthy run read "Starting" indefinitely while the
+  poll returned 200 to nobody; and applying the saved presentation at launch
+  called through to `openWindow`, so every start opened a duplicate window.
+
+  Neither was found by looking for it — the first showed up as an amber dot next
+  to a server that was demonstrably up, the second as a screenshot crop region
+  that inexplicably spanned two windows. Both were in `@Published` and
+  window-lifecycle wiring rather than in logic a unit test would reach, so the
+  fix is a smoke test that launches the real app and asserts a few facts about
+  the result. `tools/screenshot.sh` already does the hard part. Tracked as 1.9
+  in [ROADMAP.md](ROADMAP.md).
 - **The install path.** `pnpm install` against a real registry is slow and
   network-dependent; the fixture uses `python3 -m http.server` instead.
 - **Per-run databases.** Needs a live Postgres. Covered manually against

@@ -44,10 +44,22 @@ cd runbranch && ./make-app.sh && open .
 
 Drag `Runbranch.app` to the Dock.
 
-The build is ad-hoc signed, not notarised, so the first launch needs
+The build is signed locally, not notarised, so the first launch needs
 **right-click → Open** rather than a double-click. Notarising it would need an
 Apple Developer account; until then that prompt is the honest cost of building
 it yourself.
+
+By default `make-app.sh` signs ad-hoc, which means a new identity on every
+build — and macOS ties privacy permissions to the signature, so anything you
+grant the app is dropped the next time you rebuild. If that gets tiresome:
+
+```bash
+./tools/make-signing-identity.sh    # a self-signed identity, once
+```
+
+Builds then keep one stable identity, and a permission you grant survives a
+rebuild. It does not make the app notarised and does not remove the
+right-click on first launch.
 
 ---
 
@@ -86,7 +98,7 @@ A `Procfile` needs no target list at all — set `PROCFILE=1` and its processes
 become your targets.
 
 Full reference: **[docs/config.md](docs/config.md)**. Check any project with
-`./runbranch.sh doctor`.
+`./runbranch.sh doctor`, which names the command that fixes whatever it finds.
 
 ---
 
@@ -110,6 +122,23 @@ from the same source and thrown away with the worktree.
 **Status that keeps being true.** Uptime ticks. Health is polled, not assumed.
 Processes and ports orphaned by a crash, a sleep or a force quit are found and
 reclaimed on next launch — you should never go hunting with `lsof`.
+
+**Every setting, in the app.** A project's whole config is editable in a sheet —
+targets, presets, the copied files, the migration command, the sidebar glyph —
+and it writes the same `.conf` you would have edited by hand. Removing a project
+is in the right-click menu too, with a confirmation that names the repository it
+will *not* delete.
+
+<img src="docs/img/settings.png" width="620" alt="Editing a project's configuration in the app">
+
+**A sidebar that scales past four projects.** Running first, then favourites you
+have pinned, then the rest. Search filters branches; the filter menu narrows to
+your own, to open pull requests, or hides what is merged.
+
+**Out of the way when you want it.** Runbranch can live in the Dock, in the menu
+bar, or only in the menu bar — a status item showing what is running, with Stop
+and a way back to the window. A demo runs for an hour while you use other apps,
+and the window is not where you want the status.
 
 ---
 
@@ -180,11 +209,15 @@ tell you when it's up.**
 runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
 app/RunBranch.swift   the front end
 projects/*.conf       one file per project
+tests/engine.sh       engine tests; every case is a bug that really happened
 make-app.sh           builds Runbranch.app
 make-icons.sh         the graphic set, from assets/mark-source.png
-tools/                trim/centre, WebKit render, crop, demo data, screenshots
+tools/                icon processing, signing identity, demo data, screenshots
 docs/config.md        every config key
-docs/PLAN.md          design notes and roadmap
+docs/TESTING.md       what is covered, what is not, and how to add a case
+docs/ROADMAP.md       what ships when, and why each item is worth doing
+docs/PLAN.md          design notes
+docs/VISION.md        the README the tool should earn
 ```
 
 Nothing generated is committed. `Runbranch.app`, `build/` and `demo/` are all
