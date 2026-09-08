@@ -116,4 +116,7 @@ esac
 case "$WANT" in
   all|scan)     shoot "scan.png"       scan     "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
 esac
+case "$WANT" in
+  all|about)    shoot "about.png"      about    "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
+esac
 exit "$FAIL"

@@ -1118,7 +1118,7 @@ enum Screenshot {
 
     /// Which screen to photograph. The docs need more than one, and opening a
     /// sheet by hand before every capture is not automation.
-    enum Scene: String { case main, settings, scan, logs }
+    enum Scene: String { case main, settings, scan, logs, about }
 
     /// Capture diagnostics. Launched via LaunchServices the app has no useful
     /// stderr, so mirror everything into RB_SHOT_LOG for the script to show.
@@ -1218,6 +1218,14 @@ enum Screenshot {
                 if !ours.isEmpty { break }
                 try? await Task.sleep(for: .milliseconds(400))
             }
+            // The About scene wants only the panel, not the panel plus the
+            // window behind it — the union of both is mostly empty space.
+            if Screenshot.scene == .about, ours.count > 1 {
+                ours = [ours.min(by: {
+                    $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+                })!]
+            }
+
             guard let target = ours.max(by: {
                 $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
             }) else {
@@ -2072,6 +2080,8 @@ struct ContentView: View {
                     }
                 case .scan:
                     scanning = true
+                case .about:
+                    AboutPanel.shared.show()
                 case .logs:
                     showingLogs = true
                 }
@@ -2862,6 +2872,94 @@ final class MenuBridge: ObservableObject {
     var hasSelection: () -> Bool = { false }
 }
 
+/// Owns the About panel. One instance, built on first use.
+@MainActor
+final class AboutPanel {
+    static let shared = AboutPanel()
+    private var panel: NSPanel?
+
+    func show() {
+        if panel == nil {
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 400),
+                            styleMask: [.titled, .closable, .fullSizeContentView],
+                            backing: .buffered, defer: false)
+            p.titleVisibility = .hidden
+            p.titlebarAppearsTransparent = true
+            p.isMovableByWindowBackground = true
+            // Not a utility panel: it should not float over everything, and it
+            // should go away when the app is not in front.
+            p.hidesOnDeactivate = false
+            p.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: AboutView())
+            p.contentView = host
+            p.setContentSize(host.fittingSize)
+            p.center()
+            panel = p
+        }
+        panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// The About window.
+///
+/// Not `orderFrontStandardAboutPanel`, which was the first attempt: it renders
+/// the icon at a fixed, small size and takes no instruction about it, and it
+/// has nowhere to put a link. The layout below follows the same shape as the
+/// system panel — icon, name, one line of what it is, version, then the small
+/// print — because that shape is what people recognise.
+struct AboutView: View {
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // The app icon rather than the bare mark: the tile is what the
+            // system panels show, and it is what the app looks like in the Dock.
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 128, height: 128)
+                .padding(.top, 26)
+
+            Text("Runbranch")
+                .font(.system(size: 22, weight: .semibold))
+                .padding(.top, 14)
+
+            Text("Run a branch that isn't the one you're working on")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            Text("Version \(version)")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.top, 10)
+
+            Spacer(minLength: 14)
+
+            VStack(spacing: 3) {
+                Text("Created by Alec McLeod")
+                Text("MIT licensed — free to use, change and share")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+
+            Link("Runbranch on GitHub", destination: repoURL)
+                .font(.system(size: 11))
+                .padding(.top, 10)
+                .padding(.bottom, 24)
+        }
+        .multilineTextAlignment(.center)
+        .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var repoURL: URL {
+        URL(string: "https://github.com/aosmcleod/runbranch")!
+    }
+}
+
 /// Keeps the app alive with no window open.
 ///
 /// A SwiftUI app terminates when its last window closes, which makes menu-bar
@@ -2890,6 +2988,7 @@ struct RunBranchApp: App {
             ContentView()
         }
         .windowResizability(.contentMinSize)
+
         .commands {
             // Toggle Sidebar, which View otherwise lacks entirely.
             SidebarCommands()
@@ -2901,7 +3000,7 @@ struct RunBranchApp: App {
                 }
             }
             CommandGroup(replacing: .appInfo) {
-                Button("About Runbranch") { showAbout() }
+                Button("About Runbranch") { AboutPanel.shared.show() }
             }
             // Replacing .newItem drops "New Window" with it, which is the
             // right call: a second window on the same projects would show the
@@ -2928,25 +3027,5 @@ struct RunBranchApp: App {
         }
     }
 
-    /// The standard panel, which already knows how to lay out the icon, name
-    /// and version. A hand-built window would only be a worse copy of it.
-    private func showAbout() {
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-        let credits = NSMutableAttributedString(
-            string: "Run a branch that isn't the one you're working on, "
-                + "on a real port, beside your work, without touching your checkout.\n\n"
-                + "Projects are plain config files. MIT licensed.",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ])
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "Runbranch",
-            .applicationVersion: version,
-            .credits: credits,
-        ])
-        NSApp.activate(ignoringOtherApps: true)
-    }
 }
 
