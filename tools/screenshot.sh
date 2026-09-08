@@ -26,10 +26,32 @@ OUT="$REPO/docs/img"
 [ -x "$APP" ] || { echo "build the app first: ./make-app.sh" >&2; exit 1; }
 [ -d "$REPO/demo" ] || "$REPO/tools/make-demo.sh" >/dev/null
 
+# The running strip is only honest if something is actually running. A left-over
+# state file from an earlier session shows "Starting" with a day of uptime,
+# which is worse than showing nothing: it is a state the app cannot really be
+# in. So start a real demo run, and stop it on the way out.
+DEMO_ENV=(RB_PROJECTS_DIR="$REPO/demo/projects" RB_HOME="$REPO/demo/state" RB_NO_OPEN=1)
+demo_down() {
+  env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" stop northwind-web >/dev/null 2>&1 || true
+}
+echo "==> starting the demo run so health and uptime are real"
+demo_down
+env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" run northwind-web feat/checkout-summary web \
+  >/dev/null 2>&1 || echo "  !! demo run failed; the running strip will be empty" >&2
+
+# Wait for the port to actually answer. Capturing sooner catches the amber
+# "Starting" state, which is accurate but not what the docs are illustrating.
+for _ in $(seq 1 30); do
+  curl -sfo /dev/null "http://localhost:4173/" && break
+  /bin/sleep 1
+done
+curl -sfo /dev/null "http://localhost:4173/" \
+  || echo "  !! port 4173 never answered; health will read as starting" >&2
+trap 'demo_down; rm -rf "$EMPTY"' EXIT
+
 # Onboarding has to be shot against an empty config directory, since the
 # welcome screen only appears when nothing is declared.
 EMPTY="$(mktemp -d)"
-trap 'rm -rf "$EMPTY"' EXIT
 mkdir -p "$EMPTY/projects" "$EMPTY/state"
 
 # macOS ships no timeout(1), and a wedged capture must not wedge the pipeline.
@@ -41,11 +63,35 @@ run_limited() {
 shoot() {  # file, scene, projects-dir, state-dir
   local file="$1" scene="$2" pdir="$3" sdir="$4"
   # A previous instance still holding a window makes the next capture fail.
-  pkill -f 'RunBranch --screenshot' 2>/dev/null
+  # Any surviving instance, not just a screenshot one. While one holds the
+  # bundle, a newly launched instance starts but never creates a window and
+  # reports nothing at all — no error, no log, just a process that sits there
+  # until it is killed. The old pattern missed plain instances, so a single
+  # stray one silently broke every capture that followed.
+  pkill -f 'Runbranch.app/Contents/MacOS/RunBranch' 2>/dev/null
+  /bin/sleep 0.4
   rm -f "$OUT/$file"
-  RB_PROJECTS_DIR="$pdir" RB_HOME="$sdir" RB_MY_EMAILS="dana@example.com" \
-  RB_NO_OPEN=1 run_limited 45 "$APP" --screenshot "$OUT/$file" --scene "$scene" 2>&1 \
-    | grep -v AttributeGraph | sed 's/^/    /'
+  # Launch through LaunchServices, not by exec'ing Contents/MacOS/RunBranch.
+  # Exec'ing it proved unreliable: the process starts, never creates a window,
+  # logs nothing at all, and sits there until it is killed. Through `open` it
+  # works every time. A bundle wants to be launched as a bundle.
+  #
+  # -W waits for exit. --env is needed because a GUI launch does not inherit
+  # this shell's environment. Diagnostics come back through RB_SHOT_LOG, since
+  # the app's stderr is not connected to this terminal.
+  local log="$OUT/.capture.log"
+  : > "$log"
+  run_limited 75 open -n -W \
+    --env "RB_PROJECTS_DIR=$pdir" \
+    --env "RB_HOME=$sdir" \
+    --env "RB_MY_EMAILS=dana@example.com" \
+    --env "RB_SCAN_ROOT=/Users/you/Development" \
+    --env "RB_NO_OPEN=1" \
+    --env "RB_SHOT_LOG=$log" \
+    "$REPO/Runbranch.app" --args --screenshot "$OUT/$file" --scene "$scene" \
+    >/dev/null 2>&1
+  [ -s "$log" ] && sed 's/^/    /' "$log"
+  rm -f "$log"
   if [ -s "$OUT/$file" ]; then
     printf '  %-22s %s\n' "$file" "$(sips -g pixelWidth -g pixelHeight "$OUT/$file" \
       | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w"x"h}')"

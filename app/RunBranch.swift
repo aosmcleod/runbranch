@@ -945,6 +945,19 @@ enum Screenshot {
     /// sheet by hand before every capture is not automation.
     enum Scene: String { case main, settings, scan, logs }
 
+    /// Capture diagnostics. Launched via LaunchServices the app has no useful
+    /// stderr, so mirror everything into RB_SHOT_LOG for the script to show.
+    static func note(_ text: String) {
+        let line = text.hasSuffix("\n") ? text : text + "\n"
+        FileHandle.standardError.write(line.data(using: .utf8)!)
+        guard let path = ProcessInfo.processInfo.environment["RB_SHOT_LOG"] else { return }
+        if let h = FileHandle(forWritingAtPath: path) {
+            h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+        } else {
+            try? line.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+
     static var scene: Scene {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "--scene"), i + 1 < a.count,
@@ -967,19 +980,31 @@ enum Screenshot {
         // reaches the defer, so this exits the process outright.
         Task.detached {
             try? await Task.sleep(for: .seconds(30))
-            FileHandle.standardError.write("capture timed out after 30s\n".data(using: .utf8)!)
+            Screenshot.note("capture timed out after 30s")
             exit(2)
         }
         defer { NSApp.terminate(nil) }
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) ?? NSApp.windows.first
-        else { return }
+        // The main window, never a sheet: a sheet is a child window, and
+        // changing its level detaches it from the modal session it belongs to.
+        guard let window = NSApp.windows.first(where: {
+            $0.isVisible && $0.parent == nil
+        }) ?? NSApp.windows.first(where: { $0.isVisible })
+            ?? NSApp.windows.first else { return }
 
         // A window belongs to one Space, and a fullscreen app's Space excludes
         // it — which is why every earlier capture caught whatever was
         // fullscreen instead. This was the real cause, not the capture API.
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.level = .floating
-        if let screen = NSScreen.main {
+        // A window whose sharingType is .none is visible on screen but absent
+        // from the capture API's list entirely — the exact symptom we had, and
+        // indistinguishable from a missing permission from the outside.
+        window.sharingType = .readOnly
+        // Capture on the sharpest available display. A window on a 1x monitor
+        // can only ever yield 1x pixels, so if a Retina screen is attached the
+        // shot should happen there.
+        let best = NSScreen.screens.max { $0.backingScaleFactor < $1.backingScaleFactor }
+        if let screen = best ?? NSScreen.main {
             // Whatever size the mode asked for — onboarding is deliberately
             // small — just centred so every capture is framed the same way.
             let size = window.frame.size
@@ -987,43 +1012,40 @@ enum Screenshot {
             window.setFrame(NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
                                    width: size.width, height: size.height), display: true)
         }
-        // Glass samples whatever is behind the window, so without this every
-        // capture picks up the current wallpaper's colour and the docs change
-        // character whenever the wallpaper does. A neutral panel behind the
-        // window keeps glass reading as glass while making captures repeatable.
-        // It sits below our window and is never in the image itself, since the
-        // filter captures our window alone.
-        var backdrop: NSWindow?
-        if let screen = NSScreen.main {
-            let b = NSWindow(contentRect: screen.frame, styleMask: [.borderless],
-                             backing: .buffered, defer: false)
-            b.backgroundColor = NSColor(calibratedWhite: 0.42, alpha: 1)
-            b.isOpaque = true
-            b.ignoresMouseEvents = true
-            b.level = NSWindow.Level(rawValue: window.level.rawValue - 1)
-            b.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            b.orderFront(nil)
-            backdrop = b
-        }
-        defer { backdrop?.orderOut(nil) }
-
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        try? await Task.sleep(for: .seconds(2.5))     // layout, health poll, glass
+        try? await Task.sleep(for: .seconds(3.5))     // layout, health poll, glass
+
+        // Re-assert focus. Anything that grabbed it during the settle above
+        // leaves the window looking inactive — grey traffic lights, dimmed
+        // controls — which reads as a broken app rather than a screenshot.
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        try? await Task.sleep(for: .milliseconds(600))
 
         do {
             let id = CGWindowID(window.windowNumber)
-            // The window does not appear in the shareable list immediately, so
-            // poll rather than assume. Without this the capture succeeded only
-            // sometimes, which is worse than failing.
-            var target: SCWindow?
+            let mypid = ProcessInfo.processInfo.processIdentifier
+            // Poll for any on-screen window belonging to this app, rather than
+            // one specific window number. With a sheet open there are several,
+            // and which one NSApp lists first is not ours to predict — waiting
+            // on the wrong number simply timed out while the app sat visible
+            // on screen. The largest is the real window; the rest are its
+            // sheets, and they are all captured together below.
+            var ours: [SCWindow] = []
             for _ in 0..<12 {
                 let content = try await SCShareableContent.excludingDesktopWindows(
                     false, onScreenWindowsOnly: true)
-                if let w = content.windows.first(where: { $0.windowID == id }) { target = w; break }
+                ours = content.windows.filter {
+                    $0.owningApplication?.processID == mypid && $0.isOnScreen
+                        && $0.frame.width > 1 && $0.frame.height > 1
+                }
+                if !ours.isEmpty { break }
                 try? await Task.sleep(for: .milliseconds(400))
             }
-            guard let target else {
+            guard let target = ours.max(by: {
+                $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+            }) else {
                 // A granted call lists every on-screen window on the machine.
                 // A short list owned only by system processes means the grant
                 // is missing; owner names alone do not prove it is present.
@@ -1034,36 +1056,90 @@ enum Screenshot {
                     $0.owningApplication?.applicationName
                 }).sorted().joined(separator: ", ")
                 let ours = NSApp.windows.map {
-                    "#\($0.windowNumber) visible=\($0.isVisible) frame=\($0.frame)"
+                    "#\($0.windowNumber) visible=\($0.isVisible) "
+                        + "sharing=\($0.sharingType.rawValue) frame=\($0.frame)"
                 }.joined(separator: " | ")
+                // Full dump. Every inference so far has been wrong; this
+                // says exactly what the capture API can see and who owns it.
+                let mypid = ProcessInfo.processInfo.processIdentifier
+                let dump = (content?.windows ?? []).map { w in
+                    let app = w.owningApplication
+                    return "  id=\(w.windowID) pid=\(app?.processID ?? -1)"
+                        + " bundle=\(app?.bundleIdentifier ?? "?")"
+                        + " onScreen=\(w.isOnScreen) frame=\(w.frame)"
+                }.joined(separator: "\n")
+                Screenshot.note("our pid=\(mypid) windowNumber=\(id)\nvisible windows:\n\(dump)")
+
                 let msg = "window \(id) never became visible to the capture API. "
                     + "Capture API sees \(seen) windows owned by [\(owners)]; "
                     + "a short, system-only list means this build lacks the Screen "
                     + "Recording grant — see the header of tools/screenshot.sh.\n"
                     + "Our windows: \(ours)\n"
-                FileHandle.standardError.write(msg.data(using: .utf8)!)
+                Screenshot.note(msg)
                 return
             }
-            let filter = SCContentFilter(desktopIndependentWindow: target)
+            // A sheet is its own window, so a single-window filter composited
+            // it in flat: no shadow, no rounded edge, wrong against the parent.
+            // Filtering the display down to this app instead captures every
+            // window we own, each with its real chrome, and leaves everything
+            // else out.
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            let ourWindows = ours
+            let display = content.displays.first {
+                $0.frame.intersects(target.frame)
+            } ?? content.displays.first
+
+            let filter: SCContentFilter
+            var region: CGRect?
+            if let display, let me = content.applications.first(where: {
+                $0.processID == mypid
+            }) {
+                filter = SCContentFilter(display: display,
+                                         including: [me],
+                                         exceptingWindows: [])
+                // Union of our windows, padded so the drop shadow is not
+                // sheared off, then clamped to the display.
+                let union = ourWindows.dropFirst().reduce(
+                    ourWindows.first?.frame ?? target.frame) { $0.union($1.frame) }
+                region = union.insetBy(dx: -70, dy: -70)
+                    .intersection(CGRect(origin: .zero, size: display.frame.size))
+            } else {
+                filter = SCContentFilter(desktopIndependentWindow: target)
+            }
+
             let cfg = SCStreamConfiguration()
-            cfg.width = Int(target.frame.width * 2)
-            cfg.height = Int(target.frame.height * 2)
+            // Ask for exactly the native pixel size. A hardcoded 2x here
+            // upscaled the render on any display that is not 2x, which is what
+            // made every screenshot look soft. pointPixelScale is the display's
+            // real ratio, so this is sharp on Retina and on a 1x monitor alike.
+            let scale = CGFloat(filter.pointPixelScale)
+            let rect = region ?? filter.contentRect
+            if region != nil { cfg.sourceRect = rect }
+            cfg.width = Int((rect.width * scale).rounded())
+            cfg.height = Int((rect.height * scale).rounded())
             cfg.showsCursor = false
-            cfg.scalesToFit = true
+            cfg.scalesToFit = false
+            cfg.backgroundColor = .clear
             let shot = try await SCScreenshotManager.captureImage(
                 contentFilter: filter, configuration: cfg)
             guard let png = NSBitmapImageRep(cgImage: shot)
                     .representation(using: .png, properties: [:]) else { return }
             try png.write(to: URL(fileURLWithPath: path))
-            FileHandle.standardError.write(
-              "wrote \(path) (\(shot.width)x\(shot.height))\n".data(using: .utf8)!)
+            Screenshot.note("wrote \(path) (\(shot.width)x\(shot.height))")
+            // A sheet's modal session refuses NSApp.terminate, which left the
+            // watchdog to kill a run that had already succeeded. The file is
+            // written and flushed, so leave now.
+            exit(0)
         } catch {
+            // Not necessarily a permission problem, so do not assert one.
             let msg = """
             capture failed: \(error.localizedDescription)
-            add Runbranch.app under System Settings > Privacy & Security > Screen Recording
+            If that reads as a permission problem, add Runbranch.app under
+            System Settings > Privacy & Security > Screen Recording.
 
             """
-            FileHandle.standardError.write(msg.data(using: .utf8)!)
+            Screenshot.note(msg)
         }
     }
 }
@@ -1241,7 +1317,12 @@ struct ProjectEditor: View {
                         }
                         TextField("Default branch", text: bind("DEFAULT_BRANCH"))
                         LabeledContent("Repository") {
-                            Text(f["REPO"] ?? "").font(.system(size: 11, design: .monospaced))
+                            // Abbreviated, like Finder and the rest of the app.
+                            // A full path here also puts the account name into
+                            // any screenshot of this sheet.
+                            Text((f["REPO"] ?? "").replacingOccurrences(
+                                of: NSHomeDirectory(), with: "~"))
+                                .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                     }
@@ -1364,7 +1445,9 @@ struct ProjectEditor: View {
 struct ScanSheet: View {
     let onClose: (_ added: Int) -> Void
 
-    @State private var directory = NSHomeDirectory() + "/Development"
+    // Overridable so documentation captures do not publish a real account name.
+    @State private var directory = ProcessInfo.processInfo.environment["RB_SCAN_ROOT"]
+        ?? NSHomeDirectory() + "/Development"
     @State private var found: [(name: String, path: String)] = []
     @State private var chosen: Set<String> = []
     @State private var phase: Phase = .idle
@@ -1770,10 +1853,25 @@ struct ContentView: View {
             if let path = Screenshot.path {
                 // Open whatever the requested scene needs, then let it settle.
                 switch Screenshot.scene {
-                case .main:     break
-                case .settings: if let p = selectedProject { editingProject = .init(id: p) }
-                case .scan:     scanning = true
-                case .logs:     showingLogs = true
+                case .main:
+                    break
+                case .settings:
+                    // Projects load asynchronously, so a selection may not
+                    // exist yet. Waiting beats capturing an empty sheet.
+                    var waited = 0
+                    while selectedProject == nil && waited < 40 {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        waited += 1
+                    }
+                    if let p = selectedProject {
+                        editingProject = .init(id: p)
+                    } else {
+                        Screenshot.note("no project selected; settings sheet not opened")
+                    }
+                case .scan:
+                    scanning = true
+                case .logs:
+                    showingLogs = true
                 }
                 if Screenshot.scene != .main { try? await Task.sleep(for: .seconds(1.2)) }
                 await Screenshot.captureAndQuit(to: path)
