@@ -105,6 +105,14 @@ func write(_ cover: [Float], w: Int, h: Int, to path: String) throws {
     try png.write(to: URL(fileURLWithPath: path))
 }
 
+// The 1x geometry is decided once, and 2x is exactly twice it.
+//
+// Rounding each scale independently gave 22x18 and 43x36 — and 43 is not twice
+// 22. AppKit takes an image's size from the 1x representation and then stretches
+// the 2x one to fill it, so a half-pixel of rounding became a visible squeeze on
+// a HiDPI display. Representations of one image have to be integer multiples.
+var baseW = 0
+
 for (factor, name) in [(1, "MenuBarIcon.png"), (2, "MenuBarIcon@2x.png")] {
     let ch = contentHeight * factor
     let pad = canvasPad * factor
@@ -119,7 +127,13 @@ for (factor, name) in [(1, "MenuBarIcon.png"), (2, "MenuBarIcon@2x.png")] {
     }
     let cw = r.maxX - r.minX + 1, chh = r.maxY - r.minY + 1
     let step = Float(chh) / Float(ch)                 // source px per output px
-    let outW = max(1, Int((Float(cw) / step).rounded()))
+    let outW: Int
+    if factor == 1 {
+        outW = max(1, Int((Float(cw) / step).rounded()))
+        baseW = outW
+    } else {
+        outW = baseW * factor
+    }
 
     var down = [Float](repeating: 0, count: outW * ch)
     for oy in 0..<ch {

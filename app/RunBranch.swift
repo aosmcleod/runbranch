@@ -2545,6 +2545,10 @@ final class MenuBarController: NSObject, ObservableObject {
             // Loading the 1x by URL got that representation only.
             if let image = NSImage(named: "MenuBarIcon") {
                 image.isTemplate = true
+                // Never scale the axes independently. The default for a button
+                // is proportional, but saying so costs nothing and this glyph
+                // is not square, which is exactly when the difference shows.
+                button.imageScaling = .scaleProportionallyDown
                 // Its own size, deliberately. The mark is wider than it is
                 // tall and a status item is variable-width; forcing a square
                 // was what made the glyph small.
