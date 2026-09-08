@@ -1746,6 +1746,8 @@ struct ContentView: View {
     @State private var loadingProjects = true
     @StateObject private var runner = Runner()
     @StateObject private var health = HealthMonitor()
+    @Environment(\.openWindow) private var openWindow
+    @State private var presentation = Presentation.current
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -1853,6 +1855,16 @@ struct ContentView: View {
             // before anything is drawn rather than showing as a phantom run.
             _ = await Task.detached { Engine.reclaim() }.value
             loadProjects()
+
+            // The status item lives outside any view, so hand it the actions
+            // it needs and keep its state fed from here.
+            let bar = MenuBarController.shared
+            bar.onOpenWindow = { openWindow(id: "main") }
+            bar.onStop = {
+                guard let p = selectedProject else { return }
+                run(["stop", p], "Stopping")
+            }
+            bar.apply(Presentation.current)
 
             let bridge = MenuBridge.shared
             bridge.addProject = { addProject() }
@@ -2002,6 +2014,12 @@ struct ContentView: View {
                         Divider()
                         Button("Project settings…") { editingProject = .init(id: p.id) }
                         Button("Open config in a text editor") { editConfig(p.id) }
+                    }
+                    Divider()
+                    Picker("Show Runbranch in", selection: Binding(
+                        get: { presentation },
+                        set: { presentation = $0; MenuBarController.shared.apply($0) })) {
+                        ForEach(Presentation.allCases) { Text($0.label).tag($0) }
                     }
                 } label: { Image(systemName: "ellipsis") }
                 .menuIndicator(.hidden)
@@ -2197,6 +2215,11 @@ struct ContentView: View {
     private func applySelection(_ snap: ProjectSnapshot) {
         if snap.state.running { health.watch(snap.state.targets) } else { health.stop() }
 
+        let bar = MenuBarController.shared
+        bar.project = projects.first { $0.id == snap.id }?.name ?? snap.id
+        bar.branch = snap.state.ref
+        bar.running = snap.state.running
+
         if preset.isEmpty || !snap.presets.contains(preset) { preset = snap.presets.first ?? "" }
         if snap.state.running {
             selection = snap.state.ref
@@ -2363,6 +2386,164 @@ struct ContentView: View {
     }
 }
 
+/// Where the app appears: Dock, menu bar, or both.
+///
+/// Menu-bar-only means switching NSApplication's activation policy to
+/// .accessory, which removes the Dock icon and the app's own menu bar. That is
+/// reversible at runtime, but it also means the window can only be summoned
+/// from the status item, so the status menu always offers a way back.
+enum Presentation: String, CaseIterable, Identifiable {
+    case dock, both, menuBar
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .dock:    return "Dock Only"
+        case .both:    return "Dock and Menu Bar"
+        case .menuBar: return "Menu Bar Only"
+        }
+    }
+
+    var showsStatusItem: Bool { self != .dock }
+    var policy: NSApplication.ActivationPolicy { self == .menuBar ? .accessory : .regular }
+
+    static let key = "presentation"
+
+    static var current: Presentation {
+        get {
+            UserDefaults.standard.string(forKey: key).flatMap(Presentation.init) ?? .dock
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+    }
+}
+
+/// Owns the status item. One instance, created at launch.
+@MainActor
+final class MenuBarController: NSObject, ObservableObject {
+    static let shared = MenuBarController()
+
+    @Published private(set) var mode: Presentation = .dock
+    private var item: NSStatusItem?
+
+    /// What the menu shows. Set by the window as its state changes, since the
+    /// status item lives outside any view.
+    var project: String?
+    var branch: String?
+    var running = false
+    var healthLabel: String?
+    var onOpenWindow: (() -> Void)?
+    var onStop: (() -> Void)?
+
+    func apply(_ next: Presentation) {
+        mode = next
+        Presentation.current = next
+        NSApp.setActivationPolicy(next.policy)
+
+        if next.showsStatusItem {
+            if item == nil { install() }
+        } else {
+            if let item { NSStatusBar.system.removeStatusItem(item) }
+            item = nil
+        }
+
+        // Leaving .accessory does not bring the window back on its own, and
+        // entering it hides one that was open. Either way the user asked for a
+        // change of where the app lives, not for their window to vanish.
+        if next != .menuBar {
+            NSApp.activate(ignoringOtherApps: true)
+            onOpenWindow?()
+        }
+    }
+
+    private func install() {
+        let new = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = new.button {
+            // A template image is tinted by the system for light and dark menu
+            // bars and inverted while the menu is open. Anything else looks
+            // wrong in at least one of those states.
+            if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                image.isTemplate = true
+                image.size = NSSize(width: 18, height: 18)
+                button.image = image
+            } else {
+                button.title = "RB"
+            }
+            button.toolTip = "Runbranch"
+        }
+        new.menu = buildMenu()
+        item = new
+    }
+
+    /// Rebuilt on each open, so it reflects the current run rather than
+    /// whatever was true when the item was installed.
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.delegate = self
+        return menu
+    }
+
+    func refresh() {
+        guard let menu = item?.menu else { return }
+        menu.removeAllItems()
+
+        let heading: String
+        if let project {
+            heading = running
+                ? "\(project) — \(branch ?? "?")"
+                : "\(project) — not running"
+        } else {
+            heading = "No project selected"
+        }
+        let title = NSMenuItem(title: heading, action: nil, keyEquivalent: "")
+        title.isEnabled = false
+        menu.addItem(title)
+
+        if running, let healthLabel {
+            let status = NSMenuItem(title: healthLabel, action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
+        }
+
+        menu.addItem(.separator())
+
+        if running {
+            menu.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: "")
+                .target = self
+        }
+        menu.addItem(withTitle: "Open Runbranch", action: #selector(openWindow),
+                     keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Runbranch", action: #selector(quit), keyEquivalent: "q")
+            .target = self
+    }
+
+    @objc private func stop() { onStop?() }
+    @objc private func quit() { NSApp.terminate(nil) }
+
+    @objc private func openWindow() {
+        // From .accessory the app cannot bring up a window while it is not a
+        // regular app, so step back to .regular first and let the user's mode
+        // stand otherwise.
+        if mode == .menuBar { NSApp.setActivationPolicy(.regular) }
+        NSApp.activate(ignoringOtherApps: true)
+        onOpenWindow?()
+        if mode == .menuBar {
+            // Return to accessory once the window is up, so the Dock icon does
+            // not linger against the setting.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard self?.mode == .menuBar else { return }
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
+    }
+}
+
+extension MenuBarController: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) { refresh() }
+}
+
 /// Lets the main menu drive the window's actions.
 ///
 /// Menu commands are built at the App level, where none of ContentView's state
@@ -2379,8 +2560,22 @@ final class MenuBridge: ObservableObject {
     var hasSelection: () -> Bool = { false }
 }
 
+/// Keeps the app alive with no window open.
+///
+/// A SwiftUI app terminates when its last window closes, which makes menu-bar
+/// only mode impossible: switching to .accessory takes the window away and the
+/// app exits with it. In Dock-only mode the old behaviour is right — closing
+/// the window of a single-window utility should quit it.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {
+        Presentation.current == .dock
+    }
+}
+
 @main
 struct RunBranchApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
     init() {
         // No window tabbing. It fills View and Window with items — Show Tab
         // Bar, Merge All Windows, Move Tab to New Window — that do nothing
@@ -2389,7 +2584,7 @@ struct RunBranchApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Runbranch") {
+        WindowGroup("Runbranch", id: "main") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

@@ -39,6 +39,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # app tile is redundant and its light backing sits badly on a dark splash.
 cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
 
+# Menu bar template glyph, derived from the same source as the icon.
+swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-source.png" \
+  "$APP/Contents/Resources"
+
 # --- binary ---------------------------------------------------------------
 swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/RunBranch"
 echo "    binary built"
