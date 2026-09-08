@@ -24,10 +24,11 @@ demo a colleague's branch without reading anything.
 | 1.2 | ✅ **Onboarding** — welcome screen when nothing is declared, then a scan that proposes projects with progress | The blank first launch was the worst moment in the app |
 | 1.3 | ✅ **Sidebar sections** — Running, Favourites, Projects; hover `+` to add; pin from the context menu | Four projects fit in one list. Twenty do not |
 | 1.4 | ✅ **Menus** — About, File items with shortcuts, Toggle Sidebar, Help to the repository; no New Window, no window tabbing | An app with no menu bar items reads as unfinished, and About is where the licence and version belong |
-| 1.5 | **Docs** — README with the logo and screenshot, config reference | It is going public |
-| 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 38 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
+| 1.5 | ✅ **Docs** — README with the logo and four screenshots, config reference, TESTING, ROADMAP | It is going public |
+| 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 48 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
 | 1.8 | ✅ **Open-source guidelines** — CONTRIBUTING, CODE_OF_CONDUCT, TESTING, issue and PR templates | A repo without them asks every contributor to guess |
-| 1.6 | **Design and code review** — commonise, refactor, delete | Two months of accreted decisions want one pass |
+| 1.6 | ✅ **Design and code review** — one duplicated engine block removed, dead code deleted, home abbreviation commonised; the structural half is 1.10 | Two months of accreted decisions want one pass |
+| 1.11 | **Publish it** — no remote exists yet; 61 commits sitting on a local `main` | Every other v1 item was justified by "it is going public", which has not happened |
 | 1.10 | **Decompose ContentView** — 716 lines and 23 state properties in one view, in a 2,700-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
 | 1.9 | **A UI smoke test** — launch the app against the demo config, assert the window renders, a project loads, health resolves to healthy, and exactly one window exists | See below. This is the one item the original list got wrong |
 
