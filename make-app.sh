@@ -39,10 +39,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # app tile is redundant and its light backing sits badly on a dark splash.
 cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
 
-# Menu bar template glyph. From the seamed vector rather than the colour PNG:
-# the petals overlap, so a silhouette of the artwork is one blob, and the vector
-# carries the seams between them as real geometry.
-swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-template.svg" \
+# Menu bar template glyph, from the solid vector.
+#
+# The seamed vector is also here (assets/mark-template.svg) and cuts the petals
+# apart with hairline gaps, which is more faithful to the mark. Alec prefers the
+# solid silhouette at menu bar size, so that is what ships; swap the argument
+# to compare them.
+swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-silhouette.svg" \
   "$APP/Contents/Resources"
 
 # --- binary ---------------------------------------------------------------

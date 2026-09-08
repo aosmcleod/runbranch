@@ -1874,7 +1874,12 @@ struct ContentView: View {
             // The status item lives outside any view, so hand it the actions
             // it needs and keep its state fed from here.
             let bar = MenuBarController.shared
-            bar.onOpenWindow = { openWindow(id: "main") }
+            // Focuses the existing window rather than making one, because the
+            // scene above is a Window and not a WindowGroup.
+            bar.onOpenWindow = {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             bar.onStop = {
                 guard let p = selectedProject else { return }
                 run(["stop", p], "Stopping")
@@ -2491,7 +2496,24 @@ final class MenuBarController: NSObject, ObservableObject {
     /// `initial` is the application of the saved setting at launch, which must
     /// not summon a window: SwiftUI has already made one, and asking for
     /// another opens a duplicate.
+    // Menu-bar-only still shows its window at launch, because the scene opens
+    // one and closing it here does not work: tearing down ContentView takes
+    // with it the openWindow environment action that `onOpenWindow` captured,
+    // so the status menu could no longer bring a window back at all. Suppressing
+    // the launch window needs the scene to not open one in the first place —
+    // `.defaultLaunchBehavior(.suppressed)` — which is a per-scene decision and
+    // cannot be made conditional on a runtime setting.
+    private var closeObserver: NSObjectProtocol?
+
     func apply(_ next: Presentation, initial: Bool = false) {
+        if closeObserver == nil {
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: nil, queue: .main
+            ) { _ in
+                Task { @MainActor in MenuBarController.shared.windowClosed() }
+            }
+        }
+
         mode = next
         Presentation.current = next
         NSApp.setActivationPolicy(next.policy)
@@ -2579,20 +2601,29 @@ final class MenuBarController: NSObject, ObservableObject {
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func openWindow() {
-        // From .accessory the app cannot bring up a window while it is not a
-        // regular app, so step back to .regular first and let the user's mode
-        // stand otherwise.
+        // An .accessory app cannot raise a window, so become .regular first —
+        // and then STAY there while the window is up.
+        //
+        // Reverting on a timer instead does not work: the policy change lands
+        // while the window is still being created and takes it with it, so
+        // Open silently produced nothing. The Dock icon is tied to whether a
+        // window is open, which is also the behaviour people expect from a
+        // menu bar app that can show one.
         if mode == .menuBar { NSApp.setActivationPolicy(.regular) }
         NSApp.activate(ignoringOtherApps: true)
         onOpenWindow?()
-        if mode == .menuBar {
-            // Return to accessory once the window is up, so the Dock icon does
-            // not linger against the setting.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard self?.mode == .menuBar else { return }
-                NSApp.setActivationPolicy(.accessory)
-            }
+    }
+
+    /// Back to accessory once the last window goes away, so the Dock icon does
+    /// not linger against the setting.
+    func windowClosed() {
+        guard mode == .menuBar else { return }
+        // The closing window is still in the list at notification time.
+        let remaining = NSApp.windows.filter {
+            $0.isVisible && $0.parent == nil && !($0 is NSPanel)
         }
+        guard remaining.count <= 1 else { return }
+        NSApp.setActivationPolicy(.accessory)
     }
 }
 
@@ -2640,7 +2671,7 @@ struct RunBranchApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Runbranch", id: "main") {
+        Window("Runbranch", id: "main") {
             ContentView()
         }
         .windowResizability(.contentMinSize)
