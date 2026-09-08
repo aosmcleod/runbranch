@@ -7,13 +7,16 @@
 #   ./tools/screenshot.sh main       just one
 #
 # The app photographs its own window (see Screenshot in app/RunBranch.swift).
-# It needs Screen Recording permission, and macOS will not prompt for it on an
-# ad-hoc-signed binary launched from a terminal — add it by hand:
+# It needs Screen Recording permission, which macOS will not prompt for on a
+# binary launched from a terminal. Grant it by hand, once:
 #   System Settings > Privacy & Security > Screen Recording > + > Runbranch.app
 #
-# Note the grant is tied to the code signature, and an ad-hoc signature changes
-# on every build. Re-granting after a rebuild is expected until the app is
-# signed with a real identity.
+# That grant is keyed to the app's code signature. An ad-hoc signature changes
+# with every build, so the grant would be dropped on every rebuild — run
+# ./tools/make-signing-identity.sh first and the signature stays fixed, which
+# means granting once is enough. Symptom if you skip it: every capture fails
+# with "never became visible to the capture API", and the reported window list
+# is short and owned only by system processes.
 
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

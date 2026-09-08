@@ -74,9 +74,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# An ad-hoc signature is enough for a local build, and it keeps the bundle
-# identity stable so macOS does not re-prompt for permissions on every rebuild.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# Signing identity. An ad-hoc signature (-s -) derives the identity from the
+# binary's own hash, so every rebuild looks like a different app to macOS and
+# any privacy grant given to the previous build is dropped. That is fine for
+# just running the app, but it revokes the Screen Recording permission the
+# screenshot pipeline needs, every single time.
+#
+# So prefer a fixed local certificate when one exists. ./tools/make-signing-identity.sh
+# creates it; without it we fall back to ad-hoc and say what that costs.
+SIGN_ID="Runbranch Local Signing"
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGN_ID"; then
+  codesign --force --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
+    && echo "    signed with $SIGN_ID" \
+    || { echo "    !! signing with $SIGN_ID failed, falling back to ad-hoc" >&2
+         codesign --force --sign - "$APP" >/dev/null 2>&1 || true; }
+else
+  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+  echo "    signed ad-hoc (screenshots will need re-granting; see tools/make-signing-identity.sh)"
+fi
 
 touch "$APP"
 echo "    done"

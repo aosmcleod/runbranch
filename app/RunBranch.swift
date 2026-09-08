@@ -912,6 +912,26 @@ enum Screenshot {
             window.setFrame(NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
                                    width: size.width, height: size.height), display: true)
         }
+        // Glass samples whatever is behind the window, so without this every
+        // capture picks up the current wallpaper's colour and the docs change
+        // character whenever the wallpaper does. A neutral panel behind the
+        // window keeps glass reading as glass while making captures repeatable.
+        // It sits below our window and is never in the image itself, since the
+        // filter captures our window alone.
+        var backdrop: NSWindow?
+        if let screen = NSScreen.main {
+            let b = NSWindow(contentRect: screen.frame, styleMask: [.borderless],
+                             backing: .buffered, defer: false)
+            b.backgroundColor = NSColor(calibratedWhite: 0.42, alpha: 1)
+            b.isOpaque = true
+            b.ignoresMouseEvents = true
+            b.level = NSWindow.Level(rawValue: window.level.rawValue - 1)
+            b.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            b.orderFront(nil)
+            backdrop = b
+        }
+        defer { backdrop?.orderOut(nil) }
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         try? await Task.sleep(for: .seconds(2.5))     // layout, health poll, glass
