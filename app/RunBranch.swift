@@ -944,10 +944,6 @@ enum Screenshot {
         return a[i + 1]
     }
 
-    /// Set while capturing, so the backdrop panel can be excluded from the
-    /// crop region — it is one of this process's windows and covers the screen.
-    nonisolated(unsafe) static var backdropNumber: Int?
-
     /// Which screen to photograph. The docs need more than one, and opening a
     /// sheet by hand before every capture is not automation.
     enum Scene: String { case main, settings, scan, logs }
@@ -1019,27 +1015,6 @@ enum Screenshot {
             window.setFrame(NSRect(x: vf.midX - size.width / 2, y: vf.midY - size.height / 2,
                                    width: size.width, height: size.height), display: true)
         }
-        // An opaque panel behind the window, just below it in the stacking
-        // order. The capture below is display-bounded — the only way to get
-        // real window shadows — so this is what hides every other app and
-        // keeps the surround identical from one run to the next. An earlier
-        // attempt at this had no effect because the capture was scoped to this
-        // application, which excluded the panel along with everything else.
-        var backdrop: NSWindow?
-        if let screen = window.screen ?? NSScreen.main {
-            let b = NSWindow(contentRect: screen.frame, styleMask: [.borderless],
-                             backing: .buffered, defer: false)
-            b.backgroundColor = NSColor(calibratedWhite: 0.16, alpha: 1)
-            b.isOpaque = true
-            b.ignoresMouseEvents = true
-            b.level = NSWindow.Level(rawValue: window.level.rawValue - 1)
-            b.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            b.orderFront(nil)
-            backdrop = b
-            backdropNumber = b.windowNumber
-        }
-        defer { backdrop?.orderOut(nil) }
-
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         try? await Task.sleep(for: .seconds(3.5))     // layout, health poll, glass
@@ -1067,7 +1042,6 @@ enum Screenshot {
                 ours = content.windows.filter {
                     $0.owningApplication?.processID == mypid && $0.isOnScreen
                         && $0.frame.width > 1 && $0.frame.height > 1
-                        && Int($0.windowID) != Screenshot.backdropNumber
                 }
                 if !ours.isEmpty { break }
                 try? await Task.sleep(for: .milliseconds(400))
@@ -1121,13 +1095,12 @@ enum Screenshot {
 
             let filter: SCContentFilter
             var region: CGRect?
-            if let display {
-                // The whole display, cropped below to our windows plus a
-                // margin. Scoping the filter to this application produced a
-                // clean background but no shadows at all, and a macOS sheet
-                // reads as floating almost entirely through its shadow. The
-                // backdrop above is what keeps everything else out of frame.
-                filter = SCContentFilter(display: display, excludingWindows: [])
+            if let display, let me = content.applications.first(where: {
+                $0.processID == mypid
+            }) {
+                filter = SCContentFilter(display: display,
+                                         including: [me],
+                                         exceptingWindows: [])
                 // Union of our windows, padded so the drop shadow is not
                 // sheared off, then clamped to the display.
                 let union = ourWindows.dropFirst().reduce(
@@ -1151,13 +1124,6 @@ enum Screenshot {
             cfg.showsCursor = false
             cfg.scalesToFit = false
             cfg.backgroundColor = .clear
-            // Shadows are dropped by default, which is why sheets came out
-            // looking pasted on: a macOS sheet is read as floating almost
-            // entirely through its shadow. These are the display-bounded
-            // variants, because the filter above is display-bounded; the
-            // single-window ones do nothing here.
-            cfg.ignoreShadowsDisplay = false
-            cfg.ignoreGlobalClipDisplay = false
             let shot = try await SCScreenshotManager.captureImage(
                 contentFilter: filter, configuration: cfg)
             guard let png = NSBitmapImageRep(cgImage: shot)
@@ -1306,6 +1272,27 @@ struct SymbolPicker: View {
 /// The engine owns the file: this reads `get` and writes changed keys through
 /// `set`, which keeps comments, backs the file up and reverts anything that
 /// will not load. So the worst a mistake here can do is show an error.
+/// Makes a sheet's own window transparent so the material behind the content
+/// is what you see.
+///
+/// A SwiftUI sheet on macOS is a real NSWindow that fills itself with an opaque
+/// background colour. Anything translucent placed inside it therefore composites
+/// against that fill rather than against the parent window, so the sheet reads
+/// as a flat filled rectangle with no depth to it. Clearing the window's own
+/// background is what lets the material — and the window's shadow — show.
+struct SheetChrome: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let w = view.window else { return }
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.hasShadow = true
+        }
+    }
+}
+
 struct ProjectEditor: View {
     let projectID: String
     let onClose: (_ changed: Bool) -> Void
@@ -1435,9 +1422,10 @@ struct ProjectEditor: View {
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
-        // Shorter than the window, so the sheet sits inside its parent rather
-        // than hanging past the bottom edge and reading as a detached panel.
-        .frame(width: 560, height: 500)
+        .frame(width: 560, height: 620)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .presentationBackground(.clear)
+        .background(SheetChrome())
         .task {
             let loaded = await Task.detached { Engine.get(projectID) }.value
             f = loaded; original = loaded; loading = false
@@ -1603,6 +1591,9 @@ struct ScanSheet: View {
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
         .frame(width: 560, height: 480)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .presentationBackground(.clear)
+        .background(SheetChrome())
     }
 
     private func chooseFolder() {
@@ -1711,7 +1702,7 @@ struct WelcomeView: View {
 struct WindowSizer: NSViewRepresentable {
     let compact: Bool
     static let compactSize = NSSize(width: 520, height: 400)
-    static let fullSize = NSSize(width: 1000, height: 620)
+    static let fullSize = NSSize(width: 1000, height: 720)
 
     final class Coordinator { var applied: Bool? }
     func makeCoordinator() -> Coordinator { Coordinator() }
