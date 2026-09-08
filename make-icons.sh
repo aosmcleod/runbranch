@@ -39,8 +39,19 @@ ALPHA_CUTOFF=0.22     # below this, a pixel is fringe rather than soft edge
 ICON_FRACTION=0.72    # the glyph inside the system's tile. Apple's own icons put
                       # roughly this much glyph inside a tile that fills the
                       # canvas; 86% left almost no margin at all
-MARK_FRACTION=0.94    # the standalone mark keeps a little breathing room, and
-                      # that margin is also what the optical nudge moves within
+MARK_FRACTION=0.94    # the standalone mark keeps a little breathing room
+
+# Centring is geometric, not optical.
+#
+# `trim` can put the centre of MASS at the canvas centre, which is right for a
+# mark whose visual weight sits away from the middle of its bounding box — a
+# triangle, an arrow. It is wrong for this one. The petals are close to
+# symmetric, so the eye reads the bounding box, and mass-centring pushed the
+# glyph 42px right of centre in the tile (margins L164 R122) and left the
+# standalone mark with a 3px right margin against 58 on the left.
+#
+# Pass `optical` as trim's last argument to go back, and measure the margins
+# afterwards rather than trusting either mode to look right.
 
 [ -f "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
 command -v swiftc >/dev/null 2>&1 || { echo "swiftc missing: xcode-select --install" >&2; exit 1; }
@@ -52,8 +63,8 @@ if [ ! -x "$BIN/trim" ] || [ "$REPO/tools/trim.swift" -nt "$BIN/trim" ]; then
 fi
 
 echo "==> mark"
-"$BIN/trim" "$SRC" "$REPO/assets/mark.png"       1024 "$MARK_FRACTION" "$ALPHA_CUTOFF" optical 2>&1 | sed 's/^/    /'
-"$BIN/trim" "$SRC" "$ICON/Assets/mark.png"       1024 "$ICON_FRACTION" "$ALPHA_CUTOFF" optical >/dev/null 2>&1
+"$BIN/trim" "$SRC" "$REPO/assets/mark.png"       1024 "$MARK_FRACTION" "$ALPHA_CUTOFF" 2>&1 | sed 's/^/    /'
+"$BIN/trim" "$SRC" "$ICON/Assets/mark.png"       1024 "$ICON_FRACTION" "$ALPHA_CUTOFF" >/dev/null 2>&1
 
 # --- the manifest -----------------------------------------------------------
 # system-light / system-dark tell the system to draw its own tile per
