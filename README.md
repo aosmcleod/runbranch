@@ -212,6 +212,7 @@ projects/*.conf       one file per project
 tests/engine.sh       engine tests; every case is a bug that really happened
 make-app.sh           builds Runbranch.app
 make-icons.sh         the graphic set, from assets/mark-source.png
+assets/               the mark: colour PNG, and vectors for the mono templates
 tools/                icon processing, signing identity, demo data, screenshots
 docs/config.md        every config key
 docs/TESTING.md       what is covered, what is not, and how to add a case

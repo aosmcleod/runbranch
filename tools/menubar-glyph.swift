@@ -1,24 +1,22 @@
-// Renders a monochrome template image for the menu bar from the logo mark.
+// Renders the monochrome template image for the menu bar.
 //
 // A menu bar item has to be a template: macOS tints it for light and dark menu
 // bars and inverts it while the menu is open, so colour and gradient cannot
-// survive the trip. Only the silhouette does — which is a problem when the
-// mark's shapes overlap, because their union is then one contiguous blob with
-// nothing to say where one shape ends.
+// survive the trip. Only the silhouette does — and the mark's two petals
+// overlap, so their plain silhouette is one blob with nothing to say where a
+// petal ends.
 //
-// So: cut a hairline gap where two materially different hues meet.
+// The source is therefore a vector with the seams drawn in as real geometry:
+// the two petals and the lens where they cross are separate paths with gaps
+// between them. Rendering that gives an exact result at any size.
 //
-// The width of that gap is the whole trick, and an earlier attempt got it
-// wrong. Marking any output pixel whose source block straddled a hue boundary
-// made the gap as wide as a block — about 70 source pixels at 18pt — and it ate
-// more of the glyph than it revealed. Sizing the band in OUTPUT pixels and
-// converting back to source works: one output pixel wide, along the actual
-// boundary, at any target size.
+// This replaced deriving the seams from the colour PNG, which worked but needed
+// hue bands tuned by hand to the mark, and re-tuning whenever it changed. If
+// you ever have to go back to it, the two things that make it work are in the
+// `app-icons` skill; the short version is that the gap must be sized in output
+// pixels and cut between hue-classified regions, not wherever hue changes.
 //
-// Marks whose parts are already separated by transparency have no internal
-// boundary to find, so they fall through this unchanged.
-//
-//   swift tools/menubar-glyph.swift <source.png> <out-dir>
+//   swift tools/menubar-glyph.swift <source.svg> <out-dir>
 //
 // Writes MenuBarIcon.png (18pt) and MenuBarIcon@2x.png (36pt).
 
@@ -27,123 +25,81 @@ import AppKit
 let args = CommandLine.arguments
 guard args.count == 3 else {
     FileHandle.standardError.write(
-        "usage: menubar-glyph <source.png> <out-dir>\n".data(using: .utf8)!)
+        "usage: menubar-glyph <source.svg> <out-dir>\n".data(using: .utf8)!)
     exit(2)
 }
-guard let src = NSImage(contentsOfFile: args[1]),
-      let cg = src.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-    FileHandle.standardError.write("cannot read \(args[1])\n".data(using: .utf8)!)
+guard let art = NSImage(contentsOfFile: args[1]), art.size.width > 0 else {
+    FileHandle.standardError.write("""
+        cannot read \(args[1])
+
+        This wants the seamed vector — two petals and the lens where they cross
+        as separate paths. A raster source will load but its silhouette is a
+        single blob, which is the whole thing this avoids.
+
+        """.data(using: .utf8)!)
     exit(1)
 }
 
-/// Alpha below this counts as absent. Edges are antialiased and panels may be
-/// semi-transparent, so a naive test picks up a halo.
-let alphaCutoff: Float = 0.35
-// The mark's shapes are identified by hue band, and the bands below are tuned
-// to the current mark: a warm shape, a cool shape, and the blended colour where
-// they overlap. Reacting to local hue *distance* instead was tried and is worse
-// — it fires on the gradient inside a single shape and, more importantly, only
-// nicks the seam where the colour happens to change fastest, rather than
-// following the whole boundary between the two shapes.
-//
-// Retune these if the mark changes. `tools/hue-probe` prints a scanline.
-let warmBand: (Float, Float) = (0.85, 0.20)   // wraps through 0
-let blendBand: (Float, Float) = (0.72, 0.85)  // the overlap
+/// A little air, so the glyph does not touch the edge of its slot.
+let inset: CGFloat = 0.03
+/// Supersampling factor. The seams are roughly a pixel wide at the target, so
+/// rendering straight to 18pt leaves them to the rasteriser's antialiasing;
+/// rendering large and averaging down keeps them as a definite line.
+let over = 32
 
-let W = cg.width, H = cg.height
-let read = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4,
-                     space: CGColorSpaceCreateDeviceRGB(),
-                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-read.draw(cg, in: CGRect(x: 0, y: 0, width: W, height: H))
-let px = read.data!.bindMemory(to: UInt8.self, capacity: W * H * 4)
+/// Fit the vector into a square of `side`, centred, and return its coverage.
+func coverage(side: Int) -> [Float] {
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                               isPlanar: false, colorSpaceName: .deviceRGB,
+                               bytesPerRow: side * 4, bitsPerPixel: 32)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let avail = CGFloat(side) * (1 - inset * 2)
+    let scale = min(avail / art.size.width, avail / art.size.height)
+    let w = art.size.width * scale, h = art.size.height * scale
+    art.draw(in: NSRect(x: (CGFloat(side) - w) / 2, y: (CGFloat(side) - h) / 2,
+                        width: w, height: h))
+    NSGraphicsContext.restoreGraphicsState()
 
-/// 0 absent, 1 the warm shape, 2 the overlap, 3 the cool shape.
-var cls = [UInt8](repeating: 0, count: W * H)
-var alpha = [Float](repeating: 0, count: W * H)
-for i in 0..<(W * H) {
-    let a = Float(px[i * 4 + 3]) / 255
-    alpha[i] = a
-    guard a > 0.5 else { continue }
-    let c = NSColor(red: CGFloat(px[i * 4]) / 255, green: CGFloat(px[i * 4 + 1]) / 255,
-                    blue: CGFloat(px[i * 4 + 2]) / 255, alpha: 1)
-    let h = Float(c.hueComponent)
-    if h >= warmBand.0 || h < warmBand.1            { cls[i] = 1 }
-    else if h >= blendBand.0 && h < blendBand.1     { cls[i] = 2 }
-    else                                            { cls[i] = 3 }
+    // Only the alpha matters; the paths' own colour is irrelevant to a template.
+    let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+                        bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(rep.cgImage!, in: CGRect(x: 0, y: 0, width: side, height: side))
+    let px = ctx.data!.bindMemory(to: UInt8.self, capacity: side * side * 4)
+    return (0..<(side * side)).map { Float(px[$0 * 4 + 3]) / 255 }
 }
 
-/// True when nothing in the mark overlaps — no two bands are both present — in
-/// which case transparency already separates the shapes and there is no seam to
-/// cut. A mark like that falls through unchanged.
-let hasOverlap = cls.contains(2)
-
-func render(size S: Int) -> CGImage {
-    // One output pixel spans this many source pixels, so this is what "a
-    // one-pixel gap" means down here.
-    let span = Float(W) / Float(S)
-    let r = max(1, Int((span * 0.55).rounded()))
-
-    // Sample a ring rather than a filled disc: the band only needs to know
-    // whether a different hue is within reach, not how much of one.
-    let ring: [(Int, Int)] = (0..<12).map { k in
-        let t = Float(k) / 12 * 2 * .pi
-        return (Int((cos(t) * Float(r)).rounded()), Int((sin(t) * Float(r)).rounded()))
-    }
-
-    var gap = [Bool](repeating: false, count: W * H)
-    if hasOverlap {
-        // Cut along the boundary between the warm shape and everything else,
-        // counting the overlap as part of the other shape so the front one
-        // reads unbroken.
-        for y in 0..<H {
-            for x in 0..<W {
-                let i = y * W + x
-                guard cls[i] == 2 || cls[i] == 3 else { continue }
-                for (dx, dy) in ring {
-                    let nx = x + dx, ny = y + dy
-                    guard nx >= 0, nx < W, ny >= 0, ny < H else { continue }
-                    if cls[ny * W + nx] == 1 { gap[i] = true; break }
-                }
-            }
-        }
-    }
-
-    let out = CGContext(data: nil, width: S, height: S, bitsPerComponent: 8, bytesPerRow: S * 4,
-                        space: CGColorSpaceCreateDeviceRGB(),
+func write(_ cover: [Float], side: Int, to path: String) throws {
+    let out = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+                        bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    // Average the coverage of the source block each output pixel covers, then
-    // threshold. Thresholding after the average keeps the edge smooth rather
-    // than stair-stepped, and renders the band as a soft one-pixel line.
-    let scale = Float(W) / Float(S)
-    for oy in 0..<S {
-        for ox in 0..<S {
-            let x0 = Int(Float(ox) * scale), x1 = min(W, Int(Float(ox + 1) * scale))
-            let y0 = Int(Float(oy) * scale), y1 = min(H, Int(Float(oy + 1) * scale))
-            var sum: Float = 0
-            var n = 0
-            for sy in y0..<max(y0 + 1, y1) {
-                for sx in x0..<max(x0 + 1, x1) {
-                    let i = sy * W + sx
-                    sum += gap[i] ? 0 : alpha[i]
-                    n += 1
-                }
-            }
-            let cover = n > 0 ? sum / Float(n) : 0
-            let a = cover < alphaCutoff ? 0 : min(1, cover * 1.25)
-            out.setFillColor(CGColor(gray: 0, alpha: CGFloat(a)))
-            out.fill(CGRect(x: ox, y: S - 1 - oy, width: 1, height: 1))
+    for y in 0..<side {
+        for x in 0..<side {
+            out.setFillColor(CGColor(gray: 0, alpha: CGFloat(cover[y * side + x])))
+            out.fill(CGRect(x: x, y: side - 1 - y, width: 1, height: 1))
         }
     }
-    return out.makeImage()!
+    let png = NSBitmapImageRep(cgImage: out.makeImage()!)
+        .representation(using: .png, properties: [:])!
+    try png.write(to: URL(fileURLWithPath: path))
 }
 
 for (side, name) in [(18, "MenuBarIcon.png"), (36, "MenuBarIcon@2x.png")] {
-    let glyph = render(size: side)
-    guard let png = NSBitmapImageRep(cgImage: glyph)
-            .representation(using: .png, properties: [:]) else {
-        FileHandle.standardError.write("failed at \(side)pt\n".data(using: .utf8)!)
-        exit(1)
+    let big = side * over
+    let hi = coverage(side: big)
+    var down = [Float](repeating: 0, count: side * side)
+    let cells = Float(over * over)
+    for oy in 0..<side {
+        for ox in 0..<side {
+            var sum: Float = 0
+            for sy in (oy * over)..<((oy + 1) * over) {
+                for sx in (ox * over)..<((ox + 1) * over) { sum += hi[sy * big + sx] }
+            }
+            down[oy * side + ox] = sum / cells
+        }
     }
-    try png.write(to: URL(fileURLWithPath: args[2] + "/" + name))
+    try write(down, side: side, to: args[2] + "/" + name)
     print("    \(name) written (\(side)pt)")
 }
