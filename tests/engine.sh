@@ -146,6 +146,65 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> port conflicts name the run holding the port"
+# Two projects that both default to the same port is the common case: Vite
+# picks 5173 for everything, so a second project collides with the first.
+mkdir -p "$RB_HOME/holder/worktrees/main"
+cat > "$RB_PROJECTS_DIR/holder.conf" <<CONF
+NAME="Holder"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4399:/:python3 -m http.server 4399"
+CONF
+cat > "$RB_PROJECTS_DIR/wants.conf" <<CONF
+NAME="Wants"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4399:/:python3 -m http.server 4399"
+CONF
+# Hold the port from inside the other project's worktree, which is what makes
+# it identifiable as ours.
+( cd "$RB_HOME/holder/worktrees/main" && python3 -m http.server 4399 >/dev/null 2>&1 & echo $! > "$TMP/holder.pid" )
+sleep 2
+CONFLICT="$("$ENGINE" run wants main web 2>&1)" || true
+has "names the project holding the port" "$CONFLICT" "running holder here"
+has "offers to stop the right project"   "$CONFLICT" "stop holder"
+case "$CONFLICT" in
+  *"stop wants"*) bad "does not send you after the wrong project" "suggested stopping wants" ;;
+  *) ok "does not send you after the wrong project" ;;
+esac
+kill "$(cat "$TMP/holder.pid")" 2>/dev/null || true
+pkill -f "http.server 4399" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/holder.conf" "$RB_PROJECTS_DIR/wants.conf"
+rm -rf "$RB_HOME/holder"
+
+echo "==> doctor reports ports claimed by more than one project"
+cat > "$RB_PROJECTS_DIR/twinA.conf" <<CONF
+NAME="Twin A"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4501:/:python3 -m http.server 4501"
+CONF
+cat > "$RB_PROJECTS_DIR/twinB.conf" <<CONF
+NAME="Twin B"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4501:/:python3 -m http.server 4501"
+CONF
+DOC="$("$ENGINE" doctor 2>&1)" || true
+has "names the shared port"    "$DOC" "4501"
+has "names both projects"      "$DOC" "twinA twinB"
+# `sort -n -u` here would collapse every line sharing a port into one, so the
+# count could never exceed 1 and the warning could never fire.
+has "warns at all"             "$DOC" "claimed by more than one project"
+rm -f "$RB_PROJECTS_DIR/twinB.conf"
+DOC="$("$ENGINE" doctor 2>&1)" || true
+case "$DOC" in
+  *"claimed by more than one project"*) bad "silent when ports are distinct" "still warned" ;;
+  *) ok "silent when ports are distinct" ;;
+esac
+rm -f "$RB_PROJECTS_DIR/twinA.conf"
+
 echo "==> remove"
 # A second project, so removing it cannot disturb the fixture the rest of the
 # suite depends on.

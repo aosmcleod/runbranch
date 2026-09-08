@@ -751,21 +751,119 @@ drop_run_database() {
 port_holder() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1; }
 port_holder_desc() { ps -o pid=,command= -p "$1" 2>/dev/null | sed -e 's/^ *//' | cut -c1-110; }
 
+# Which project owns a process, if any. Anything we started runs inside a
+# worktree under RB_HOME, and the first path segment after it is the project —
+# so a port conflict can name the run holding the port rather than leaving the
+# user to work it out from a command line.
+port_holder_project() {
+  local pid="$1"
+  local cmd cwd hay
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null)"
+  # The command line carries the worktree path only when the process was
+  # started with an absolute one — `node /path/to/.bin/vite` does, `python3 -m
+  # http.server` does not. The working directory is the worktree either way.
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  hay="$cmd $cwd"
+  case "$hay" in
+    *"$RB_HOME/"*)
+      local after
+      after="${hay#*"$RB_HOME"/}"
+      printf '%s' "${after%%/*}"
+      ;;
+  esac
+}
+
+# Ports declared by more than one project.
+#
+# Nothing stops two configs claiming the same port — and framework defaults
+# make it likely, since every Vite project wants 5173 and every Next one wants
+# 3000. It only surfaces when the second project refuses to start, which is a
+# bad time to find out. So `doctor` with no argument says so up front.
+report_port_overlaps() {
+  local n port line pairs=''
+  while IFS="$(printf '\t')" read -r n _; do
+    [ -n "$n" ] || continue
+    # target_field matches by NAME, so the names have to come from
+    # target_names — splitting $TARGETS on whitespace yields fragments of the
+    # command, not names.
+    for port in $( ( load_project "$n" >/dev/null 2>&1
+                     # target_field prints without a trailing newline, so
+                     # without the echo three ports become "400030003002".
+                     for t in $(target_names); do target_field "$t" port; echo; done
+                   ) 2>/dev/null ); do
+      [ -n "$port" ] || continue
+      pairs="$pairs$port $n
+"
+    done
+  done <<EOF
+$(list_projects)
+EOF
+
+  local overlaps
+  # `sort -u` and not `sort -n -u`: with a numeric sort, uniqueness is decided
+  # by the numeric KEY, so every line sharing a port collapses into one and the
+  # count is always 1 — which is exactly the thing being counted.
+  overlaps="$(printf '%s' "$pairs" | sort -u | awk '
+    { count[$1] = count[$1] + 1; who[$1] = who[$1] " " $2 }
+    END { for (p in count) if (count[p] > 1) print p, who[p] }
+  ' | sort -n)"
+  [ -n "$overlaps" ] || return 0
+
+  warn "These ports are claimed by more than one project, so those projects
+cannot run at the same time:"
+  printf '%s\n' "$overlaps" | while read -r port rest; do
+    printf '    %-6s %s\n' "$port" "$rest"
+  done
+  printf '\n  To run them together, give one a different port — in the target AND in
+  the command, since a framework will not pick it up otherwise:\n
+    TARGETS="docs:5174:/:npm run docs -- --port 5174"\n\n'
+  return 0
+}
+
 ensure_ports_free() {
-  local targets="$1" t port pid busy=''
+  local targets="$1"
+  local t port pid owner busy='' owners=''
   for t in $targets; do
     port="$(target_field "$t" port)"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
-    [ -n "$pid" ] && busy="$busy
+    [ -n "$pid" ] || continue
+    owner="$(port_holder_project "$pid")"
+    if [ -n "$owner" ]; then
+      busy="$busy
+  $t on port $port  ->  Runbranch is running $owner here (pid $pid)"
+      case " $owners " in *" $owner "*) ;; *) owners="$owners $owner" ;; esac
+    else
+      busy="$busy
   $t on port $port  ->  $(port_holder_desc "$pid")"
+    fi
   done
   [ -z "$busy" ] && return 0
+
+  # A port held by one of our own runs is a different problem from a port held
+  # by something the user started, and it has a different fix. Saying "stop
+  # $PROJECT" when the holder belongs to another project sends them after the
+  # wrong thing.
+  if [ -n "$owners" ]; then
+    local fix='' o
+    for o in $owners; do
+      fix="$fix$SELF stop $o
+    "
+    done
+    die "Ports this project needs are held by another Runbranch run:
+$busy
+
+Two projects that both default to the same port cannot run at once. Stop the
+other run, or give one of them different ports in its config." \
+      "$fix# then start this one again
+    $SELF get $PROJECT | grep TARGETS      # to change ports instead"
+  fi
+
   die "Something is already listening on a port this needs:
 $busy
 
 If that is your own dev server, leave it alone and stop it yourself." \
-    "$SELF stop $PROJECT      # a leftover run
+    "$SELF stop $PROJECT      # a leftover run of this project
     kill <pid>               # your own server, on purpose"
 }
 
@@ -1673,6 +1771,9 @@ EOF
       done <<EOF
 $(list_projects)
 EOF
+      # Across projects rather than within one, so it belongs here and not in
+      # doctor_project.
+      report_port_overlaps
       exit "$rc"
       ;;
     -h|--help|help) usage ;;
