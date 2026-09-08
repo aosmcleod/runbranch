@@ -1272,27 +1272,6 @@ struct SymbolPicker: View {
 /// The engine owns the file: this reads `get` and writes changed keys through
 /// `set`, which keeps comments, backs the file up and reverts anything that
 /// will not load. So the worst a mistake here can do is show an error.
-/// Makes a sheet's own window transparent so the material behind the content
-/// is what you see.
-///
-/// A SwiftUI sheet on macOS is a real NSWindow that fills itself with an opaque
-/// background colour. Anything translucent placed inside it therefore composites
-/// against that fill rather than against the parent window, so the sheet reads
-/// as a flat filled rectangle with no depth to it. Clearing the window's own
-/// background is what lets the material — and the window's shadow — show.
-struct SheetChrome: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async {
-            guard let w = view.window else { return }
-            w.isOpaque = false
-            w.backgroundColor = .clear
-            w.hasShadow = true
-        }
-    }
-}
-
 struct ProjectEditor: View {
     let projectID: String
     let onClose: (_ changed: Bool) -> Void
@@ -1423,9 +1402,6 @@ struct ProjectEditor: View {
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
         .frame(width: 560, height: 620)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-        .presentationBackground(.clear)
-        .background(SheetChrome())
         .task {
             let loaded = await Task.detached { Engine.get(projectID) }.value
             f = loaded; original = loaded; loading = false
@@ -1591,9 +1567,6 @@ struct ScanSheet: View {
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
         .frame(width: 560, height: 480)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-        .presentationBackground(.clear)
-        .background(SheetChrome())
     }
 
     private func chooseFolder() {
