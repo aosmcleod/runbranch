@@ -109,8 +109,8 @@ is "still exactly one window"  "$(field windows)" "1"
 echo "==> and the strip has drawn it"
 DRAWN="$(field drawn)"
 if [ "$(field drawnok)" != 1 ]; then
-  skip "the window could not be read (see this file's header)"
-  skip "so what it drew was not checked"
+  skip "the window could not be read: $(field drawnwhy)"
+  skip "so what it drew was not checked — see this file's header"
 else
   hasnt "the strip does not still say starting" "$DRAWN" "starting"
   has   "the strip says healthy"                "$DRAWN" "healthy"

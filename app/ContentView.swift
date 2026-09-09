@@ -302,8 +302,9 @@ struct ContentView: View {
                     // Whether the screen could be read at all, separately from
                     // what it said. Conflating them turns a missing permission
                     // into a passing assertion.
-                    ("drawnok", drawn == nil ? "0" : "1"),
-                    ("drawn", (drawn ?? []).joined(separator: " | ").lowercased()),
+                    ("drawnok", drawn.lines == nil ? "0" : "1"),
+                    ("drawn", (drawn.lines ?? []).joined(separator: " | ").lowercased()),
+                    ("drawnwhy", drawn.why),
                 ])
                 exit(0)
             }

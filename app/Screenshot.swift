@@ -308,30 +308,65 @@ enum SelfTest {
     /// build. That is reported as its own field rather than failing, because a
     /// suite that treats "could not look" as "looks right" is worse than one
     /// that admits it did not look.
+    /// Why it could not look, when it could not. Five different causes used to
+    /// arrive as one nil, which made a skipping suite impossible to diagnose —
+    /// the first time it skipped, nothing said whether the permission was gone
+    /// or the window was simply not where it was expected.
     @MainActor
-    static func readScreen() async -> [String]? {
+    static func readScreen() async -> (lines: [String]?, why: String) {
         guard let window = NSApp.windows.first(where: {
             $0.isVisible && $0.parent == nil && $0.frame.width > 200
-        }) else { return nil }
+        }) else {
+            let seen = NSApp.windows.map {
+                "visible=\($0.isVisible) child=\($0.parent != nil) w=\(Int($0.frame.width))"
+            }.joined(separator: "; ")
+            return (nil, "no window of ours to read [\(seen)]")
+        }
         // Absent this the window is on screen but missing from the capture
         // API's list entirely, which is indistinguishable from no permission.
         window.sharingType = .readOnly
+        // Deliberately no ordering front, no activation, and no change of
+        // collection behaviour. The read happens where the window already is.
         do {
             let mypid = ProcessInfo.processInfo.processIdentifier
+            // onScreenWindowsOnly: false, and no isOnScreen filter below.
+            //
+            // A window belongs to one Space and the capture API calls a window
+            // on any other Space off-screen. The test launches the app in the
+            // background on purpose, so the active Space is not ours to
+            // predict — a fullscreen app's Space excludes our window outright.
+            // The documentation path solves that by fronting the window and
+            // activating the app, which is exactly what this must not do.
+            //
+            // A desktop-independent filter renders the window's own content
+            // rather than a region of the display, so it does not need the
+            // window to be on the active Space at all. Asking for off-screen
+            // windows too is what lets us find it in the first place.
             let content = try await SCShareableContent.excludingDesktopWindows(
-                false, onScreenWindowsOnly: true)
+                false, onScreenWindowsOnly: false)
             guard let target = content.windows.filter({
-                $0.owningApplication?.processID == mypid && $0.isOnScreen
-                    && $0.frame.width > 200
+                $0.owningApplication?.processID == mypid && $0.frame.width > 200
             }).max(by: {
                 $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
-            }) else { return nil }
+            }) else {
+                // A granted call lists every on-screen window on the machine.
+                // A short list owned only by system processes means the grant
+                // is missing rather than the window being absent.
+                // Name the owners rather than counting them. A guess from the
+                // count read "not on screen" for what was a missing grant just
+                // as readily as the other way round, and the names settle it:
+                // a list of only system processes means no grant.
+                let owners = Set(content.windows.compactMap {
+                    $0.owningApplication?.applicationName
+                }).sorted().joined(separator: ", ")
+                return (nil, "capture API sees \(content.windows.count) windows, "
+                    + "none of them ours, owned by [\(owners)] — if that is only "
+                    + "system processes it is a missing Screen Recording grant")
+            }
 
             // The window on its own, not the documentation path's union with
             // whatever is presented over it. This wants legible text, not
-            // correct chrome, and a desktop-independent filter reads a window
-            // that is not frontmost — which it will not be, since the test
-            // runs without taking focus.
+            // correct chrome.
             let filter = SCContentFilter(desktopIndependentWindow: target)
             let cfg = SCStreamConfiguration()
             let scale = CGFloat(filter.pointPixelScale)
@@ -351,9 +386,12 @@ enum SelfTest {
             let lines = (request.results ?? []).compactMap {
                 $0.topCandidates(1).first?.string
             }
-            return lines.isEmpty ? nil : lines
+            if lines.isEmpty {
+                return (nil, "read a \(shot.width)x\(shot.height) image with no text in it")
+            }
+            return (lines, "")
         } catch {
-            return nil
+            return (nil, "capture failed: \(error.localizedDescription)")
         }
     }
 
