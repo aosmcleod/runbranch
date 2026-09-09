@@ -1,14 +1,22 @@
-<img src="docs/img/mark-256.png" width="84" alt="">
+<div align="center">
+
+<img src="docs/img/mark-256.png" width="96" alt="">
 
 # Runbranch
 
-**Run any branch of any project, on a real port.** Isolated by default — a
-throwaway git worktree, so your checkout is never touched. Or in place, in the
-checkout itself, when what you want to see is what you are typing.
+**Run any branch of any project, on a real port.**
 
-A native macOS app for the thing every developer improvises badly.
+Isolated by default — a throwaway git worktree, so your checkout is never
+touched. Or in place, in the checkout itself, when what you want to see is what
+you are typing.
+
+[![Licence: GPL-3.0](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
+[![Platform: macOS 26+](https://img.shields.io/badge/platform-macOS%2026%2B-lightgrey)](#install)
+[![Tests: 120](https://img.shields.io/badge/tests-120-brightgreen)](docs/TESTING.md)
 
 <img src="docs/img/screenshot.png" width="760" alt="Runbranch showing a running branch with its uptime, health and port">
+
+</div>
 
 ---
 
@@ -30,7 +38,10 @@ Runbranch does the version you'd build yourself given an afternoon: a throwaway
 git worktree per branch, your gitignored config copied in, dependencies
 installed, servers started, and a window that tells you when it's actually up.
 
-**Your checkout is never modified.** No `checkout`, no `stash`, ever.
+> [!IMPORTANT]
+> **Your checkout is never modified.** No `git checkout`, no `git stash`, ever.
+> A worktree run happens in its own directory; an in-place run starts your
+> servers where they already are and writes nothing.
 
 ---
 
@@ -45,8 +56,9 @@ cd runbranch && ./make-app.sh && open .
 
 Drag `Runbranch.app` to the Dock.
 
-The build is signed locally, not notarised, so the first launch needs
-**right-click → Open** rather than a double-click. Notarising it would need an
+> [!NOTE]
+> The build is signed locally, not notarised, so the first launch needs
+> **right-click → Open** rather than a double-click. Notarising it would need an
 Apple Developer account; until then that prompt is the honest cost of building
 it yourself.
 
@@ -66,6 +78,8 @@ right-click on first launch.
 
 ## Point it at a repo
 
+<img src="docs/img/scan.png" width="640" alt="Scanning a folder for repositories to add as projects">
+
 You shouldn't have to write a config from nothing. **Add project…** in the
 `•••` menu reads the repo — package manager, lockfile, scripts, `Procfile`,
 compose services, version pins, which files are gitignored — and proposes one,
@@ -80,7 +94,8 @@ INSTALL="pnpm install --frozen-lockfile"
 TARGETS="web:3000:/:pnpm dev"
 ```
 
-Bigger stacks add only what they need:
+<details>
+<summary><b>Bigger stacks add only what they need</b></summary>
 
 ```bash
 COPY_FILES=".env.local"                    # gitignored, so a worktree lacks it
@@ -97,6 +112,8 @@ PRESETS="web=web  full=web,worker"
 
 A `Procfile` needs no target list at all — set `PROCFILE=1` and its processes
 become your targets.
+
+</details>
 
 Full reference: **[docs/config.md](docs/config.md)**. Check any project with
 `./runbranch.sh doctor`, which names the command that fixes whatever it finds.
@@ -118,21 +135,23 @@ log matters.
 
 **Two kinds of run, and the difference matters.**
 
-A **worktree run** is the default and the interesting one: a separate copy of
-the repository at one commit, in its own directory under `~/.runbranch`. That
-is what keeps it away from your checkout — and it cuts both ways. Edits you
-make in your checkout do not reach it, and neither do new commits on the
-branch; the server is watching a different directory, so its hot reload has
-nothing to react to. Start it again to pick up whatever is newest. (*Refresh*
-re-reads pull request metadata, not code.)
+|  | Worktree run *(default)* | In-place run |
+|---|---|---|
+| Where | Its own directory under `~/.runbranch` | Your checkout |
+| Sees your edits | **No** — a snapshot of one commit | **Yes**, uncommitted work included |
+| Any branch | Yes | Only the one your checkout is on |
+| Installs, copies config, per-run database | Yes | **No** — servers only |
+| Good for | A colleague's pull request, an old release, anything you are not editing | The branch you are working on right now |
 
-An **in-place run** uses the checkout itself, so what you see is what is on
-disk — uncommitted work included. It is offered only for the branch your
-checkout is actually on, because git will not have a branch checked out twice.
-It starts your servers and manages their ports, health and logs, and does
-nothing else: no install, no copied files, no per-run database. Those all write
-somewhere, and not writing to your checkout is the promise the rest of this
-depends on.
+A worktree run is a separate copy at one commit, which is what keeps it away
+from your checkout — and it cuts both ways. Edits you make do not reach it, and
+neither do new commits; the server is watching a different directory, so its
+hot reload has nothing to react to. Start it again to pick up whatever is
+newest.
+
+> [!TIP]
+> *Refresh* re-reads pull request metadata, not code. To pick up new commits,
+> start the branch again.
 
 The app says which is which. A branch your checkout is on is badged **checked
 out**; one sitting in a worktree you made yourself is badged accordingly, since
@@ -180,7 +199,7 @@ and it writes the same `.conf` you would have edited by hand. Removing a project
 is in the right-click menu too, with a confirmation that names the repository it
 will *not* delete.
 
-<img src="docs/img/settings.png" width="620" alt="Editing a project's configuration in the app">
+<img src="docs/img/settings.png" width="640" alt="Editing a project's configuration in the app">
 
 **A sidebar that scales past four projects.** Running first, then favourites you
 have pinned, then the rest. Search filters branches; the filter menu narrows to
@@ -260,6 +279,9 @@ and tell you when it's up.**
 
 ## Layout
 
+<details>
+<summary><b>What is in the repository</b></summary>
+
 ```
 runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
 app/RunBranch.swift   the front end
@@ -278,7 +300,9 @@ docs/VISION.md        the README the tool should earn
 
 Nothing generated is committed. `Runbranch.app`, `build/` and `demo/` are all
 produced by the scripts and gitignored — the repo carries source, one logo
-source PNG, and the one mark size the README displays.
+source PNG, and the screenshots the README displays.
+
+</details>
 
 
 ## Licence

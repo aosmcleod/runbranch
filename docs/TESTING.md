@@ -2,11 +2,14 @@
 
 ## What is tested, and why those things
 
-`tests/engine.sh` — 48 assertions against a throwaway fixture repo and a
+`tests/engine.sh` — 112 assertions against a throwaway fixture repo and a
 throwaway state directory. Never against real projects.
 
+`tests/ui.sh` — 8 assertions against the real app, launched over the demo data.
+
 ```bash
-./tests/engine.sh        # run
+./tests/engine.sh        # the engine
+./tests/ui.sh            # the app
 ./tests/engine.sh -v     # show every assertion
 ./tools/lint.sh          # bash syntax, and the mistakes this file has made
 ```
