@@ -33,7 +33,16 @@ DEST="${1:-}"
 BUILD="$REPO/build"
 BIN="$BUILD/bin"
 ICON="$REPO/assets/AppIcon.icon"
-SRC="$REPO/assets/mark-source.png"
+# The vector master, rendered to a raster the rest of this can trim and inset.
+#
+# There used to be a PNG source alongside the SVG, and the two disagreed: the
+# SVG's overlap read blue-violet where the PNG's was magenta, because Figma's
+# export had dropped a mix-blend-mode. One master means that cannot recur.
+#
+# Rendered with WebKit rather than NSImage or sips, neither of which honours
+# mix-blend-mode — they would silently reproduce the very bug this replaces.
+MASTER="$REPO/assets/mark.svg"
+SRC="$BIN/mark-master.png"
 
 ALPHA_CUTOFF=0.22     # below this, a pixel is fringe rather than soft edge
 ICON_FRACTION=0.72    # the glyph inside the system's tile. Apple's own icons put
@@ -53,7 +62,13 @@ MARK_FRACTION=0.94    # the standalone mark keeps a little breathing room
 # Pass `optical` as trim's last argument to go back, and measure the margins
 # afterwards rather than trusting either mode to look right.
 
-[ -f "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
+[ -f "$MASTER" ] || { echo "missing $MASTER" >&2; exit 1; }
+mkdir -p "$BIN"
+echo "==> master"
+# 2048 across, so every downstream size is a reduction and never an
+# enlargement.
+swift "$REPO/tools/svg-render.swift" "$MASTER" "$SRC" 2048 || {
+  echo "could not render $MASTER" >&2; exit 1; }
 command -v swiftc >/dev/null 2>&1 || { echo "swiftc missing: xcode-select --install" >&2; exit 1; }
 
 mkdir -p "$BIN" "$ICON/Assets" "$REPO/docs/img"

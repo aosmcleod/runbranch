@@ -9,3 +9,9 @@ projects/*.conf
 !projects/example.conf
 Runbranch.app/
 .DS_Store
+
+# Everything in assets/ except the vector masters is rendered by make-icons.sh
+# from assets/mark.svg. Tracking a generated PNG next to the vector it comes
+# from is how the two drifted apart in the first place.
+assets/mark.png
+assets/AppIcon.icon/

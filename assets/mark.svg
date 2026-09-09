@@ -1,0 +1,71 @@
+<!--
+  Runbranch mark. Copyright (C) 2026 Alec McLeod, GPL-3.0.
+
+  The master. Every raster asset is rendered from this file, so there is one
+  source rather than a PNG and a vector drifting apart.
+
+  Two things were corrected against the Figma export:
+
+  - The top blue petal carries mix-blend-mode:lighten. Figma's SVG export
+    dropped it, which left an opaque blue petal painted over the warm one and
+    an overlap that read blue-violet instead of magenta. Established by
+    rendering all eight blend modes and measuring each against the mark.
+  - The viewBox is tightened to the artwork. The export padded it
+    asymmetrically, so anything placing this file had to guess.
+
+  Render it with WebKit, not NSImage: NSImage silently ignores
+  mix-blend-mode, which puts the overlap back to blue-violet.
+-->
+<svg width="980" height="791" viewBox="157.1 114.9 980.1 790.7" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M1032.15 708.638C918.694 863.018 742.995 938.844 633.609 881.818C538.853 804.921 573.435 612.952 712.188 454.445C864.035 296.58 1044.37 219.797 1110.72 281.265C1165.02 338.018 1132.8 562.09 1032.15 708.638Z" fill="url(#paint0_radial_66_38)"/>
+<path d="M652.803 377.835C781.608 576.999 801.62 796.895 699.054 878.74C596.489 960.586 380.208 840.962 248.803 643.834C138.925 479 132.018 175.515 206.168 130.3C305.019 70.0195 527.66 195.76 652.803 377.835Z" fill="url(#paint1_radial_66_38)"/>
+<path d="M652.803 377.835C781.608 576.999 801.62 796.895 699.054 878.74C596.489 960.586 380.208 840.962 248.803 643.834C138.925 479 132.018 175.515 206.168 130.3C305.019 70.0195 527.66 195.76 652.803 377.835Z" fill="url(#paint2_radial_66_38)"/>
+<path style="mix-blend-mode:lighten" d="M1032.15 708.638C918.694 863.018 742.995 938.844 633.609 881.818C538.853 804.921 573.435 612.952 712.188 454.445C864.035 296.58 1044.37 219.797 1110.72 281.265C1165.02 338.018 1132.8 562.09 1032.15 708.638Z" fill="url(#paint3_radial_66_38)"/>
+<path opacity="0.24" d="M1032.15 708.638C918.694 863.018 742.995 938.844 633.609 881.818C538.853 804.921 573.435 612.952 712.188 454.445C864.035 296.58 1044.37 219.797 1110.72 281.265C1165.02 338.018 1132.8 562.09 1032.15 708.638Z" fill="url(#paint4_radial_66_38)"/>
+<mask id="mask0_66_38" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="157" y="115" width="980" height="790">
+<path d="M1032.15 708.638C918.695 863.018 742.996 938.844 633.61 881.818C538.854 804.921 573.436 612.952 712.189 454.445C864.036 296.58 1044.37 219.797 1110.73 281.265C1165.02 338.018 1132.81 562.09 1032.15 708.638Z" fill="black"/>
+<path d="M652.804 377.835C781.609 576.999 801.621 796.895 699.055 878.74C596.49 960.586 380.209 840.962 248.804 643.834C138.926 479 132.019 175.515 206.169 130.3C305.02 70.0195 527.661 195.76 652.804 377.835Z" fill="black"/>
+<path d="M652.804 377.835C781.609 576.999 801.621 796.895 699.055 878.74C596.49 960.586 380.209 840.962 248.804 643.834C138.926 479 132.019 175.515 206.169 130.3C305.02 70.0195 527.661 195.76 652.804 377.835Z" fill="black"/>
+<path d="M1032.15 708.638C918.695 863.018 742.996 938.844 633.61 881.818C538.854 804.921 573.436 612.952 712.189 454.445C864.036 296.58 1044.37 219.797 1110.73 281.265C1165.02 338.018 1132.81 562.09 1032.15 708.638Z" fill="black"/>
+<path opacity="0.24" d="M1032.15 708.638C918.695 863.018 742.996 938.844 633.61 881.818C538.854 804.921 573.436 612.952 712.189 454.445C864.036 296.58 1044.37 219.797 1110.73 281.265C1165.02 338.018 1132.81 562.09 1032.15 708.638Z" fill="black"/>
+</mask>
+<g mask="url(#mask0_66_38)">
+<g opacity="0.85" style="mix-blend-mode:multiply">
+<path d="M670.007 895.502C441.617 842.782 290.191 191.73 261.003 71.9994L1100.51 223.001C992.312 480.625 777.13 856.107 670.007 895.502Z" fill="url(#paint5_linear_66_38)" fill-opacity="0.2"/>
+</g>
+</g>
+<path opacity="0.49" d="M764.006 690C768.489 785.515 738.921 867.38 670.004 895.499C595.217 884.146 560.714 782.676 592.002 667.5C614.835 583.399 668.617 505.208 702.006 466.5C744.704 549.255 761.935 641.934 764.006 690Z" fill="url(#paint6_radial_66_38)"/>
+<defs>
+<radialGradient id="paint0_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(708.018 706.014) rotate(-45.8509) scale(571.405 309.624)">
+<stop stop-color="#0136FA"/>
+<stop offset="1" stop-color="#07D8F9"/>
+</radialGradient>
+<radialGradient id="paint1_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(686.018 848.014) rotate(-122.048) scale(851.815 665.992)">
+<stop stop-color="#EC18F8"/>
+<stop offset="0.5" stop-color="#FA284B"/>
+<stop offset="1" stop-color="#FADB02"/>
+</radialGradient>
+<radialGradient id="paint2_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(664.005 888) rotate(-119.436) scale(874.935 684.069)">
+<stop offset="0.00480769" stop-color="#EC18F8"/>
+<stop offset="0.531984" stop-color="#FA284B"/>
+<stop offset="1" stop-color="#FADB02"/>
+</radialGradient>
+<radialGradient id="paint3_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(708.018 706.014) rotate(-45.8509) scale(571.405 309.624)">
+<stop stop-color="#0136FA"/>
+<stop offset="1" stop-color="#07D8F9"/>
+</radialGradient>
+<radialGradient id="paint4_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(708.018 706.014) rotate(-45.8509) scale(571.405 309.624)">
+<stop stop-color="#0136FA"/>
+<stop offset="1" stop-color="#07D8F9"/>
+</radialGradient>
+<linearGradient id="paint5_linear_66_38" x1="677.14" y1="159.534" x2="541.381" y2="927.239" gradientUnits="userSpaceOnUse">
+<stop offset="0.192308" stop-opacity="0"/>
+<stop offset="1"/>
+</linearGradient>
+<radialGradient id="paint6_radial_66_38" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(690 878) rotate(-83.7349) scale(421.518 262.823)">
+<stop stop-color="#0595FA"/>
+<stop offset="0.297334" stop-color="#5E5FF9"/>
+<stop offset="0.846154" stop-color="#FF22C6" stop-opacity="0.8"/>
+</radialGradient>
+</defs>
+</svg>

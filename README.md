@@ -288,9 +288,10 @@ app/RunBranch.swift   the front end
 projects/*.conf       one file per project (yours are gitignored)
 tests/engine.sh       engine tests; every case is a bug that really happened
 make-app.sh           builds Runbranch.app
-make-icons.sh         the graphic set, from assets/mark-source.png
+make-icons.sh         the graphic set, rendered from assets/mark.svg
 assets/               the mark: colour PNG, and vectors for the mono templates
-tools/                icon processing, signing identity, demo data, screenshots
+tools/                svg render, icon processing, signing identity, demo, screenshots
+assets/mark.svg       the mark. Every raster asset is rendered from it
 docs/config.md        every config key
 docs/TESTING.md       what is covered, what is not, and how to add a case
 docs/ROADMAP.md       what ships when, and why each item is worth doing
@@ -298,8 +299,8 @@ docs/VERSIONING.md    what the version numbers mean
 ```
 
 Nothing generated is committed. `Runbranch.app`, `build/` and `demo/` are all
-produced by the scripts and gitignored — the repo carries source, one logo
-source PNG, and the screenshots the README displays.
+produced by the scripts and gitignored — the repo carries source, the mark as
+a vector, and the screenshots the README displays.
 
 </details>
 
