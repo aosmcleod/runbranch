@@ -1106,12 +1106,26 @@ check_ports() {
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
-    found=1
+
     # project and kind together: whether this is a run of ours or the same
     # project started by something else entirely changes what can be offered.
     owner_pair="$(port_holder_owner "$pid")"
     owner="${owner_pair%%"$(printf '\t')"*}"
     kind="${owner_pair##*"$(printf '\t')"}"
+
+    # This project's OWN run is not a conflict. do_run stops whatever the
+    # project has going before it starts anything, so switching branches within
+    # a project was being stopped by a warning about a port it was about to
+    # free itself.
+    #
+    # A run of the same project started outside Runbranch is different: nothing
+    # here can stop that one, so it stays a conflict and Take Over stays on
+    # offer.
+    if [ "$owner" = "$PROJECT" ] && [ "$kind" = ours ]; then
+      continue
+    fi
+
+    found=1
     cmd="$(target_field "$t" command)"
     # `explicit` when the command names the port itself, `env` when the shift
     # can only be offered through PORT and might be ignored. Both are worth

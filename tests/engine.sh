@@ -146,6 +146,39 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> a project's own run is not a conflict with itself"
+# Switching branches within a project was being stopped by a warning about a
+# port it was about to free itself: do_run stops whatever the project has going
+# before it starts anything.
+cat > "$RB_PROJECTS_DIR/selfrun.conf" <<CONF
+NAME="Self Run"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4995:/:python3 -m http.server {port} --directory public"
+CONF
+cat > "$RB_PROJECTS_DIR/rival.conf" <<CONF
+NAME="Rival"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4995:/:python3 -m http.server {port} --directory public"
+CONF
+"$ENGINE" run selfrun main web >/dev/null 2>&1
+is "the run is up" "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4995/ 2>/dev/null)" "200"
+
+"$ENGINE" check-ports selfrun web >/dev/null 2>&1
+is "no conflict with its own run" "$?" "0"
+# Switching to another branch must therefore just work.
+"$ENGINE" run selfrun feature/one web >/dev/null 2>&1
+is "so switching branches works"  "$?" "0"
+
+# A different project on the same port is still a conflict.
+"$ENGINE" check-ports rival web >/dev/null 2>&1
+is "another project still conflicts" "$?" "1"
+
+"$ENGINE" stop selfrun >/dev/null 2>&1
+rm -f "$RB_PROJECTS_DIR/selfrun.conf" "$RB_PROJECTS_DIR/rival.conf"
+rm -rf "$RB_HOME/selfrun" "$RB_HOME/rival"
+
 echo "==> a port held from a checkout is attributed to that project"
 # The common real case: a dev server started by a terminal or an agent, inside
 # the project's own checkout. Reporting that as "another app" is unhelpful when
