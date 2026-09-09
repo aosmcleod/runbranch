@@ -141,7 +141,6 @@ struct LogViewer: View {
     /// visible hitch on a chatty dev server, on the main thread, forever.
     @State private var offset: UInt64 = 0
     @State private var filter = ""
-    @State private var timer: Timer?
     @State private var jumpTarget: Int?
     /// Both persisted: which way you like to read a log does not change
     /// between runs, and having them reset every time makes them not worth
@@ -288,12 +287,27 @@ struct LogViewer: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
         .frame(width: 680, height: 460)
-        .onAppear {
-            load()
-            timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in load() }
+        // Nothing touches the disk until the sheet has finished presenting.
+        //
+        // This was an .onAppear that read the log synchronously — open, seek,
+        // read, a regex over the chunk, then build a Line per row — and
+        // started a run-loop Timer, all on the main thread while the sheet was
+        // animating in. That is what "the log appears and then the buttons fly
+        // in" was: the content won the race for the first frame and the
+        // chrome lost it. Ports and Disk do no work on appear and neither of
+        // them does this.
+        //
+        // .task rather than .onAppear so it is off the presentation entirely,
+        // keyed on the target so switching restarts it, and cancelled on
+        // dismissal for free — which also retires the Timer.
+        .task(id: selected) {
+            try? await Task.sleep(for: .milliseconds(200))
+            while !Task.isCancelled {
+                load()
+                try? await Task.sleep(for: .milliseconds(1500))
+            }
         }
-        .onDisappear { timer?.invalidate() }
-        .onChange(of: selected) { _, _ in reset(); load() }
+        .onChange(of: selected) { _, _ in reset() }
         // Opened before the run state had loaded, this had no targets to pick
         // from and nothing ever went back for them: `selected` stayed empty,
         // `load` returned at its own guard, and the viewer sat at "0 lines"
