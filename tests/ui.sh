@@ -14,16 +14,27 @@
 #     them, and a duplicate is invisible until something does.
 #   - The run strip held the health monitor as a plain property rather than an
 #     @ObservedObject, so it never subscribed to changes and a healthy run read
-#     "Starting" indefinitely. THIS TEST DOES NOT CATCH THAT, and it is worth
-#     saying so plainly: it asks the monitor, and the monitor was always right.
-#     Only the render was stale. Reintroducing the bug on purpose left this
-#     suite passing 8/8.
+#     "Starting" indefinitely. This test now catches that too, but only by
+#     reading the screen: every other assertion here asks the app what it
+#     thinks, and in that bug the app thought correctly and drew something
+#     else. The monitor was right the whole time.
 #
-# Catching the second kind needs the text that was actually drawn. An in-process
-# accessibility walk returns nothing, because SwiftUI does not build that tree
-# unless an assistive client asks; System Events cannot see the window either.
-# A pixel check against a screenshot would work and is not built. Until then the
-# render is checked by looking at it.
+# So the last two checks are different in kind from the rest. The app captures
+# its own window through ScreenCaptureKit and runs Vision text recognition over
+# it, and reports what came back. Asserting that the strip reads "healthy" and
+# does not read "starting" is a claim about pixels, which is the only claim that
+# would have failed on the original bug.
+#
+# An in-process accessibility walk was tried first and returns nothing, because
+# SwiftUI does not build that tree unless an assistive client asks; System
+# Events cannot see the window either.
+#
+# The screen read needs the Screen Recording grant, which is tied to the code
+# signature and so absent on a machine that has never granted this build. When
+# it is missing those two checks SKIP rather than fail — and say so loudly at
+# the end, because a suite that counts "could not look" as "looks right" is
+# worse than one that admits it did not look. Run tools/make-signing-identity.sh
+# and grant it once; the grant then survives rebuilds.
 #
 # Does not take focus (RB_SHOT_QUIET), so it can be run while working.
 
@@ -35,10 +46,13 @@ VERBOSE="${1:-}"
 [ -d "$APP" ] || { echo "build the app first: ./make-app.sh" >&2; exit 1; }
 [ -d "$REPO/demo" ] || "$REPO/tools/make-demo.sh" >/dev/null
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS+1)); [ "$VERBOSE" = -v ] && printf '  ok    %s\n' "$1"; return 0; }
-bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && printf '        %s\n' "$2"; return 0; }
-is()  { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$3] got [$2]"; }
+PASS=0; FAIL=0; SKIP=0
+ok()   { PASS=$((PASS+1)); [ "$VERBOSE" = -v ] && printf '  ok    %s\n' "$1"; return 0; }
+bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && printf '        %s\n' "$2"; return 0; }
+skip() { SKIP=$((SKIP+1)); printf '  SKIP  %s\n' "$1"; return 0; }
+is()   { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$3] got [$2]"; }
+has()  { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "[$3] not in what was drawn";; esac; }
+hasnt(){ case "$2" in *"$3"*) bad "$1" "[$3] IS in what was drawn";; *) ok "$1";; esac; }
 
 OUT="$(mktemp)"
 trap 'rm -f "$OUT"; env RB_PROJECTS_DIR="$REPO/demo/projects" RB_HOME="$REPO/demo/state" \
@@ -89,5 +103,19 @@ is "with its target"           "$(field targets)" "1"
 is "health actually resolves"  "$(field health)"  "healthy"
 is "still exactly one window"  "$(field windows)" "1"
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+# And the same claim again, about the pixels rather than the state. This is the
+# pair that would have failed on the stale-render bug; everything above passed
+# through it.
+echo "==> and the strip has drawn it"
+DRAWN="$(field drawn)"
+if [ "$(field drawnok)" != 1 ]; then
+  skip "the window could not be read (see this file's header)"
+  skip "so what it drew was not checked"
+else
+  hasnt "the strip does not still say starting" "$DRAWN" "starting"
+  has   "the strip says healthy"                "$DRAWN" "healthy"
+fi
+
+printf '\n%d passed, %d failed' "$PASS" "$FAIL"
+[ "$SKIP" = 0 ] && printf '\n' || printf ', %d SKIPPED — the render was not checked\n' "$SKIP"
 [ "$FAIL" = 0 ]

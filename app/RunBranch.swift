@@ -24,6 +24,7 @@
 import SwiftUI
 import AppKit
 import ScreenCaptureKit
+import Vision
 
 // MARK: - Model
 
@@ -980,6 +981,11 @@ enum Editor: CaseIterable {
 // MARK: - Small views
 
 struct Badge: View {
+    /// The default branch. A fixed hue rather than a semantic colour, for the
+    /// reason the call site gives, and teal because every other badge colour
+    /// here is taken.
+    static let trunk = Color(red: 0.09, green: 0.58, blue: 0.64)
+
     let text: String
     var symbol: String? = nil
     var color: Color = .secondary
@@ -1109,7 +1115,10 @@ struct BranchRow: View {
                         .truncationMode(.middle)
 
                     if branch.isDefault {
-                        Badge(text: "default", color: .accentColor)
+                        // Not .accentColor. A selected row is filled with the
+                        // accent, so a badge tinted with it disappears — and
+                        // that holds whatever the user has set the accent to.
+                        Badge(text: "default", color: Badge.trunk)
                     } else if let l = branch.pr.label {
                         Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
                     }
@@ -2398,6 +2407,10 @@ struct ContentView: View {
                     return all.allSatisfy { $0 == .healthy } ? "healthy" : "mixed"
                 } ?? "no-state"
 
+                // After the state fields are settled, so what is read is
+                // what the assertions above describe.
+                let drawn = await SelfTest.readScreen()
+
                 SelfTest.report([
                     ("windows", String(realWindows.count)),
                     ("projects", String(projects.count)),
@@ -2406,6 +2419,11 @@ struct ContentView: View {
                     ("targets", String(st?.targets.count ?? 0)),
                     ("health", worst),
                     ("problem", problem ?? ""),
+                    // Whether the screen could be read at all, separately from
+                    // what it said. Conflating them turns a missing permission
+                    // into a passing assertion.
+                    ("drawnok", drawn == nil ? "0" : "1"),
+                    ("drawn", (drawn ?? []).joined(separator: " | ").lowercased()),
                 ])
                 exit(0)
             }
@@ -3328,10 +3346,79 @@ enum SelfTest {
     /// through `open` to reliably get a window and `open` does not give the
     /// caller its stdout.
     static func report(_ pairs: [(String, String)]) {
-        let text = pairs.map { "\($0.0)\t\($0.1)" }.joined(separator: "\n") + "\n"
+        // One line per field, tab-separated, so a value carrying either would
+        // silently invent a field. Screen-read text is arbitrary by nature.
+        let text = pairs.map { pair -> String in
+            let v = pair.1.replacingOccurrences(of: "\t", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+            return "\(pair.0)\t\(v)"
+        }.joined(separator: "\n") + "\n"
         FileHandle.standardOutput.write(text.data(using: .utf8)!)
         if let out = ProcessInfo.processInfo.environment["RB_SELFTEST_OUT"] {
             try? text.write(toFile: out, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// What the window actually has on it, read back off the screen.
+    ///
+    /// Every other field in this report asks the app what it thinks. The bug
+    /// this suite exists for was one where the app thought correctly and drew
+    /// something else: a healthy run read "starting" indefinitely because the
+    /// strip held its monitor as a plain property and never subscribed. The
+    /// monitor was right the whole time. Only the pixels disagreed, so only
+    /// the pixels can catch it.
+    ///
+    /// Returns nil when it could not read the screen — most often a missing
+    /// Screen Recording grant, which is per-signature and so absent on a fresh
+    /// build. That is reported as its own field rather than failing, because a
+    /// suite that treats "could not look" as "looks right" is worse than one
+    /// that admits it did not look.
+    @MainActor
+    static func readScreen() async -> [String]? {
+        guard let window = NSApp.windows.first(where: {
+            $0.isVisible && $0.parent == nil && $0.frame.width > 200
+        }) else { return nil }
+        // Absent this the window is on screen but missing from the capture
+        // API's list entirely, which is indistinguishable from no permission.
+        window.sharingType = .readOnly
+        do {
+            let mypid = ProcessInfo.processInfo.processIdentifier
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            guard let target = content.windows.filter({
+                $0.owningApplication?.processID == mypid && $0.isOnScreen
+                    && $0.frame.width > 200
+            }).max(by: {
+                $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+            }) else { return nil }
+
+            // The window on its own, not the documentation path's union with
+            // whatever is presented over it. This wants legible text, not
+            // correct chrome, and a desktop-independent filter reads a window
+            // that is not frontmost — which it will not be, since the test
+            // runs without taking focus.
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let cfg = SCStreamConfiguration()
+            let scale = CGFloat(filter.pointPixelScale)
+            cfg.width = Int((target.frame.width * scale).rounded())
+            cfg.height = Int((target.frame.height * scale).rounded())
+            cfg.showsCursor = false
+            cfg.scalesToFit = false
+            let shot = try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: cfg)
+
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            // These are labels, not prose. Correction rewrites "feat/checkout"
+            // into words that were never on the screen.
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: shot, options: [:]).perform([request])
+            let lines = (request.results ?? []).compactMap {
+                $0.topCandidates(1).first?.string
+            }
+            return lines.isEmpty ? nil : lines
+        } catch {
+            return nil
         }
     }
 
