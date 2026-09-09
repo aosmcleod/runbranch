@@ -57,6 +57,14 @@ swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-template.svg" \
 
 # --- binary ---------------------------------------------------------------
 swiftc -parse-as-library -O "$SOURCE"/*.swift -o "$APP/Contents/MacOS/RunBranch"
+# swiftc does not strip, so the Swift mangled-name table ships — over half the
+# binary, and nothing at runtime reads it. -x keeps the dynamically-referenced
+# symbols and drops the local ones.
+#
+# Before codesign, never after: stripping a signed binary invalidates the
+# signature, and the Screen Recording grant is tied to it.
+strip -x "$APP/Contents/MacOS/RunBranch" 2>/dev/null || \
+  echo "    !! strip failed; the binary ships with its symbol table" >&2
 echo "    binary built"
 
 # --- Info.plist -----------------------------------------------------------
