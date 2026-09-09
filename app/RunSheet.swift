@@ -116,7 +116,23 @@ struct LogViewer: View {
         let isError: Bool
     }
 
-    @State private var selected: String = ""
+    @State private var selected: String
+
+    init(logDir: String, targets: [RunTarget], onClose: @escaping () -> Void) {
+        self.logDir = logDir
+        self.targets = targets
+        self.onClose = onClose
+        // Valid on the FIRST layout pass, not the second.
+        //
+        // This was set in onAppear, so the first render had no selection at
+        // all — and a segmented picker whose selection matches none of its
+        // tags lays out at a different width. The header then reflowed a frame
+        // later, the spacer between the filter field and the controls
+        // recomputed, and every control slid across. Only visible on a project
+        // with more than one target, which is why a one-target demo never
+        // showed it.
+        _selected = State(initialValue: targets.first?.name ?? "")
+    }
     @State private var lines: [Line] = []
     @State private var nextID = 0
     /// How much of the file has been consumed. The point of the whole
@@ -164,19 +180,34 @@ struct LogViewer: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Titled, like every other sheet in the app. This was a bare
+            // strip of controls with no title at all, which is most of why it
+            // read as foreign — and the buttons were `.bordered` while every
+            // other button here is glass.
             HStack(spacing: 10) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 15)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Logs").font(.system(size: 14, weight: .semibold))
+                    // The target's name, unless the picker below is already
+                    // showing it.
+                    Text(targets.count > 1 || selected.isEmpty ? " " : selected)
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 if targets.count > 1 {
                     Picker("", selection: $selected) {
                         ForEach(targets) { Text($0.name).tag($0.name) }
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 160)
                 }
+                Spacer(minLength: 8)
                 TextField("Filter", text: $filter)
-                    .textFieldStyle(.roundedBorder).frame(width: 140)
-                Spacer()
-                controls
+                    .textFieldStyle(.roundedBorder).frame(width: 120)
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 8) { controls }
+                }
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
+            .padding(.horizontal, 18).padding(.vertical, 12)
 
             Divider()
 
@@ -260,7 +291,6 @@ struct LogViewer: View {
         }
         .frame(width: 680, height: 460)
         .onAppear {
-            selected = targets.first?.name ?? ""
             load()
             timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in load() }
         }
@@ -301,7 +331,9 @@ struct LogViewer: View {
                 .foregroundStyle(off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .frame(width: 15, height: 15)
         }
-        .buttonStyle(.bordered)
+        // Glass, like every other button in this app. `.bordered` was mine
+        // and it is the odd one out.
+        .buttonStyle(.glass)
         .disabled(disabled)
         .help(help)
     }
@@ -374,10 +406,21 @@ struct LogViewer: View {
         if skipPartialFirstLine && !fresh.isEmpty { fresh.removeFirst() }
         guard !fresh.isEmpty else { return }
 
-        for line in fresh {
-            lines.append(Line(id: nextID, text: line, isError: Self.looksLikeError(line)))
-            nextID += 1
+        // Explicitly unanimated.
+        //
+        // The first read lands while the sheet is still presenting, so its
+        // layout consequences were picked up by the presentation's animation —
+        // the jump-to-error button going from disabled to enabled, the counts
+        // in the footer. That is what "the log appears and then the buttons
+        // fly in" was: not the sheet resizing, but the header being animated
+        // into place a frame after the content.
+        withTransaction(Transaction(animation: nil)) {
+            for line in fresh {
+                lines.append(Line(id: nextID, text: line,
+                                  isError: Self.looksLikeError(line)))
+                nextID += 1
+            }
+            if lines.count > Self.keep { lines.removeFirst(lines.count - Self.keep) }
         }
-        if lines.count > Self.keep { lines.removeFirst(lines.count - Self.keep) }
     }
 }

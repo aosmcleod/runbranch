@@ -566,9 +566,17 @@ struct ContentView: View {
                 ScanSheet { added in
                     sheet = nil
                     guard added > 0 else { return }
+                    // Which ones are new, so the selection can land on one.
+                    // Closing onto whatever was selected before makes a
+                    // successful scan look like nothing happened.
+                    let before = Set(projects.map(\.id))
                     Task {
                         projects = await Task.detached { Engine.projects() }.value
-                        if selectedProject == nil { selectedProject = projects.first?.id }
+                        if let fresh = projects.first(where: { !before.contains($0.id) }) {
+                            selectedProject = fresh.id
+                        } else if selectedProject == nil {
+                            selectedProject = projects.first?.id
+                        }
                         await reload()
                     }
                 }

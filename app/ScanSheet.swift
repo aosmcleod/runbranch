@@ -102,7 +102,10 @@ struct ScanSheet: View {
                 VStack(spacing: 12) {
                     ProgressView(value: progress)
                         .frame(width: 260)
-                    Text(phase == .done ? "Done" : "Reading \(currentName)…")
+                    Text(phase == .done
+                         ? (chosen.count == 1 ? "Added 1 project"
+                                              : "Added \(chosen.count) projects")
+                         : "Reading \(currentName)…")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -173,6 +176,13 @@ struct ScanSheet: View {
                 progress = Double(i + 1) / Double(paths.count)
             }
             phase = .done
+            // Then close itself. Sitting on a finished progress bar waiting to
+            // be dismissed asks the user to acknowledge something they already
+            // know, and the result is behind the sheet: the projects are in the
+            // sidebar. Long enough to register that it finished, short enough
+            // not to be a wait.
+            try? await Task.sleep(for: .milliseconds(650))
+            onClose(chosen.count)
         }
     }
 }
