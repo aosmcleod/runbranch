@@ -2959,14 +2959,20 @@ struct ContentView: View {
                         Button("Add a Project…") { addProject() }
                         Button("Scan for Projects…") { scanning = true }
                     } label: {
-                        Image(systemName: "plus")
-                            // Header labels are ~11pt semibold secondary; the
-                            // glyph reads a shade small at that size, so 12.
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                        // A folder with a plus, the way Mail marks the same
+                        // action — projects are repositories on disk, so the
+                        // folder is doing real work rather than decoration.
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 12, weight: .regular))
+                            // Primary, not secondary. In Mail the label is dim
+                            // and its accessories are not: the icon and the
+                            // chevron sit at control brightness, a step above
+                            // the text they belong to. Matching the label made
+                            // this look switched off.
+                            .foregroundStyle(.primary)
                             // A hit area worth aiming at, without the glyph
                             // growing to match.
-                            .frame(width: 18, height: 18)
+                            .frame(width: 20, height: 18)
                             .contentShape(Rectangle())
                     }
                     .menuStyle(.borderlessButton)
