@@ -34,7 +34,10 @@ a minor release.
 3. `./tools/lint.sh && ./tests/engine.sh && ./tests/ui.sh` — all green.
    If `ui.sh` reports SKIPPED, the render was not checked: grant this build
    Screen Recording and run it again before releasing
-4. `./tools/screenshot.sh` if the window changed, so the README matches the app
+4. `./tools/screenshot.sh` if the window changed, so the README matches the
+   app. It refuses to run without a 2x display attached, because the docs set
+   is 2x and a 1x capture looks soft beside the rest — open the laptop lid if
+   it stops
 5. Update `CHANGELOG.md`: what changed, and for a major, what to do about it
 6. Commit as `Release vX.Y.Z`, tag `vX.Y.Z`, push both
 7. `./make-dmg.sh` — packages, verifies, and mounts the image to check the

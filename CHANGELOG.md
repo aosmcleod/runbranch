@@ -3,6 +3,46 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.2.0
+
+**Two projects that want the same port**
+
+Framework defaults collide — three projects here all want 5173 and two want
+3000 — so they cannot run at the same time. The engine could already shift a
+project's whole port set and rewrite `{port}` in its commands. Finding out and
+acting on it is what was missing.
+
+- The **Ports** sheet lists the clashes and offers a **Move…** menu that picks
+  the number. Which project moves is a real choice, so it asks — one of them is
+  usually the one you think of as owning the port
+- `runbranch.sh overlaps` reports them machine-readably; `doctor` only ever said
+  it in prose
+- `runbranch.sh suggest-offset <project>` computes the smallest shift that frees
+  every port the project declares at once, accounting for whatever is already
+  listening — including a dev server Runbranch did not start
+- `PORT_OFFSET` is editable in the project sheet, with the effective ports
+  spelled out beneath it, and documented in `docs/config.md` for the first time
+
+**Fixed**
+
+- Overlap detection compared *declared* ports, so a project you had already
+  shifted still reported as clashing and the fix looked like it had not worked
+- The self-test could hang instead of reporting: it awaited the screen-capture
+  API unbounded, and a wedged capture service never returns. Its watchdog also
+  fired at exactly the duration the test had grown into, and exited without
+  writing anything, so a timeout was indistinguishable from a crash
+- A failed screenshot capture deleted the image it could not replace. That is
+  how five README screenshots went missing between 1.1.0 being tagged and being
+  released
+- The screenshot pipeline refuses to run without a 2x display attached, rather
+  than quietly producing images at half the resolution of the rest of the set
+
+**Removed**
+
+- Four dead properties and three stray `@AppStorage` keys from the project
+  sheet — copy-paste residue, and the `@AppStorage` ones were binding the
+  sidebar's persisted state from an unrelated view
+
 ## 1.1.0
 
 **Runs tell you more about themselves**

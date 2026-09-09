@@ -150,6 +150,22 @@ shoot() {  # file, scene, projects-dir, state-dir
 
 WANT="${1:-all}"
 FAIL=0
+# The docs set is 2x. A capture takes the scale of whichever display the window
+# is on, so on a 1x monitor — a clamshelled laptop on an external, say — every
+# image comes back at half the linear resolution and looks soft beside the rest.
+# Upscaling it would be fake resolution, and hardcoding a 2x multiplier here is
+# what made every screenshot blurry once already.
+if ! /usr/bin/swift - <<'SWIFT' 2>/dev/null
+import AppKit
+exit(NSScreen.screens.contains { $0.backingScaleFactor >= 2 } ? 0 : 1)
+SWIFT
+then
+  echo "  !! no 2x display attached, so captures would be half the resolution of" >&2
+  echo "     the existing set. Open the laptop lid, or set RB_SHOT_ANY_SCALE=1 to" >&2
+  echo "     capture anyway." >&2
+  [ -n "${RB_SHOT_ANY_SCALE:-}" ] || exit 1
+fi
+
 echo "==> screenshots"
 case "$WANT" in
   all|onboarding) shoot "onboarding.png" main "$EMPTY/projects" "$EMPTY/state" || FAIL=1 ;;
