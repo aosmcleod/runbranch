@@ -1,4 +1,11 @@
 build/
 demo/
+
+# Project definitions are personal: they name real repositories on a real
+# machine, and the author's are nobody else's starting state. The engine reads
+# this directory by default, so they live here — untracked. example.conf is the
+# one that ships.
+projects/*.conf
+!projects/example.conf
 Runbranch.app/
 .DS_Store

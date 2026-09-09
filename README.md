@@ -208,7 +208,7 @@ tell you when it's up.**
 ```
 runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
 app/RunBranch.swift   the front end
-projects/*.conf       one file per project
+projects/*.conf       one file per project (yours are gitignored)
 tests/engine.sh       engine tests; every case is a bug that really happened
 make-app.sh           builds Runbranch.app
 make-icons.sh         the graphic set, from assets/mark-source.png

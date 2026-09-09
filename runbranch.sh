@@ -35,7 +35,11 @@ PROJECTS_DIR="${RB_PROJECTS_DIR:-$SELF_DIR/projects}"
 
 # Every address you author commits under. A branch is "yours" when its tip
 # carries one of them.
-MY_EMAILS="${RB_MY_EMAILS:-alecmcleod@icloud.com alec.mcleod@functionpoint.com alec@mcleod.co}"
+# Which commits count as "mine", for the my-branches filter. Defaults to the
+# email git is configured with, since hardcoding an author's own addresses into
+# a published tool is both wrong for everyone else and a needless disclosure.
+# RB_MY_EMAILS overrides, space-separated, for anyone who commits under several.
+MY_EMAILS="${RB_MY_EMAILS:-$(git config --get user.email 2>/dev/null)}"
 
 PR_CACHE_TTL="${RB_PR_TTL:-900}"   # 15 minutes
 WEEK=604800
