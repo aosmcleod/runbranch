@@ -52,6 +52,31 @@ restore_presentation() {
   fi
 }
 
+# The Disk sheet exists to show what worktrees cost and to reclaim the dead
+# ones. With a single 16 KB worktree and nothing to reclaim it illustrates
+# neither, so the demo is given a few — including one whose branch has since
+# been deleted, which is the state the Reclaim menu is for.
+#
+# The deleted branch is created for the purpose rather than taken from the
+# demo's real ones, so the branch list in the other scenes is unaffected.
+DEMO_REPO="$REPO/demo/repos/northwind-web"
+seed_worktrees() {
+  local wt="$REPO/demo/state/northwind-web/worktrees"
+  # Idempotent: this runs on every capture and each run costs a second.
+  [ -d "$wt/chore-retire-legacy-cart" ] && return 0
+  echo "==> seeding worktrees so the disk scene has something to show"
+  git -C "$DEMO_REPO" branch chore/retire-legacy-cart main >/dev/null 2>&1
+  local ref
+  for ref in fix/cart-quantity-race chore/retire-legacy-cart; do
+    env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" run northwind-web "$ref" web \
+      >/dev/null 2>&1
+    env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" stop northwind-web >/dev/null 2>&1
+  done
+  # Now delete the branch, so its worktree reads "branch gone".
+  git -C "$DEMO_REPO" branch -D chore/retire-legacy-cart >/dev/null 2>&1
+}
+[ -d "$DEMO_REPO" ] && seed_worktrees
+
 echo "==> starting the demo run so health and uptime are real"
 demo_down
 env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" run northwind-web feat/checkout-summary web \

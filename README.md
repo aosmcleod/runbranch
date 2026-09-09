@@ -196,6 +196,21 @@ claim to know what has been merged: a squash-merge leaves a branch looking
 unmerged to git, so calling those reclaimable would eventually delete something
 you still wanted.
 
+<img src="docs/img/disk.png" width="640" alt="The Disk sheet: three worktrees with their sizes, one marked branch gone, and a Reclaim menu">
+
+**Two projects that want the same port.** Framework defaults collide — three
+projects here all want 5173 — so they cannot run at once. The **Ports** sheet
+says which, and picks a shift that clears every port a project declares,
+accounting for whatever is already listening. Which project moves is a real
+choice, so it asks: one of them is usually the one you think of as owning the
+port.
+
+<img src="docs/img/ports.png" width="640" alt="The Ports sheet listing every declared port, with two projects claiming 4174 and a Move menu to separate them">
+
+It stays out of the sidebar on purpose. Nothing is wrong until you try to run
+the second one, and a warning on every project that merely *might* clash is a
+warning nobody reads.
+
 **Status that keeps being true.** Uptime ticks. Health is polled, not assumed.
 Processes and ports orphaned by a crash, a sleep or a force quit are found and
 reclaimed on next launch — you should never go hunting with `lsof`.

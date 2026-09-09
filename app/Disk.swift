@@ -137,7 +137,9 @@ struct DiskSheet: View {
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
-        .frame(width: 460, height: 380)
+        // 520 to match the Ports sheet, and because at 460 the footer line about
+        // reclaimable worktrees wrapped onto two.
+        .frame(width: 520, height: 400)
     }
 
     @ViewBuilder
