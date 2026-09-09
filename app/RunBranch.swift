@@ -1709,7 +1709,6 @@ struct ProjectEditor: View {
     /// Projects whose ports are held by something Runbranch did not start.
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
-    @State private var hoveringProjects = false
     // Persisted: collapsing a section is a preference, and having it spring
     // back open on every launch would make it pointless.
     @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
@@ -2190,7 +2189,6 @@ struct ContentView: View {
     /// Projects whose ports are held by something Runbranch did not start.
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
-    @State private var hoveringProjects = false
     // Persisted: collapsing a section is a preference, and having it spring
     // back open on every launch would make it pointless.
     @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
@@ -2946,46 +2944,14 @@ struct ContentView: View {
                     ForEach(favourites) { projectRow($0, isLive: false) }
                 }
             }
-            Section(isExpanded: $projectsExpanded) {
+            // No accessory in this header. Three attempts at a plus that
+            // matched the system's own control — sizing, colour, hover — and
+            // none of them looked right; SwiftUI styles the label it generates
+            // and not content handed to it. Adding a project is on Cmd-N, in
+            // the ellipsis menu and on the welcome screen, so nothing is lost
+            // by leaving the header alone.
+            Section("Projects", isExpanded: $projectsExpanded) {
                 ForEach(others) { projectRow($0, isLive: false) }
-            } header: {
-                // The system styles the automatic label but not content given
-                // to it, so the plus matches by hand: same secondary colour and
-                // weight as the label, revealed on hover like the chevron.
-                HStack(spacing: 0) {
-                    Text("Projects")
-                    Spacer(minLength: 0)
-                    Menu {
-                        Button("Add a Project…") { addProject() }
-                        Button("Scan for Projects…") { scanning = true }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                            // secondaryLabelColor, not SwiftUI's `.secondary`.
-                            //
-                            // `.secondary` resolves against whatever it is
-                            // inside, and inside a section header that put it
-                            // in the wrong place twice: too dim first, then too
-                            // bright when corrected to `.primary`. The system
-                            // colour is a fixed value and the one the collapse
-                            // chevron uses, so this matches it by definition
-                            // rather than by eye.
-                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            // A hit area worth aiming at, without the glyph
-                            // growing to match.
-                            .frame(width: 18, height: 18)
-                            .contentShape(Rectangle())
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .opacity(hoveringProjects ? 1 : 0)
-                    .help("Add or scan for projects")
-                }
-                // The whole row is the hover target, so the button does not
-                // have to be found before it appears.
-                .contentShape(Rectangle())
-                .onHover { hoveringProjects = $0 }
             }
         }
         .listStyle(.sidebar)
