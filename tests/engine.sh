@@ -358,20 +358,30 @@ FAV_LEFT="$(grep -cxF spare "$RB_HOME/favourites" 2>/dev/null)" || FAV_LEFT=0
 is  "unpins the favourite"    "$FAV_LEFT" "0"
 is  "the fixture survives"    "$([ -f "$RB_PROJECTS_DIR/fixture.conf" ] && echo yes || echo no)" "yes"
 
-# Removing the config from under a live run would orphan the servers, leaving
+# Removing the config from under a live run orphans the servers, leaving
 # nothing that knows how to stop them.
+#
+# Driven through an actual run on purpose. The first version of this test wrote
+# a fake state file at the path the implementation looked for — and the
+# implementation looked for "current" while the state file is called "state", so
+# the test passed while the guard never fired once.
 cat > "$RB_PROJECTS_DIR/busy.conf" <<CONF
 NAME="Busy"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4323:/:python3 -m http.server 4323 --directory public"
+TARGETS="web:4323:/:python3 -m http.server {port} --directory public"
 CONF
-mkdir -p "$RB_HOME/busy"
-printf 'REF=main\nPIDS=1\n' > "$RB_HOME/busy/current"
+"$ENGINE" run busy main web >/dev/null 2>&1
+is  "the run really started"   "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4323/ 2>/dev/null)" "200"
 BUSY_OUT="$("$ENGINE" remove busy 2>&1)"; BUSY_RC=$?
 is  "refuses while running"    "$BUSY_RC" "1"
 is  "keeps a running project"  "$([ -f "$RB_PROJECTS_DIR/busy.conf" ] && echo yes || echo no)" "yes"
+is  "leaves the state alone"   "$([ -f "$RB_HOME/busy/state" ] && echo yes || echo no)" "yes"
 has "names the command to fix it" "$BUSY_OUT" "stop busy"
+# And once stopped it goes, so the guard is not simply refusing everything.
+"$ENGINE" stop busy >/dev/null 2>&1
+"$ENGINE" remove busy >/dev/null 2>&1
+is  "removes it once stopped"  "$([ -f "$RB_PROJECTS_DIR/busy.conf" ] && echo yes || echo no)" "no"
 rm -rf "$RB_HOME/busy" "$RB_PROJECTS_DIR/busy.conf"
 
 UNKNOWN_OUT="$("$ENGINE" remove nosuchproject 2>&1)"

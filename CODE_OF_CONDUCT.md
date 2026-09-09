@@ -6,7 +6,7 @@ Concretely: no harassment, no personal attacks, no dismissiveness about
 someone's experience level. Criticise code and ideas as much as you like —
 that is the job — but not people.
 
-Reported problems go to alec.mcleod@functionpoint.com and are handled
+Reported problems go to alec@mcleod.co and are handled
 privately. Maintainers may remove comments, close pull requests, or block
 accounts.
 

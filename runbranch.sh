@@ -1438,16 +1438,31 @@ remove_project() {
   local conf="$PROJECTS_DIR/$name.conf"
   [ -f "$conf" ] || die "No such project: $name" "runbranch.sh projects"
 
-  # Refuse while it is running. Removing the config underneath a live run would
-  # orphan the servers with nothing left that knows how to stop them.
-  local state="$RB_HOME/$name/current"
-  if [ -f "$state" ]; then
-    die "$name is running." "runbranch.sh stop $name"
+  # Refuse while it is running. Removing the config underneath a live run
+  # orphans the servers with nothing left that knows how to stop them.
+  #
+  # Asked through load_project and demo_running rather than by rebuilding the
+  # path here: the previous version looked for a file called "current" when the
+  # state file is called "state", so the guard never fired once. A running
+  # project could be removed and its servers left listening with no way to stop
+  # them through Runbranch at all.
+  load_project "$name"
+  if demo_running; then
+    die "$name is running." "$SELF stop $name"
   fi
 
   rm -f "$conf"
-  # Worktrees, logs and metadata. Anything here was created by us.
-  [ -d "$RB_HOME/$name" ] && rm -rf "$RB_HOME/$name"
+  # Worktrees, logs and metadata — all of it ours. Leashed the same way worktree
+  # deletion is: this is an rm -rf built from a name, and a name that came out
+  # empty would take every project's state with it.
+  local work="$RB_HOME/$name"
+  if [ -n "$name" ] && [ -d "$work" ]; then
+    case "$work" in
+      "$RB_HOME"/?*) rm -rf "$work" ;;
+      *) die "Refusing to delete $work — it is not a project directory under $RB_HOME." \
+           "Remove it by hand if that is really what you want." ;;
+    esac
+  fi
   # And the favourite pin, which lives outside the config on purpose.
   if [ -f "$FAVOURITES_FILE" ]; then
     grep -vxF "$name" "$FAVOURITES_FILE" > "$FAVOURITES_FILE.tmp" 2>/dev/null || true
