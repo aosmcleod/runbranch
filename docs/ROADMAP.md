@@ -9,9 +9,15 @@ aspirational README this came out of are in the git history — they described
 building the thing rather than the thing, and the README covers what exists
 while this covers what does not.
 
-The revision is not a re-plan. Menus and menu bar mode shipped, so they are
-marked as such; and two days of building surfaced one thing the original list
-got wrong, which is 1.9 below.
+Near-term work — the open v1 items and the whole v1.1 band — is tracked in
+[issues](https://github.com/aosmcleod/runbranch/issues) now that there is a
+repository to track it in. This file keeps the reasoning and the long horizon,
+which is what it is better at than a tracker. Where an item is filed, the issue
+is the live one and this is the argument for it.
+
+Revised 2026-09-09, after publication. Menus, menu bar mode, publication and
+the port work shipped; running in place shipped and was not on this list at
+all, which is the largest thing the original plan got wrong.
 
 ---
 
@@ -27,17 +33,18 @@ demo a colleague's branch without reading anything.
 | 1.3 | ✅ **Sidebar sections** — Running, Favourites, Projects; hover `+` to add; pin from the context menu | Four projects fit in one list. Twenty do not |
 | 1.4 | ✅ **Menus** — About, File items with shortcuts, Toggle Sidebar, Help to the repository; no New Window, no window tabbing | An app with no menu bar items reads as unfinished, and About is where the licence and version belong |
 | 1.5 | ✅ **Docs** — README with the logo and four screenshots, config reference, TESTING, ROADMAP | It is going public |
-| 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 48 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
+| 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 112 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
 | 1.8 | ✅ **Open-source guidelines** — CONTRIBUTING, CODE_OF_CONDUCT, TESTING, issue and PR templates | A repo without them asks every contributor to guess |
 | 1.6 | ✅ **Design and code review** — one duplicated engine block removed, dead code deleted, home abbreviation commonised; the structural half is 1.10 | Two months of accreted decisions want one pass |
-| 1.11 | **Publish it** — no remote exists yet; 61 commits sitting on a local `main` | Every other v1 item was justified by "it is going public", which has not happened |
-| 1.10 | **Decompose ContentView** — 716 lines and 23 state properties in one view, in a 2,700-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
-| 1.9 | ⚠️ **A UI smoke test** — `tests/ui.sh`, 8 assertions. Catches the duplicate window; does NOT catch the stale-render bug it was also written for | Half done, and the half it misses is recorded in the test file. Asserting the monitor passes while the render is stale — reintroducing that bug left the suite green. Catching it needs the drawn text, which neither an in-process accessibility walk nor System Events can reach |
+| 1.11 | ✅ **Publish it** — public at `aosmcleod/runbranch` under GPL-3.0, v1.0.0 tagged | Every other v1 item was justified by "it is going public". The release still has no installable artifact, which is [#3](https://github.com/aosmcleod/runbranch/issues/3) |
+| 1.10 | **Decompose ContentView** — [#1](https://github.com/aosmcleod/runbranch/issues/1). 918 lines and 31 state properties in one view, in a 3,504-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
+| 1.9 | ⚠️ **A UI smoke test** — [#2](https://github.com/aosmcleod/runbranch/issues/2). `tests/ui.sh`, 8 assertions. Catches the duplicate window; does NOT catch the stale-render bug it was also written for | Half done, and the half it misses is recorded in the test file. Asserting the monitor passes while the render is stale — reintroducing that bug left the suite green. Catching it needs the drawn text, which neither an in-process accessibility walk nor System Events can reach |
 
 ### Why 1.9
 
-The engine has 38 assertions. The app — around 2,700 lines of Swift — has none,
-and on 2026-09-08 that cost two real bugs:
+The engine has 112 assertions. The app — around 3,500 lines of Swift — has
+eight, none of which can see what is drawn, and on 2026-09-08 that cost two
+real bugs:
 
 - The run strip held the health monitor as a plain property rather than an
   `@ObservedObject`, so it never subscribed to changes and kept whatever it drew
@@ -63,10 +70,11 @@ does the hard part — it launches the app unattended and knows when it failed.
 The review found the engine in reasonable shape — one duplicated block, since
 removed, and no dead functions. The app is the imbalance:
 
-- `ContentView` is 716 lines with 23 state properties, in a file of 2,700.
-- `Screenshot` (217 lines) and `Engine` (204) are cohesive and would move out
-  cleanly; `ProjectEditor` (173) and `ScanSheet` (164) are already separate
-  types sharing one file only by habit.
+- `ContentView` is 918 lines with 31 state properties, in a file of 3,504 —
+  both larger than when this was written, which is the argument making itself.
+- `Screenshot` and `Engine` are cohesive and would move out cleanly;
+  `ProjectEditor` and `ScanSheet` are already separate types sharing one file
+  only by habit.
 
 Nothing here is broken, which is why it is 1.10 and not urgent. But it is the
 same place both bugs behind 1.9 lived — a view holding 23 pieces of state has
@@ -81,23 +89,57 @@ refactor is precisely the kind of change that silently alters behaviour.
 
 ---
 
+## What shipped that this plan did not contain
+
+Worth recording separately, because it changed what the app is rather than
+adding to it. The original plan described a tool that runs branches from
+throwaway worktrees. It now runs them from a throwaway worktree *or* from the
+checkout you are working in, and those are different products.
+
+- **Running in place.** A branch that is the one currently checked out in the
+  repository runs there, against the working tree as it stands — uncommitted
+  changes included. This exists because a worktree is a snapshot: hot reload in
+  a worktree cannot see code you are typing in your checkout, and the fix
+  attempted first was to make Refresh do something it does not mean. There is
+  no install, nothing is copied, and there is no per-run database, and the run
+  strip has to say so, because those absences are surprising if you assume
+  every run is isolated. Runbranch never switches a branch in a checkout it
+  does not own; an in-place run of a ref that is not checked out is refused
+  with the `git switch` line that would fix it.
+- **Adopting a run Runbranch did not start.** A port answering when we expected
+  it not to used to be an error. It is now attributable — to another project's
+  run, to a foreign process, or to nothing identifiable — and the run can be
+  adopted rather than fought with. This is what makes in-place runs usable at
+  all, since the thing already holding the port is usually your own dev server
+  or an agent's.
+- **A ports view.** What is listening, on which port, belonging to what. Built
+  because the port conflict dialogue needed the data anyway, and once the
+  engine can answer the question there is no reason not to show it.
+
+The follow-ups these opened are filed rather than planned here:
+[#13](https://github.com/aosmcleod/runbranch/issues/13) — an in-place run does
+not notice its branch being switched underneath it, and
+[#14](https://github.com/aosmcleod/runbranch/issues/14) — Vite resolves a
+different project root in place than it does in a worktree.
+
+---
+
 ## v1.1 — the things you notice on day two
 
 | | Item | Why |
 |---|---|---|
 | 2.1 | ✅ **Menu bar mode** — Dock, both, or menu bar only; status item with the current run, Stop, and a way back to the window | A demo runs for an hour while you use other apps. The window is not where you want the status |
-| 2.13 | **Keep the ports view current on a timer** — it is read on launch and after every operation, so a server started while the window sits idle is not noticed until something else happens | Each read is one `lsof` per declared port plus a `ps` to attribute it, so a tight poll is wasteful. Thirty seconds, or watching for a `kqueue` event, would do |
-| 2.12 | **Update a run to the branch's latest commit** — one action that re-checks-out the tip and restarts, plus showing in the strip when the worktree is behind | A worktree is pinned to the commit it was made at, so new commits need a stop and a start. Alec hit this expecting *Refresh* to do it, which only re-reads pull request metadata. Being able to see "3 commits behind" is half the value |
-| 2.2 | **Per-target restart** — restart web without restarting the api | Overmind's best idea. A Next rebuild should not cost a database connection |
-| 2.3 | **Notifications** — ready, failed, and "still running after an hour" | The run outlives the window on purpose; it should be able to say so |
-| 2.4 | **Log improvements** — follow toggle, wrap toggle, jump to first error | The viewer works; it does not yet help you read |
-| 2.5 | **Disk usage in the app** — `runbranch.sh disk` reports it; the app does not show it, and there is no prompt when it grows | On this machine: 3 worktrees, 1.9GB, 1.1GB of it not in use. The engine can now say so and nothing asks it. A prune of `gone` worktrees could be offered rather than waiting to be asked; "merged" deliberately stays out of it, since a squash-merge leaves a branch looking unmerged |
+| 2.13 | [#5](https://github.com/aosmcleod/runbranch/issues/5) **Keep the ports view current on a timer** — it is read on launch and after every operation, so a server started while the window sits idle is not noticed until something else happens | Each read is one `lsof` per declared port plus a `ps` to attribute it, so a tight poll is wasteful. Thirty seconds, or watching for a `kqueue` event, would do |
+| 2.12 | [#6](https://github.com/aosmcleod/runbranch/issues/6) **Update a run to the branch's latest commit** — one action that re-checks-out the tip and restarts, plus showing in the strip when the worktree is behind | A worktree is pinned to the commit it was made at, so new commits need a stop and a start. Alec hit this expecting *Refresh* to do it, which only re-reads pull request metadata. Being able to see "3 commits behind" is half the value |
+| 2.2 | [#7](https://github.com/aosmcleod/runbranch/issues/7) **Per-target restart** — restart web without restarting the api | Overmind's best idea. A Next rebuild should not cost a database connection |
+| 2.3 | [#8](https://github.com/aosmcleod/runbranch/issues/8) **Notifications** — ready, failed, and "still running after an hour" | The run outlives the window on purpose; it should be able to say so |
+| 2.4 | [#9](https://github.com/aosmcleod/runbranch/issues/9) **Log improvements** — follow toggle, wrap toggle, jump to first error | The viewer works; it does not yet help you read |
+| 2.5 | [#10](https://github.com/aosmcleod/runbranch/issues/10) **Disk usage in the app** — `runbranch.sh disk` reports it; the app does not show it, and there is no prompt when it grows | On this machine: 3 worktrees, 1.9GB, 1.1GB of it not in use. The engine can now say so and nothing asks it. A prune of `gone` worktrees could be offered rather than waiting to be asked; "merged" deliberately stays out of it, since a squash-merge leaves a branch looking unmerged |
 | 2.6 | ✅ **Remove a project** — right-click → Remove Project, with a confirmation naming the repository it will not touch; refused while running | Adding is in the app; removing still means deleting a file by hand |
-| 2.7 | **Quick Look the diff** — space on a branch shows what changed against the default | Deciding whether to run a branch is the step before running it |
-| 2.10 | **Worktree names can collide** — `slug_for` maps a ref to a directory by replacing anything outside `[A-Za-z0-9._-]` with `-`, so `feat/a-b` and `feat/a+b` both become `feat-a-b` and share one worktree | Found by probing, not by hitting it. Mostly benign, since each run re-checks-out the ref — but `remove-worktree` on one deletes the other's, and the UI shows a worktree as present for a branch that does not own it. Fixing it renames existing worktrees, so it wants doing deliberately |
-| 2.11 | **The app has no way to report an error** — there is no alert anywhere in it. Engine failures outside the run sheet (saving a config, toggling a favourite, checking ports) fail silently | Every other error path in this project names the command that fixes it. The app throws that away for anything that is not a streamed run |
-| 2.9 | **Port allocation across projects** — framework defaults collide: three projects here all want 5173 and two want 3000, so they cannot run together without hand-editing ports into both the target and the command | `doctor` now warns, and a conflict names the run holding the port, but the user still has to pick the numbers. Assigning a per-project offset and rewriting it into the command is the real fix |
-| 2.8 | **Modal depth** — sheets render flat against the parent window, with no material and no edge to separate them | Tried and abandoned on 2026-09-08: glass surfaces, a cleared sheet window and a `SheetChrome` representable each changed nothing visible. Whatever is going on is not where I looked, and it wants a fresh read rather than more of the same |
+| 2.7 | [#11](https://github.com/aosmcleod/runbranch/issues/11) **Quick Look the diff** — space on a branch shows what changed against the default | Deciding whether to run a branch is the step before running it |
+| 2.10 | ✅ **Worktree names can collide** — `worktree_slug` now records the owning ref in a meta file and gives a second, colliding ref a digest suffix | Found by probing, not by hitting it. The per-run *database* name had the same bug and was fixed with it, which is the part that would have corrupted data rather than just confusing the UI |
+| 2.11 | ✅ **The app has no way to report an error** — `Engine.failure` routes 11 previously-silent paths to an alert that names the command | Every other error path in this project names the command that fixes it. The app was throwing that away for anything that was not a streamed run |
+| 2.9 | ⚠️ **Port allocation across projects** — [#12](https://github.com/aosmcleod/runbranch/issues/12). The engine half shipped: `PORT_OFFSET` shifts every declared port, `{port}` in a command is rewritten, `doctor` warns on overlap, and a taken port offers switch / take over / run elsewhere | Framework defaults collide — three projects here all want 5173 and two want 3000. What is left is that the user still picks the number by hand, in a file, which is the half that made it worth doing |
 
 ---
 
@@ -182,3 +224,9 @@ Small, cheap, and each removes a papercut. Most are an afternoon.
   a fallback nobody can currently see
 - Capture the About panel and the menu bar item in the screenshot set, so the
   docs show them without anyone having to open the app
+- Sheets render flat against the parent window, with no material and no edge to
+  separate them. Tried and abandoned on 2026-09-08: glass surfaces, a cleared
+  sheet window and a `SheetChrome` representable each changed nothing visible.
+  Not filed, because there is no next step to file — it wants a fresh read by
+  someone who knows where macOS actually decides this, not another attempt from
+  the same direction
