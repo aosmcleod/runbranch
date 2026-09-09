@@ -236,6 +236,8 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh add <repo>               # propose a config and write it
 ./runbranch.sh remove studio            # delete its config and state, never its repo
 ./runbranch.sh ports                    # every declared port, and what is on it
+./runbranch.sh overlaps                 # ports claimed by more than one project
+./runbranch.sh suggest-offset studio    # the smallest shift that frees its ports
 ./runbranch.sh disk                     # worktree sizes, and what is reclaimable
 ./runbranch.sh cleanup studio           # remove worktrees, interactively
 ./runbranch.sh prune-gone studio        # remove the ones whose branch no longer exists

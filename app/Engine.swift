@@ -181,6 +181,21 @@ enum Engine {
     /// Every worktree on disk across every project, and what it costs.
     static func disk() -> [DiskRow] { DiskRow.parse(capture(["disk"]).out) }
 
+    /// Ports more than one project declares. `doctor` says the same thing in
+    /// prose, which the app cannot act on.
+    static func overlaps() -> [PortOverlap] {
+        PortOverlap.parse(capture(["overlaps"]).out)
+    }
+
+    /// The smallest `PORT_OFFSET` that puts all of a project's ports somewhere
+    /// free. nil when the engine could not find one, rather than 0 — which
+    /// means "nothing needs moving" and is a different answer.
+    static func suggestedOffset(_ project: String) -> Int? {
+        let r = capture(["suggest-offset", project])
+        guard r.code == 0 else { return nil }
+        return Int(r.out.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     /// Git repos under a directory that are not already declared, as
     /// (name, path) pairs.
     static func scan(_ directory: String) -> [(name: String, path: String)] {

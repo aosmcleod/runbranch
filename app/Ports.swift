@@ -150,6 +150,13 @@ struct PortConflictSheet: View {
 /// which project.
 struct PortsSheet: View {
     let rows: [PortRow]
+    /// Ports two projects both want. Deliberately shown here and not on the
+    /// project rows in the sidebar: nothing is wrong until you try to run the
+    /// second one, and a warning badge on a project that merely *might* clash
+    /// cried wolf on every row.
+    let overlaps: [PortOverlap]
+    /// Shift one project's ports out of the way.
+    let onSeparate: (String) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -203,6 +210,11 @@ struct PortsSheet: View {
                 }
             }
 
+            if !overlaps.isEmpty {
+                Divider()
+                clashes
+            }
+
             Divider()
             HStack {
                 Spacer()
@@ -211,7 +223,48 @@ struct PortsSheet: View {
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 520, height: 460)
+    }
+
+    /// The projects that cannot run together, and a way to fix it.
+    ///
+    /// Fixing it means giving one of them a PORT_OFFSET, which shifts every
+    /// port it declares and rewrites `{port}` in its commands — so a project
+    /// declaring 3000 and 3001 keeps them adjacent. Picking the number by hand,
+    /// in a file, in two places per target, was the part that made this worth
+    /// doing at all.
+    @ViewBuilder
+    private var clashes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+                Text(overlaps.count == 1
+                     ? "One port is claimed by more than one project"
+                     : "\(overlaps.count) ports are claimed by more than one project")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            ForEach(overlaps) { clash in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(String(clash.port))
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(width: 52, alignment: .leading)
+                    Text(clash.projects.joined(separator: ", "))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    // Which one moves is a real choice — one of them is
+                    // probably the one you think of as owning the port.
+                    Menu("Move…") {
+                        ForEach(clash.projects, id: \.self) { p in
+                            Button(p) { onSeparate(p) }
+                        }
+                    }
+                    .menuStyle(.button).controlSize(.small).fixedSize()
+                }
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
     }
 
     @ViewBuilder

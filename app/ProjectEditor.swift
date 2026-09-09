@@ -29,16 +29,6 @@ struct ProjectEditor: View {
     @State private var loading = true
     @State private var saving = false
     @State private var problem: String?
-    /// Every declared port and what is on it.
-    @State private var portRows: [PortRow] = []
-    /// Projects whose ports are held by something Runbranch did not start.
-    @State private var occupiedElsewhere: Set<String> = []
-    @State private var showingPorts = false
-    // Persisted: collapsing a section is a preference, and having it spring
-    // back open on every launch would make it pointless.
-    @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
-    @AppStorage("sidebar.favourites.expanded") private var favouritesExpanded = true
-    @AppStorage("sidebar.projects.expanded")   private var projectsExpanded = true
 
     private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
 
@@ -50,6 +40,34 @@ struct ProjectEditor: View {
     }
     private var dirtyKeys: [String] {
         f.keys.filter { f[$0] != original[$0] }.sorted()
+    }
+
+    /// What the offset actually does to the declared ports.
+    ///
+    /// Once it is set, the numbers in TARGETS are no longer the numbers the
+    /// servers listen on, and working that out in your head is the part that
+    /// made hand-editing ports the easier option.
+    private var offsetNote: String {
+        let raw = (f["PORT_OFFSET"] ?? "").trimmingCharacters(in: .whitespaces)
+        let offset = Int(raw) ?? 0
+        let declared = (f["TARGETS"] ?? "")
+            .components(separatedBy: .newlines)
+            .compactMap { line -> Int? in
+                let parts = line.components(separatedBy: ":")
+                guard parts.count >= 2 else { return nil }
+                return Int(parts[1].trimmingCharacters(in: .whitespaces))
+            }
+        guard !declared.isEmpty else {
+            return "Shifts every port this project declares, and rewrites "
+                 + "{port} in its commands."
+        }
+        guard offset != 0 else {
+            return "Declared: " + declared.map(String.init).joined(separator: ", ")
+                 + ". A shift moves all of them together."
+        }
+        return "Runs on "
+             + declared.map { "\($0) → \($0 + offset)" }.joined(separator: ", ")
+             + ". {port} in a command is rewritten to match."
     }
 
     var body: some View {
@@ -99,6 +117,14 @@ struct ProjectEditor: View {
                                   prompt: Text("e.g. api"))
                         TextField("Presets", text: bind("PRESETS"),
                                   prompt: Text("web=web  both=web,admin"))
+                        // Here rather than in its own section: it only means
+                        // anything next to the ports it shifts.
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("Port offset", text: bind("PORT_OFFSET"),
+                                      prompt: Text("0"))
+                            Text(offsetNote)
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
                         Toggle("Targets come from a Procfile", isOn: boolBind("PROCFILE"))
                         Toggle("The server opens a browser itself", isOn: boolBind("OPENS_ITSELF"))
                     }

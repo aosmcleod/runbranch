@@ -295,6 +295,27 @@ struct PortConflict {
 }
 
 /// A declared port and what is on it, from `runbranch.sh ports`.
+/// A port more than one project declares.
+///
+/// Not a conflict yet — nothing is running — which is exactly why it is worth
+/// saying: you find out otherwise by trying to run the second one.
+struct PortOverlap: Identifiable {
+    let port: Int
+    let projects: [String]
+
+    var id: Int { port }
+
+    static func parse(_ text: String) -> [PortOverlap] {
+        text.split(separator: "\n").compactMap { line in
+            let f = line.components(separatedBy: "\t")
+            guard f.count >= 2, let port = Int(f[0]) else { return nil }
+            let who = f[1].split(separator: " ").map(String.init)
+            guard who.count > 1 else { return nil }
+            return PortOverlap(port: port, projects: who)
+        }
+    }
+}
+
 /// One worktree on disk: what it cost, and whether anything still wants it.
 struct DiskRow: Identifiable {
     let project: String

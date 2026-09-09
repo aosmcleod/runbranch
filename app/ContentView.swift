@@ -109,6 +109,9 @@ struct ContentView: View {
     @State private var problem: String?
     /// Every declared port and what is on it.
     @State private var portRows: [PortRow] = []
+    /// Ports two projects both want. Read in the same sweep, since it is one
+    /// more engine call over the same data.
+    @State private var portOverlaps: [PortOverlap] = []
     /// Every worktree on disk, or nil when it has not been measured.
     ///
     /// Deliberately NOT read on the refresh path. Measuring it means `du -sk`
@@ -257,6 +260,7 @@ struct ContentView: View {
         // both: nothing at rest, a material once something scrolls beneath it.
         .toolbarBackgroundVisibility(.automatic, for: .windowToolbar)
         .task {
+            if SelfTest.requested { SelfTest.phase("task-entered") }
             // Reclaim before reading state, so a crash's leftovers are gone
             // before anything is drawn rather than showing as a phantom run.
             _ = await Task.detached { Engine.reclaim() }.value
@@ -287,6 +291,7 @@ struct ContentView: View {
                 present(.editing(project: p))
             }
             if SelfTest.requested {
+                SelfTest.phase("selftest-branch")
                 SelfTest.armWatchdog()
                 // Wait for the things a launch is supposed to produce, rather
                 // than sleeping a fixed amount and hoping.
@@ -312,9 +317,11 @@ struct ContentView: View {
                     return all.allSatisfy { $0 == .healthy } ? "healthy" : "mixed"
                 } ?? "no-state"
 
+                SelfTest.phase("settled")
                 // After the state fields are settled, so what is read is
                 // what the assertions above describe.
                 let drawn = await SelfTest.readScreen()
+                SelfTest.phase("screen-read")
 
                 SelfTest.report([
                     ("windows", String(realWindows.count)),
@@ -373,6 +380,8 @@ struct ContentView: View {
                     }
                 case .disk:
                     present(.disk)
+                case .ports:
+                    present(.ports)
                 }
                 if Screenshot.scene != .main { try? await Task.sleep(for: .seconds(1.2)) }
                 // The first health poll can take up to its 3s timeout, and the
@@ -545,7 +554,9 @@ struct ContentView: View {
                     onShift: { resolveByShifting(pending) },
                     onCancel: { sheet = nil })
             case .ports:
-                PortsSheet(rows: portRows) { sheet = nil }
+                PortsSheet(rows: portRows, overlaps: portOverlaps,
+                           onSeparate: { separate($0) },
+                           onClose: { sheet = nil })
             case .disk:
                 DiskSheet(rows: diskRows,
                           onPrune: { pruneGone($0) },
@@ -760,6 +771,35 @@ struct ContentView: View {
         run(["update", p], "Updating \(snap.state.ref)")
     }
 
+    /// Shift one project's ports clear of every other project's, and of
+    /// anything already listening.
+    ///
+    /// The engine picks the number: it has to clear every port the project
+    /// declares at once, and account for servers Runbranch did not start. An
+    /// offset of 0 means nothing needed moving, which is worth saying rather
+    /// than silently doing nothing.
+    private func separate(_ project: String) {
+        Task {
+            let offset = await Task.detached { Engine.suggestedOffset(project) }.value
+            guard let offset, offset > 0 else {
+                problem = offset == 0
+                    ? "\(project) does not need moving — nothing else is on its ports."
+                    : "Could not find a free range for \(project) within 200 ports."
+                return
+            }
+            let err = await Task.detached {
+                Engine.set(project, "PORT_OFFSET", String(offset))
+            }.value
+            if let err {
+                problem = err
+                return
+            }
+            cache[project] = nil
+            await reload()
+            await refreshLive()
+        }
+    }
+
     /// Walk the worktrees and add up what they cost. Seconds, not milliseconds.
     private func measureDisk() async {
         diskRows = await Task.detached { Engine.disk() }.value
@@ -908,6 +948,7 @@ struct ContentView: View {
         // and after every operation without anyone pressing anything.
         let rows = await Task.detached { PortRow.parse(Engine.capture(["ports"]).out) }.value
         portRows = rows
+        portOverlaps = await Task.detached { Engine.overlaps() }.value
     }
 
     /// Builds the whole snapshot, then assigns it in one go. Nothing is

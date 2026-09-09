@@ -628,6 +628,51 @@ is "a running worktree is never pruned" \
 is "and it is still on disk"    "$([ -d "$WT/feature-one" ] && echo yes || echo no)" "yes"
 "$ENGINE" stop fixture >/dev/null 2>&1
 
+echo "==> overlapping ports are reported, and an offset is suggested that clears them"
+# Two projects that both want 4321, which is what framework defaults actually
+# do: three projects on this machine all want 5173.
+cat > "$RB_PROJECTS_DIR/twin.conf" <<CONF
+NAME="Twin"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+INSTALL="false"
+TARGETS="web:4321:/:python3 -m http.server {port} --directory public"
+CONF
+OV="$("$ENGINE" overlaps)"
+has "the shared port is named"   "$OV" "4321"
+is  "and both projects with it" \
+    "$(printf '%s\n' "$OV" | awk -F'\t' '$1==4321 {print NF}')" "2"
+
+OFF="$("$ENGINE" suggest-offset twin)"
+is "a shift is suggested"        "$([ "$OFF" -ge 1 ] && echo yes || echo no)" "yes"
+
+# The bug this section is really about: overlap detection compared DECLARED
+# ports, so a project that had already been shifted still reported as clashing
+# and the fix looked like it had not worked.
+"$ENGINE" set twin PORT_OFFSET "$OFF" >/dev/null 2>&1
+is "setting it clears the overlap" \
+   "$("$ENGINE" overlaps | awk -F'\t' '$1==4321' | wc -l | tr -d ' ')" "0"
+is "and the shifted port is where it was sent" \
+   "$("$ENGINE" ports | awk -F'\t' '$1=="twin" {print $3}')" "$((4321 + OFF))"
+
+# Asked again, the next project has to clear the one that just moved rather
+# than being sent to the same place.
+SECOND="$("$ENGINE" suggest-offset fixture)"
+is "the next suggestion avoids it" \
+   "$([ "$SECOND" != "$OFF" ] && echo different || echo same)" "different"
+
+# A listener nobody declared still has to be avoided — being able to run
+# alongside your own dev server is the point.
+python3 -m http.server $((4321 + OFF + 1)) >/dev/null 2>&1 &
+SQUAT=$!
+sleep 1
+"$ENGINE" set twin PORT_OFFSET 0 >/dev/null 2>&1
+THIRD="$("$ENGINE" suggest-offset twin)"
+is "an undeclared listener is avoided" \
+   "$([ "$((4321 + THIRD))" != "$((4321 + OFF + 1))" ] && echo yes || echo no)" "yes"
+kill "$SQUAT" 2>/dev/null; wait "$SQUAT" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/twin.conf"; rm -rf "$RB_HOME/twin"
+
 echo
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ] || exit 1

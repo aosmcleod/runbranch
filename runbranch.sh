@@ -965,44 +965,92 @@ port_holder_project() {
 # make it likely, since every Vite project wants 5173 and every Next one wants
 # 3000. It only surfaces when the second project refuses to start, which is a
 # bad time to find out. So `doctor` with no argument says so up front.
-report_port_overlaps() {
-  local n port line pairs=''
+# Every effective port every project declares, as `port<TAB>project`.
+#
+# Effective and not declared: PORT_OFFSET shifts a project's whole set, so
+# comparing declared numbers reported two projects as clashing after they had
+# already been separated — which made the fix look like it had not worked.
+declared_ports() {
+  local n t port
   while IFS="$(printf '\t')" read -r n _; do
     [ -n "$n" ] || continue
-    # target_field matches by NAME, so the names have to come from
-    # target_names — splitting $TARGETS on whitespace yields fragments of the
-    # command, not names.
-    for port in $( ( load_project "$n" >/dev/null 2>&1
-                     # target_field prints without a trailing newline, so
-                     # without the echo three ports become "400030003002".
-                     for t in $(target_names); do target_field "$t" port; echo; done
-                   ) 2>/dev/null ); do
-      [ -n "$port" ] || continue
-      pairs="$pairs$port $n
-"
-    done
+    (
+      load_project "$n" >/dev/null 2>&1 || exit 0
+      # target_field matches by NAME, so the names have to come from
+      # target_names — splitting $TARGETS on whitespace yields fragments of
+      # the command, not names.
+      for t in $(target_names); do
+        port="$(target_port "$t")" || continue
+        [ -n "$port" ] && printf '%s\t%s\n' "$port" "$n"
+      done
+    )
   done <<EOF
 $(list_projects)
 EOF
+}
 
-  local overlaps
+# Ports claimed by more than one project, as `port<TAB>project project ...`.
+port_overlaps() {
   # `sort -u` and not `sort -n -u`: with a numeric sort, uniqueness is decided
-  # by the numeric KEY, so every line sharing a port collapses into one and the
-  # count is always 1 — which is exactly the thing being counted.
-  overlaps="$(printf '%s' "$pairs" | sort -u | awk '
-    { count[$1] = count[$1] + 1; who[$1] = who[$1] " " $2 }
-    END { for (p in count) if (count[p] > 1) print p, who[p] }
-  ' | sort -n)"
+  # by the numeric KEY, so every line sharing a port collapses into one and
+  # the count is always 1 — which is exactly the thing being counted.
+  declared_ports | sort -u | awk -F'\t' '
+    { n[$1] = n[$1] + 1; who[$1] = (who[$1] == "" ? $2 : who[$1] " " $2) }
+    END { for (p in n) if (n[p] > 1) printf "%s\t%s\n", p, who[p] }
+  ' | sort -n
+}
+
+# The smallest shift that puts every one of a project's ports somewhere free.
+#
+# Free means two things, and both matter: not claimed by another project, and
+# not currently listened on by anything — including a server Runbranch did not
+# start, since being able to run them together is the whole point.
+#
+# The shift applies to every target in the project, so a project declaring 3000
+# and 3001 keeps them adjacent. Prints 0 when nothing needs moving.
+suggest_offset() {
+  local project="$1" mine others listeners try=0 port clash t
+  mine="$( ( load_project "$project" >/dev/null 2>&1
+             # target_field prints without a trailing newline, so without the
+             # echo three ports become "400030003002".
+             for t in $(target_names); do target_field "$t" port; echo; done
+           ) 2>/dev/null )"
+  [ -n "$mine" ] || { printf '0\n'; return 0; }
+  others="$(declared_ports | awk -F'\t' -v me="$project" '$2 != me { print $1 }')"
+  listeners="$(listeners_now | cut -f1)"
+  while [ "$try" -le 200 ]; do
+    clash=0
+    for port in $mine; do
+      [ -n "$port" ] || continue
+      if printf '%s\n%s\n' "$others" "$listeners" \
+           | grep -qx "$((port + try))" 2>/dev/null; then
+        clash=1; break
+      fi
+    done
+    [ "$clash" = 0 ] && { printf '%s\n' "$try"; return 0; }
+    try=$((try + 1))
+  done
+  # Nothing free within 200. Saying so beats suggesting a number that clashes.
+  printf '0\n'
+  return 1
+}
+
+report_port_overlaps() {
+  local overlaps
+  overlaps="$(port_overlaps)"
   [ -n "$overlaps" ] || return 0
 
   warn "These ports are claimed by more than one project, so those projects
 cannot run at the same time:"
-  printf '%s\n' "$overlaps" | while read -r port rest; do
+  printf '%s\n' "$overlaps" | while IFS="$(printf '\t')" read -r port rest; do
     printf '    %-6s %s\n' "$port" "$rest"
   done
-  printf '\n  To run them together, give one a different port — in the target AND in
-  the command, since a framework will not pick it up otherwise:\n
-    TARGETS="docs:5174:/:npm run docs -- --port 5174"\n\n'
+  printf '\n  Give one of them a PORT_OFFSET, which shifts every port it
+  declares and rewrites {port} in its commands:\n
+    %s set <project> PORT_OFFSET 1\n
+  Or move the port by hand — in the target AND in the command, since a
+  framework will not pick it up otherwise:\n
+    TARGETS="docs:5174:/:npm run docs -- --port 5174"\n\n' "$SELF"
   return 0
 }
 
@@ -2256,6 +2304,8 @@ Runbranch — run any local project from a throwaway git worktree.
                                        what holds the ports, and a free offset
   runbranch.sh update <project>        re-check-out the ref at its tip and restart
   runbranch.sh prune-gone <project>    remove worktrees whose ref no longer exists
+  runbranch.sh overlaps                ports claimed by more than one project
+  runbranch.sh suggest-offset <p>      the smallest PORT_OFFSET that frees its ports
   runbranch.sh disk                    every worktree, its size, and whether it is in use
   runbranch.sh ports                   every declared port, and what is on it
   runbranch.sh kill-port <pid>         end a port holder, if it belongs to a project
@@ -2407,6 +2457,15 @@ main() {
     prune-gone)
       need_project "${2:-}"
       prune_gone_worktrees
+      ;;
+    overlaps)
+      # Machine-readable. doctor says the same thing in prose, which the app
+      # cannot act on.
+      port_overlaps
+      ;;
+    suggest-offset)
+      need_project "${2:-}"
+      suggest_offset "$2"
       ;;
     ports)
       if [ "$HAVE_TTY" = 1 ]; then

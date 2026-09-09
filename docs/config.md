@@ -27,6 +27,7 @@ URL" and should stay four lines long.
 | `SEED` | no | run after migrations — an empty app is not worth looking at |
 | `RUNTIME` | no | `mise` / `fnm` / `asdf` / `nvm` — activated **inside the worktree**, so the repo's own pin is honoured |
 | `PROCFILE` | no | `1` derives targets from the repo's `Procfile`. Ports are assigned foreman-style from `PORT_BASE` (default 5000, +100 each) and exported as `PORT` |
+| `PORT_OFFSET` | no | shifts every port this project declares by this much, and rewrites `{port}` in its commands to match. `0` (default) uses the declared ports. Framework defaults collide — three projects here all want 5173 — and this is how two of them run at once without editing the number in both the target and the command. It moves the whole set together, so a project declaring 3000 and 3001 keeps them adjacent |
 | `PORT_BASE` | no | first port assigned when `PROCFILE=1` |
 | `PORTS` | no | `fixed` (default) or `stepping`. Stepping is not implemented yet — a stack that bakes its origins into config (an OAuth origin, a CORS allowlist, an API URL the client was built with) must stay fixed |
 | `SYMBOL` | no | SF Symbol for the sidebar |
@@ -102,6 +103,30 @@ and the compose file is where it says. All of those otherwise surface minutes
 into a run, as a failure that looks like the branch's fault.
 
 ---
+
+## When two projects want the same port
+
+Framework defaults collide. Three projects on this machine all want 5173 and
+two want 3000, so they cannot run at the same time.
+
+```bash
+./runbranch.sh overlaps                  # ports claimed by more than one project
+./runbranch.sh suggest-offset <project>  # the smallest shift that frees its ports
+./runbranch.sh set <project> PORT_OFFSET 1
+```
+
+`doctor` reports the same overlaps in prose. In the app they are listed at the
+bottom of the **Ports** sheet, with a **Move…** menu that picks the number for
+you — which one moves is a real choice, since one of them is usually the
+project you think of as owning the port.
+
+A suggestion has to clear every port the project declares at once, and it
+accounts for whatever is already listening — including a dev server Runbranch
+did not start, since running alongside your own is the point.
+
+Deliberately not surfaced on the project rows themselves. Nothing is wrong
+until you try to run the second one, and a warning on every project that merely
+*might* clash is a warning nobody reads.
 
 ## Keeping the config in the repo
 

@@ -104,7 +104,10 @@ cat > "$DEMO/projects/lumen-ui.conf" <<CONF
 NAME="Lumen UI"
 REPO="$DEMO/repos/lumen-ui"
 DEFAULT_BRANCH="main"
-TARGETS="docs:4175:/:python3 -m http.server 4175"
+# Deliberately the same port as the api above. Framework defaults really do
+# collide — three projects on the author's machine all want 5173 — and the
+# Ports sheet's overlap section has nothing to show without one.
+TARGETS="docs:4174:/:python3 -m http.server {port}"
 SYMBOL="paintpalette"
 CONF
 cat > "$DEMO/projects/ledger-service.conf" <<CONF

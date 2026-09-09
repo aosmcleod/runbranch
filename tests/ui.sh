@@ -61,14 +61,11 @@ trap 'rm -f "$OUT"; env RB_PROJECTS_DIR="$REPO/demo/projects" RB_HOME="$REPO/dem
 # macOS ships no timeout(1).
 limited() { local s="$1"; shift; perl -e 'alarm shift; exec @ARGV or exit 127' "$s" "$@"; }
 
-report() {  # sets REPORT to the app's own account of itself
+launch() {  # launch(background?) — runs the app once and leaves its report in $OUT
   : > "$OUT"
   pkill -f 'Runbranch.app/Contents/MacOS/RunBranch' 2>/dev/null
   /bin/sleep 1
-  # -g so the launch itself does not foreground the app: `open`
-  # does that on its own, and the in-app activation guard cannot
-  # stop it.
-  limited 60 open -g -n -W \
+  limited 60 open ${1:+-g} -n -W \
     --env "RB_PROJECTS_DIR=$REPO/demo/projects" \
     --env "RB_HOME=$REPO/demo/state" \
     --env "RB_MY_EMAILS=dana@example.com" \
@@ -80,11 +77,33 @@ report() {  # sets REPORT to the app's own account of itself
   REPORT="$(cat "$OUT" 2>/dev/null)"
 }
 
+report() {  # sets REPORT to the app's own account of itself
+  # -g first, so a run alongside real work does not steal focus.
+  launch -g
+  [ -n "$REPORT" ] && return 0
+  # A backgrounded launch whose window never renders produces nothing at all,
+  # and the app cannot report that — it never got as far as running. It happens
+  # when another app is fullscreen: the window belongs to a Space that is not
+  # the active one, SwiftUI never draws it, and the body that would have
+  # written the report is never evaluated.
+  #
+  # So try once in the foreground, which does render, and say plainly that
+  # focus was taken and why. Failing here instead would be a red suite for a
+  # reason that is nothing to do with the app.
+  echo "  NOTE  the background launch produced nothing, which happens while"
+  echo "        another app is fullscreen. Retrying in the foreground — this"
+  echo "        takes focus once."
+  launch
+}
+
 field() { printf '%s\n' "$REPORT" | awk -F'\t' -v k="$1" '$1==k {print $2}'; }
 
 echo "==> the app launches and settles"
 report
 [ -n "$REPORT" ] || { echo "  FAIL  the app produced no report at all"; exit 1; }
+# The watchdog writes a report of its own rather than dying silently, so a
+# timeout says so instead of looking like a crash.
+[ "$(field timedout)" = 1 ] && { echo "  FAIL  $(field problem)"; exit 1; }
 # Exactly one. A duplicate window at launch is invisible until you count them.
 is "exactly one window"        "$(field windows)"  "1"
 is "the projects loaded"       "$(field projects)" "4"

@@ -36,7 +36,7 @@ enum Screenshot {
 
     /// Which screen to photograph. The docs need more than one, and opening a
     /// sheet by hand before every capture is not automation.
-    enum Scene: String { case main, settings, scan, logs, about, disk }
+    enum Scene: String { case main, settings, scan, logs, about, disk, ports }
 
     /// Capture diagnostics. Launched via LaunchServices the app has no useful
     /// stderr, so mirror everything into RB_SHOT_LOG for the script to show.
@@ -312,8 +312,27 @@ enum SelfTest {
     /// arrive as one nil, which made a skipping suite impossible to diagnose —
     /// the first time it skipped, nothing said whether the permission was gone
     /// or the window was simply not where it was expected.
+    /// Bounded, because a diagnostic must not hang the thing it is
+    /// diagnosing. A wedged capture service does not throw — it simply never
+    /// returns — and an unbounded await here hung the whole self-test, which
+    /// then produced no report at all rather than a report saying it could not
+    /// look. A timeout is just another reason, so it is reported like one.
     @MainActor
     static func readScreen() async -> (lines: [String]?, why: String) {
+        await withTaskGroup(of: (lines: [String]?, why: String).self) { group in
+            group.addTask { await readScreenUnbounded() }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(8))
+                return (nil, "gave up waiting for the capture API after 8s")
+            }
+            let first = await group.next() ?? (nil, "the screen read returned nothing")
+            group.cancelAll()
+            return first
+        }
+    }
+
+    @MainActor
+    private static func readScreenUnbounded() async -> (lines: [String]?, why: String) {
         guard let window = NSApp.windows.first(where: {
             $0.isVisible && $0.parent == nil && $0.frame.width > 200
         }) else {
@@ -395,11 +414,33 @@ enum SelfTest {
         }
     }
 
-    /// Nothing here should take 20 seconds. If it does, that is the finding.
+    /// Where the self-test got to, written as it goes.
+    ///
+    /// The final report overwrites this. It exists because "the app produced
+    /// no report at all" says nothing about which of a dozen awaits never
+    /// came back, and finding that out by bisecting a GUI launch is slow.
+    static func phase(_ name: String) {
+        guard let out = ProcessInfo.processInfo.environment["RB_SELFTEST_OUT"] else { return }
+        try? "phase\t\(name)\n".write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
+    /// A hard stop, well clear of what the self-test legitimately takes.
+    ///
+    /// It was 20 seconds, which the self-test then grew into: waiting for the
+    /// launch to settle is up to 12, and bounding the screen read added 8 on a
+    /// machine where the capture API is wedged. Exactly 20, so the watchdog
+    /// won the race and killed a run that was about to succeed.
+    ///
+    /// And it exited without writing anything, so the shell test reported "the
+    /// app produced no report at all" — indistinguishable from a crash, and
+    /// the reason that race took as long to find as it did. It writes a report
+    /// now, because a timeout is a finding and should read like one.
     static func armWatchdog() {
         Task.detached {
-            try? await Task.sleep(for: .seconds(20))
+            try? await Task.sleep(for: .seconds(40))
             FileHandle.standardError.write("selftest timed out\n".data(using: .utf8)!)
+            report([("timedout", "1"),
+                    ("problem", "the self-test did not finish within 40s")])
             exit(3)
         }
     }
