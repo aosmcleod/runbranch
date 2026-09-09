@@ -181,6 +181,14 @@ struct LogViewer: View {
             Divider()
 
             ScrollViewReader { proxy in
+                // The horizontal axis only when lines are not wrapping.
+                //
+                // Enabling it unconditionally seemed tidier — it keeps the
+                // view's identity stable across a wrap toggle — but a
+                // horizontal axis and children asking for maxWidth: .infinity
+                // are contradictory instructions. The lines wrapped at a width
+                // of SwiftUI's choosing, the content came out wider than the
+                // sheet, and every line sat indented halfway across it.
                 ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(shown) { line in
@@ -201,9 +209,20 @@ struct LogViewer: View {
                     }
                     .padding(12)
                 }
+                // Flexible rather than ideal-driven, so the content's width
+                // can never reach the frame at the end of this view and the
+                // sheet's size is decided in one place. Belt and braces: the
+                // sheet was measured opening at 680x460 and staying there, so
+                // this is not fixing an observed resize.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onChange(of: lines.last?.id) { _, last in
                     guard follow, let last else { return }
-                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    // Bottom LEFT, not `.bottom`. `.bottom` is (0.5, 1) and
+                    // the x half of it matters now that this scroll view has
+                    // a horizontal axis: following the tail scrolled the log
+                    // to horizontally centred, so every line sat indented
+                    // halfway across the sheet.
+                    withAnimation { proxy.scrollTo(last, anchor: .bottomLeading) }
                 }
                 // Jumping while pinned to the tail scrolls straight back, so
                 // unpin first. Following is what you want while waiting and
@@ -211,19 +230,27 @@ struct LogViewer: View {
                 .onChange(of: jumpTarget) { _, row in
                     guard let row else { return }
                     follow = false
-                    withAnimation { proxy.scrollTo(row, anchor: .center) }
+                    // Vertically centred, horizontally at the start, for the
+                    // same reason as above.
+                    withAnimation { proxy.scrollTo(row, anchor: UnitPoint(x: 0, y: 0.5)) }
                     jumpTarget = nil
                 }
             }
 
             Divider()
             HStack(spacing: 8) {
+                // Both fixed and always present. The count grew from "0 lines"
+                // as the first read landed and the error tally appeared from
+                // nothing, so the footer reflowed a beat after the sheet
+                // opened.
                 Text("\(shown.count) lines")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                if !errorLines.isEmpty {
-                    Text("· \(errorLines.count) matching error")
-                        .font(.system(size: 11)).foregroundStyle(.red)
-                }
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 70, alignment: .leading)
+                Text(errorLines.isEmpty ? " "
+                     : "· \(errorLines.count) matching error")
+                    .font(.system(size: 11)).foregroundStyle(.red)
+                    .frame(width: 150, alignment: .leading)
                 Spacer()
                 Button("Done", action: onClose)
                     .buttonStyle(.glassProminent).controlSize(.large)
@@ -252,30 +279,57 @@ struct LogViewer: View {
         }
     }
 
+    /// One control, so five of them match.
+    ///
+    /// Two were `Toggle(.button)`, which fills with the accent colour when on.
+    /// Both default to on, so the row opened with two buttons lit up as though
+    /// something wanted attention — and the accent belongs to a state that is
+    /// NOT the default, which is how the filter glyph in the main toolbar uses
+    /// it. `Toggle(.button)` also pads differently from `Button`, and SF
+    /// Symbols have different intrinsic widths, so five controls that should
+    /// have matched were three sizes.
+    ///
+    /// State is the glyph's prominence now: on is the ordinary colour, off is
+    /// dimmed. The fixed box is what keeps a wide symbol and a narrow one the
+    /// same size.
+    private func iconButton(_ symbol: String, help: String,
+                            off: Bool = false, disabled: Bool = false,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                .foregroundStyle(off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .frame(width: 15, height: 15)
+        }
+        .buttonStyle(.bordered)
+        .disabled(disabled)
+        .help(help)
+    }
+
     @ViewBuilder
     private var controls: some View {
-        Button {
+        iconButton("exclamationmark.magnifyingglass",
+                   help: errorLines.isEmpty ? "No errors in this log"
+                                            : "Jump to the first error",
+                   disabled: errorLines.isEmpty) {
             jumpTarget = errorLines.first?.id
-        } label: { Image(systemName: "exclamationmark.magnifyingglass") }
-            .disabled(errorLines.isEmpty)
-            .help(errorLines.isEmpty ? "No errors in this log" : "Jump to the first error")
-        Toggle(isOn: $wrap) { Image(systemName: "text.word.spacing") }
-            .toggleStyle(.button)
-            .help(wrap ? "Wrapping long lines" : "Long lines scroll sideways")
-        Toggle(isOn: $follow) { Image(systemName: "arrow.down.to.line") }
-            .toggleStyle(.button)
-            .help(follow ? "Following new output" : "Not following — new output does not scroll")
-        Button {
+        }
+        iconButton("text.word.spacing",
+                   help: wrap ? "Wrapping long lines" : "Long lines scroll sideways",
+                   off: !wrap) { wrap.toggle() }
+        iconButton("arrow.down.to.line",
+                   help: follow ? "Following new output"
+                                : "Not following — new output does not scroll",
+                   off: !follow) { follow.toggle() }
+        iconButton("doc.on.doc", help: "Copy what is on screen") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(lines.map(\.text).joined(separator: "\n"),
                                            forType: .string)
-        } label: { Image(systemName: "doc.on.doc") }
-            .help("Copy what is on screen")
-        Button {
+        }
+        iconButton("folder", help: "Reveal in Finder") {
             NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
                                           inFileViewerRootedAtPath: logDir)
-        } label: { Image(systemName: "folder") }
-            .help("Reveal in Finder")
+        }
     }
 
     private func reset() {
