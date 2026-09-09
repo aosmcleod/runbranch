@@ -14,12 +14,12 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$REPO/runbranch.sh"
-SOURCE="$REPO/app/RunBranch.swift"
+SOURCE="$REPO/app"
 DEST="${1:-$REPO}"
 APP="$DEST/Runbranch.app"
 
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
-[ -f "$SOURCE" ] || { echo "missing $SOURCE" >&2; exit 1; }
+[ -d "$SOURCE" ] || { echo "missing $SOURCE" >&2; exit 1; }
 command -v swiftc >/dev/null 2>&1 || {
   echo "swiftc is not on PATH. Install the Xcode command line tools:" >&2
   echo "  xcode-select --install" >&2
@@ -56,7 +56,7 @@ swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-template.svg" \
   "$APP/Contents/Resources"
 
 # --- binary ---------------------------------------------------------------
-swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/RunBranch"
+swiftc -parse-as-library -O "$SOURCE"/*.swift -o "$APP/Contents/MacOS/RunBranch"
 echo "    binary built"
 
 # --- Info.plist -----------------------------------------------------------
