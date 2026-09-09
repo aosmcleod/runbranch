@@ -100,7 +100,15 @@ shoot() {  # file, scene, projects-dir, state-dir
   # which is the signature of racing the previous instance rather than of
   # anything being wrong with the capture.
   /bin/sleep 1.5
-  rm -f "$OUT/$file"
+  # Write to a temporary name and move it into place only once it exists.
+  #
+  # This used to `rm -f` the target first, so a failed capture destroyed the
+  # previous good image. Six failures in one run took five README screenshots
+  # with them, and `git add -A` committed the deletions — the README rendered
+  # broken images on GitHub until it was noticed. A capture that cannot
+  # succeed should leave what is already there alone.
+  local dest="$OUT/$file"
+  local tmp="$OUT/.$file.new"
   # Launch through LaunchServices, not by exec'ing Contents/MacOS/RunBranch.
   # Exec'ing it proved unreliable: the process starts, never creates a window,
   # logs nothing at all, and sits there until it is killed. Through `open` it
@@ -119,17 +127,25 @@ shoot() {  # file, scene, projects-dir, state-dir
     --env "RB_NO_OPEN=1" \
     --env "RB_SHOT_LOG=$log" \
     ${RB_SHOT_QUIET:+--env "RB_SHOT_QUIET=$RB_SHOT_QUIET"} \
-    "$REPO/Runbranch.app" --args --screenshot "$OUT/$file" --scene "$scene" \
+    "$REPO/Runbranch.app" --args --screenshot "$tmp" --scene "$scene" \
     >/dev/null 2>&1
   [ -s "$log" ] && sed 's/^/    /' "$log"
   rm -f "$log"
-  if [ -s "$OUT/$file" ]; then
-    printf '  %-22s %s\n' "$file" "$(sips -g pixelWidth -g pixelHeight "$OUT/$file" \
+  if [ -s "$tmp" ]; then
+    mv -f "$tmp" "$dest"
+    printf '  %-22s %s\n' "$file" "$(sips -g pixelWidth -g pixelHeight "$dest" \
       | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w"x"h}')"
+    return 0
+  fi
+  rm -f "$tmp"
+  # Still a failure, and still reported as one — but the image that was there
+  # is still there, so a bad run cannot empty docs/img.
+  if [ -s "$dest" ]; then
+    printf '  %-22s FAILED (kept the previous one)\n' "$file"
   else
     printf '  %-22s FAILED\n' "$file"
-    return 1
   fi
+  return 1
 }
 
 WANT="${1:-all}"
