@@ -146,6 +146,21 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> a config that will not parse says so"
+# An unclosed quote used to let bash print its own diagnostics and then apply
+# half the file, so the error that surfaced was whatever happened to be missing
+# — an unclosed quote reported itself as "sets no REPO".
+printf 'NAME="Broken\nREPO=%s\n' "$FIX" > "$RB_PROJECTS_DIR/broken.conf"
+BROKEN="$("$ENGINE" branches broken 2>&1)" || true
+has "names the syntax error"     "$BROKEN" "syntax error"
+has "quotes the offending line"  "$BROKEN" "line 1"
+case "$BROKEN" in
+  *"sets no REPO"*) bad "does not misdiagnose it" "still blamed a missing REPO" ;;
+  *) ok "does not misdiagnose it" ;;
+esac
+is "and does not leave it usable" "$("$ENGINE" doctor broken >/dev/null 2>&1; echo $?)" "1"
+rm -f "$RB_PROJECTS_DIR/broken.conf"
+
 echo "==> port conflicts name the run holding the port"
 # Two projects that both default to the same port is the common case: Vite
 # picks 5173 for everything, so a second project collides with the first.

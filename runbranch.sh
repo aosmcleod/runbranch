@@ -181,6 +181,20 @@ load_project() {
 
   reset_project_defaults
 
+  # Check the file parses before sourcing it. Sourcing a broken one lets bash
+  # print its own diagnostics — "unexpected EOF while looking for matching
+  # quote" — and then carries on with half the file applied, so the failure that
+  # surfaces is whatever happened to be missing rather than the syntax error
+  # that caused it. An unclosed quote reported itself as "sets no REPO".
+  local parse
+  if ! parse="$(/bin/bash -n "$file" 2>&1)"; then
+    die "$name.conf has a syntax error:
+  ${parse#"$file": }
+
+A config is shell, so an unclosed quote or stray backtick stops it being read." \
+      "open -t '$file'"
+  fi
+
   # shellcheck disable=SC1090
   . "$file"
 
