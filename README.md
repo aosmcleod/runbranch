@@ -283,4 +283,6 @@ source PNG, and the one mark size the README displays.
 
 ## Licence
 
-MIT.
+[GPL-3.0](LICENSE). Use it, change it, redistribute it — including
+commercially. What you cannot do is take it closed: anything built on it has to
+ship its source under the same terms.

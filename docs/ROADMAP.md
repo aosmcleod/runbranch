@@ -30,7 +30,7 @@ demo a colleague's branch without reading anything.
 | 1.6 | ✅ **Design and code review** — one duplicated engine block removed, dead code deleted, home abbreviation commonised; the structural half is 1.10 | Two months of accreted decisions want one pass |
 | 1.11 | **Publish it** — no remote exists yet; 61 commits sitting on a local `main` | Every other v1 item was justified by "it is going public", which has not happened |
 | 1.10 | **Decompose ContentView** — 716 lines and 23 state properties in one view, in a 2,700-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
-| 1.9 | **A UI smoke test** — launch the app against the demo config, assert the window renders, a project loads, health resolves to healthy, and exactly one window exists | See below. This is the one item the original list got wrong |
+| 1.9 | ⚠️ **A UI smoke test** — `tests/ui.sh`, 8 assertions. Catches the duplicate window; does NOT catch the stale-render bug it was also written for | Half done, and the half it misses is recorded in the test file. Asserting the monitor passes while the render is stale — reintroducing that bug left the suite green. Catching it needs the drawn text, which neither an in-process accessibility walk nor System Events can reach |
 
 ### Why 1.9
 

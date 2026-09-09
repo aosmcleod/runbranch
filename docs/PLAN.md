@@ -194,7 +194,7 @@ The screenshots' actual lesson. No new capability, large perceived gain.
 14. `doctor`.
 
 ### Phase 5 — Ship it
-15. Rename (see below), MIT licence, docs, screenshots.
+15. Rename (see below), GPL-3.0 licence, docs, screenshots.
 16. In-repo `.launcher.toml`.
 17. Release: signing and notarisation, or an honest "right-click → Open" note.
     Homebrew cask if it earns one.
@@ -430,5 +430,5 @@ later.
 | 6.1 | Rename everything to `runbranch` | all |
 | 6.2 | `make-icons.sh`: flat layered art, `actool` appearance variants, plus the transparent mark for docs | assets |
 | 6.3 | `.runbranch` in-repo config with local override | engine |
-| 6.4 | MIT licence, `docs/config.md`, screenshots, honest README | docs |
+| 6.4 | GPL-3.0 licence, `docs/config.md`, screenshots, honest README | docs |
 | 6.5 | Release: signing and notarisation, or a documented right-click → Open | build |

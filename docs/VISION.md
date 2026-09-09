@@ -181,4 +181,4 @@ tell you when it is up.**
 
 ## Licence
 
-MIT.
+GPL-3.0.

@@ -1,3 +1,14 @@
+// Runbranch — run any branch of any project on a real port.
+// Copyright (C) 2026 Alec McLeod
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details:
+// <https://www.gnu.org/licenses/>.
+
 // RunBranch — the front end. All the work happens in runbranch.sh;
 // this is a window over it. Projects are declared in projects/*.conf and the
 // app knows nothing about any of them beyond what the engine reports.
@@ -3386,7 +3397,7 @@ struct AboutView: View {
 
             VStack(spacing: 3) {
                 Text("Created by Alec McLeod")
-                Text("MIT licensed — free to use, change and share")
+                Text("GPL-3.0 — free to use, change and share alike")
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
