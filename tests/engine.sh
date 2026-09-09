@@ -547,6 +547,87 @@ has "names the repo"             "$("$ENGINE" propose "$FIX")" "REPO="
 # exist, which failed minutes into a run instead of immediately.
 has "admits when it cannot tell" "$("$ENGINE" propose "$FIX")" "REPLACE-ME"
 
+echo "==> a run says how far the branch has moved since it started"
+"$ENGINE" run fixture feature/one web >/dev/null 2>&1
+behind() { "$ENGINE" state fixture | awk -F'\t' '$1=="behind"{print $2}'; }
+is "a fresh run is not behind"  "$(behind)" "0"
+# Move the branch on with plumbing rather than a checkout. The ref is checked
+# out in the run's worktree, and an empty commit onto the tip is what someone
+# else pushing looks like from here.
+NEWC="$(git -C "$FIX" commit-tree "$(git -C "$FIX" rev-parse 'feature/one^{tree}')" \
+        -p feature/one -m "feat(one): a commit made after the run started")"
+git -C "$FIX" update-ref refs/heads/feature/one "$NEWC"
+# The bug behind this: a worktree is pinned to the commit it was made at, and
+# Refresh — which only re-reads pull request metadata — was mistaken for a way
+# to pick up new commits. So a run sat on an old commit looking current.
+is "and says so once it has"    "$(behind)" "1"
+"$ENGINE" update fixture >/dev/null 2>&1
+is "update catches it up"       "$(behind)" "0"
+is "the run is still up"        "$("$ENGINE" state fixture | awk -F'\t' '$1=="run"{print 1}')" "1"
+is "on the same ref"            "$("$ENGINE" state fixture | awk -F'\t' '$1=="run"{print $2}')" "feature/one"
+"$ENGINE" stop fixture >/dev/null 2>&1
+
+echo "==> update refuses a run that is already on the working tree"
+git -C "$FIX" checkout -q main
+cat > "$RB_PROJECTS_DIR/drift.conf" <<CONF
+NAME="Drift"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+INSTALL="false"
+TARGETS="web:4982:/:python3 -m http.server {port} --directory public"
+CONF
+"$ENGINE" run drift main web --in-place >/dev/null 2>&1
+UPD="$("$ENGINE" update drift 2>&1)" || true
+has "says why there is nothing to do" "$UPD" "already on the working tree"
+is  "and leaves the run alone"        "$("$ENGINE" state drift | awk -F'\t' '$1=="run"{print 1}')" "1"
+
+echo "==> an in-place run notices the branch being switched underneath it"
+# Starting in place refuses a ref the checkout is not on, and until now nothing
+# checked again. Switch the branch in a terminal, an editor or an agent and the
+# servers keep running, now serving something else, while Runbranch reports the
+# branch it started with — and hot reload picks the new code up, which is what
+# makes it convincing as well as wrong.
+switched() { "$ENGINE" state drift | awk -F'\t' '$1=="switched"{print $2}'; }
+is "says nothing while it is right" "$(switched)" ""
+git -C "$FIX" checkout -q -b drift/elsewhere
+is "reports the branch now on disk" "$(switched)" "drift/elsewhere"
+is "and still reports the run's own" \
+   "$("$ENGINE" state drift | awk -F'\t' '$1=="run"{print $2}')" "main"
+git -C "$FIX" checkout -q main
+is "and stops saying it once back"  "$(switched)" ""
+# A worktree run has nothing to be switched out from under it.
+"$ENGINE" stop drift >/dev/null 2>&1
+"$ENGINE" run fixture feature/one web >/dev/null 2>&1
+is "a worktree run never reports it" \
+   "$("$ENGINE" state fixture | awk -F'\t' '$1=="switched"{print $2}')" ""
+"$ENGINE" stop fixture >/dev/null 2>&1
+rm -f "$RB_PROJECTS_DIR/drift.conf"; rm -rf "$RB_HOME/drift"
+
+echo "==> prune-gone removes worktrees whose ref is gone, and spares the rest"
+git -C "$FIX" checkout -q -b doomed/branch
+git -C "$FIX" checkout -q main
+"$ENGINE" run fixture doomed/branch web >/dev/null 2>&1
+"$ENGINE" stop fixture >/dev/null 2>&1
+WT="$RB_HOME/fixture/worktrees"
+# Not a count of everything on disk: earlier cases leave worktrees behind on
+# purpose, and asserting a total here made this test about them instead.
+is "the doomed worktree exists" "$([ -d "$WT/doomed-branch" ] && echo yes || echo no)" "yes"
+git -C "$FIX" branch -D doomed/branch >/dev/null 2>&1
+# "gone" and not "merged": a squash-merge leaves a branch looking unmerged, so
+# a merged-branch heuristic would either miss the common case or delete work.
+PRUNED="$("$ENGINE" prune-gone fixture 2>&1)"
+has "it says which ref went"    "$PRUNED" "doomed/branch no longer exists"
+is "the dead one is gone"       "$([ -d "$WT/doomed-branch" ] && echo yes || echo no)" "no"
+is "the live one is spared"     "$([ -d "$WT/feature-one" ] && echo yes || echo no)" "yes"
+is "and again does nothing"     "$("$ENGINE" prune-gone fixture 2>&1 | awk -F'\t' '$1=="pruned"{print $2}')" "0"
+# Refusing to delete what is in use matters more than the pruning does.
+"$ENGINE" run fixture feature/one web >/dev/null 2>&1
+git -C "$FIX" update-ref -d refs/heads/feature/one
+is "a running worktree is never pruned" \
+   "$("$ENGINE" prune-gone fixture 2>&1 | awk -F'\t' '$1=="pruned"{print $2}')" "0"
+is "and it is still on disk"    "$([ -d "$WT/feature-one" ] && echo yes || echo no)" "yes"
+"$ENGINE" stop fixture >/dev/null 2>&1
+
 echo
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ] || exit 1

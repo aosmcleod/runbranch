@@ -45,6 +45,18 @@ a minor release.
 A release nobody can install is not a release, which is why the disk image is a
 step rather than an afterthought.
 
+## Naming a release
+
+The GitHub release is titled `Runbranch X.Y.Z`. Nothing else — no theme, no
+adjective. A title that describes one release's circumstances ("installable")
+reads as a permanent property of the software rather than a fact about that
+build, and it is wrong by the next release.
+
+Every listed release has a disk image attached. A release without one is a tag
+wearing a release's clothes, and the honest thing is to leave it as a tag.
+`v1.0.0` is exactly that: the tag is real history and the CHANGELOG describes
+it, but it was published with nothing to download, so it has no release page.
+
 ## Pre-1.0 and 1.0
 
 Everything before 1.0.0 was built in one long stretch by one person and never

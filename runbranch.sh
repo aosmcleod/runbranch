@@ -2043,6 +2043,77 @@ EOF
   PICKED_PRESET="${PRESET_LIST[$reply]}"
 }
 
+# How many commits the ref has gained since this run's worktree was made.
+#
+# A worktree is checked out at a commit and stays there, so a run cannot see
+# commits pushed after it started. Nothing said so before: Refresh re-reads
+# pull request metadata, which is a fair thing for it to mean and not what you
+# want in the moment.
+#
+# Prints 0 rather than failing whenever the answer is not knowable — no
+# worktree, a ref that has since been deleted, a shallow clone. "Behind by an
+# unknown amount" is not something a UI can say usefully, and 0 reads as
+# "nothing to tell you", which is true.
+commits_behind() {
+  local pinned tip
+  [ "$IN_PLACE" = 1 ] && { printf '0'; return 0; }
+  [ -n "$S_WORKTREE" ] && [ -d "$S_WORKTREE" ] || { printf '0'; return 0; }
+  pinned="$(git -C "$S_WORKTREE" rev-parse HEAD 2>/dev/null)"
+  [ -n "$pinned" ] || { printf '0'; return 0; }
+  tip="$(repo_git rev-parse --verify --quiet "$S_REF^{commit}" 2>/dev/null)"
+  [ -n "$tip" ] || { printf '0'; return 0; }
+  repo_git rev-list --count "$pinned..$tip" 2>/dev/null || printf '0'
+}
+
+# The branch the checkout is on now, when an in-place run is no longer on the
+# one it was started for.
+#
+# Starting in place refuses a ref that is not checked out, and nothing checked
+# again after that. So: start in place on feat/x, then switch to main in a
+# terminal, an editor or an agent. The servers keep running and now serve main
+# while Runbranch still says feat/x — and hot reload picks the new code up,
+# which is what makes it convincing as well as wrong.
+#
+# Prints nothing when there is nothing to say, so callers can test for empty.
+switched_branch() {
+  local now
+  [ "$IN_PLACE" = 1 ] || return 0
+  [ -n "$S_REF" ] || return 0
+  now="$(current_branch)"
+  [ -n "$now" ] || return 0
+  [ "$now" = "$S_REF" ] && return 0
+  printf '%s' "$now"
+}
+
+# Remove every worktree whose ref no longer exists, without asking.
+#
+# `cleanup` is the interactive version and needs a terminal, which the app does
+# not have. "gone" and not "merged" on purpose: a squash-merge leaves a branch
+# looking unmerged, so a merged-branch heuristic would either miss the common
+# case or delete work that was never merged at all.
+prune_gone_worktrees() {
+  local dir slug ref running='' removed=0
+  demo_running && running="$S_WORKTREE"
+  [ -d "$WORKTREES" ] || { info "No worktrees on disk."; return 0; }
+  for dir in "$WORKTREES"/*; do
+    [ -d "$dir" ] || continue
+    [ "$dir" = "$running" ] && continue
+    slug="$(basename "$dir")"
+    ref="$(cat "$META_DIR/$slug.ref" 2>/dev/null)"
+    # No meta file means nothing records which ref owns it, so there is no
+    # evidence it is dead. report_disk calls those idle for the same reason.
+    [ -n "$ref" ] || continue
+    repo_git rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1 && continue
+    repo_git worktree remove --force "$dir" >/dev/null 2>&1 || safe_rm_worktree "$dir"
+    rm -f "$META_DIR/$slug.ref"
+    ok "removed $slug — $ref no longer exists"
+    removed=$((removed + 1))
+  done
+  repo_git worktree prune >/dev/null 2>&1
+  [ "$removed" -gt 0 ] || info "Nothing to prune — every worktree's ref still exists."
+  printf 'pruned\t%s\n' "$removed"
+}
+
 # Every worktree on disk, with what it costs and whether anything still wants it.
 #
 #   project <TAB> slug <TAB> ref <TAB> kbytes <TAB> state
@@ -2147,6 +2218,8 @@ Runbranch — run any local project from a throwaway git worktree.
                                        --in-place uses the checkout, not a worktree
   runbranch.sh check-ports <p> <preset>
                                        what holds the ports, and a free offset
+  runbranch.sh update <project>        re-check-out the ref at its tip and restart
+  runbranch.sh prune-gone <project>    remove worktrees whose ref no longer exists
   runbranch.sh disk                    every worktree, its size, and whether it is in use
   runbranch.sh ports                   every declared port, and what is on it
   runbranch.sh kill-port <pid>         end a port holder, if it belongs to a project
@@ -2223,6 +2296,13 @@ main() {
       fi
       printf 'run\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$S_REF" "$S_PRESET" "$S_STARTED" "$S_EPOCH" "$S_WORKTREE" "$IN_PLACE"
+      # Their own lines rather than more fields on `run`: a reader that does
+      # not know them ignores the line, which is how every other addition here
+      # has stayed backward compatible.
+      printf 'behind\t%s\n' "$(commits_behind)"
+      local moved
+      moved="$(switched_branch)"
+      [ -n "$moved" ] && printf 'switched\t%s\n' "$moved"
       # TARGETS and PIDS are written in the same order, so they zip.
       set -- $S_PIDS
       for t in $S_TARGETS; do
@@ -2264,6 +2344,33 @@ main() {
         shift
       done
       do_run "$rp" "$rpreset"
+      ;;
+    update)
+      # Bring a run up to its ref's latest commit.
+      #
+      # A worktree is pinned to the commit it was made at, so this is a stop
+      # and a start rather than anything cleverer — `run` already re-checks-out
+      # the ref at whatever its tip is now. Naming it means the app does not
+      # have to know that, and cannot get the ref, preset or port offset wrong
+      # in between.
+      need_project "${2:-}"
+      demo_running || die "$NAME is not running." "$SELF run $2 <ref> <preset>"
+      if [ "$IN_PLACE" = 1 ]; then
+        die "$NAME is running in place, so it is already on the working tree." \
+            "There is nothing to update — edits and commits are live already."
+      fi
+      local uref upreset uoffset
+      uref="$S_REF"; upreset="$S_PRESET"; uoffset="$PORT_OFFSET"
+      stop_run
+      # stop_run clears the state these came from, and do_run reads state after
+      # this point, so put the run's own offset back before starting.
+      PORT_OFFSET="$uoffset"
+      IN_PLACE=0
+      do_run "$uref" "$upreset"
+      ;;
+    prune-gone)
+      need_project "${2:-}"
+      prune_gone_worktrees
       ;;
     ports)
       if [ "$HAVE_TTY" = 1 ]; then
