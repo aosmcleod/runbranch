@@ -164,6 +164,34 @@ has "says it is not ours"      "$ATT" "outside"
 RUNMSG="$("$ENGINE" run attrib main web 2>&1)" || true
 has "and says so in the error" "$RUNMSG" "started outside Runbranch"
 
+echo "==> a project already running outside Runbranch shows as running"
+# Finding out by failing to start is a poor way to find out. If the project's
+# own server is up, say so.
+cat > "$RB_PROJECTS_DIR/adopt.conf" <<CONF
+NAME="Adopt"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4993:/:python3 -m http.server {port} --directory public"
+CONF
+is "idle before anything runs" "$("$ENGINE" state adopt 2>&1)" "idle"
+( cd "$FIX" && python3 -m http.server 4993 --directory public >/dev/null 2>&1 & )
+sleep 2
+ADOPTED="$("$ENGINE" state adopt 2>&1)"
+has "reports a run"            "$ADOPTED" "run	"
+has "flagged as adopted"       "$ADOPTED" "	1	1"
+has "with the live target"     "$ADOPTED" "target	web	4993"
+# It must not claim someone else's port as this project's run.
+cat > "$RB_PROJECTS_DIR/notmine.conf" <<CONF
+NAME="Not Mine"
+REPO="$TMP/other-repo"
+DEFAULT_BRANCH="main"
+TARGETS="web:4993:/:true"
+CONF
+mkdir -p "$TMP/other-repo" && git -C "$TMP/other-repo" init -q -b main
+is "and not for another project" "$("$ENGINE" state notmine 2>&1)" "idle"
+pkill -f "http.server 4993" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/adopt.conf" "$RB_PROJECTS_DIR/notmine.conf"
+
 echo "==> kill-port only ends what belongs to a project"
 REFUSE="$("$ENGINE" kill-port 1 2>&1)" || true
 has "refuses an unattributable process" "$REFUSE" "does not belong to a project"

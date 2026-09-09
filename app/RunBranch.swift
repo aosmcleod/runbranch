@@ -148,6 +148,10 @@ struct RunState {
     /// Running in the real checkout rather than a worktree, so what is served
     /// is whatever is on disk — uncommitted work included.
     var inPlace = false
+    /// Runbranch did not start this — it found the project already up and is
+    /// reporting it rather than pretending otherwise. Stopping it means ending
+    /// a process someone else started, so it goes through kill-port.
+    var adopted = false
     var targets: [RunTarget] = []
 
     static let idle = RunState()
@@ -165,6 +169,7 @@ struct RunState {
                 epoch = TimeInterval(f[4]) ?? 0
                 worktree = f[5]
                 inPlace = f.count > 6 && f[6] == "1"
+                adopted = f.count > 7 && f[7] == "1"
             case "target" where f.count >= 6:
                 targets.append(RunTarget(name: f[1],
                                          port: Int(f[2]) ?? 0,
@@ -1014,7 +1019,11 @@ struct RunStrip: View {
             // Which kind of run this is, because the two behave differently in
             // the way that matters: a worktree run is a snapshot and will not
             // see your edits, an in-place run is your checkout and will.
-            if state.inPlace {
+            if state.adopted {
+                Badge(text: "started elsewhere", symbol: "arrow.up.right.square",
+                      color: .orange)
+                    .help("Already running when Runbranch looked — not started by it")
+            } else if state.inPlace {
                 Badge(text: "in place", symbol: "pencil", color: .orange)
                     .help("Running your checkout — edits and uncommitted work are live")
             }
@@ -2116,10 +2125,6 @@ struct WindowSizer: NSViewRepresentable {
 struct ProjectRow: View {
     let project: Project
     let isLive: Bool
-    /// Something Runbranch did not start is on this project's ports — a
-    /// terminal, an editor, an agent. Worth seeing before you press Start, and
-    /// worth seeing without asking for it.
-    var busyElsewhere: Bool = false
     var isSelected: Bool = false
 
     var body: some View {
@@ -2132,13 +2137,6 @@ struct ProjectRow: View {
             Spacer(minLength: 0)
             if isLive {
                 ProgressView().controlSize(.small).frame(width: 16, height: 16)
-            } else if busyElsewhere {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.9))
-                                                : AnyShapeStyle(Color.orange))
-                    .frame(width: 16, height: 16)
-                    .help("Its ports are in use by something Runbranch did not start")
             }
         }
     }
@@ -2242,14 +2240,33 @@ struct ContentView: View {
         let state = snap.state
         guard let p = selectedProject, let ref = selection else { return nil }
         if state.running && state.ref == ref {
+            if state.adopted {
+                // `stop` has no state to work from — there is no run of ours.
+                // Ending it means ending the process on the port, which is the
+                // one thing kill-port is careful about.
+                return ("Stop", true, { stopAdopted(snap) })
+            }
             return ("Stop", true, { run(["stop", p], "Stopping \(ref)") })
         }
+        // The branch the checkout is on runs IN PLACE by default.
+        //
+        // A worktree of it would be a second copy of code that is already on
+        // disk, pinned to a commit, that cannot show an edit — which is the
+        // opposite of what anyone wants from the branch they are working on. So
+        // the default inverts here, and the isolated run moves to the menu.
+        let inPlace = selectedBranch?.canRunInPlace ?? false
+
         if state.running {
             // do_run stops whatever this project has running first, and says
             // so as it goes.
-            return ("Switch", false, { startChecking(p, ref, preset, "Switching to \(ref)") })
+            return ("Switch", false, {
+                startChecking(p, ref, preset, "Switching to \(ref)", inPlace: inPlace)
+            })
         }
-        return ("Start", false, { startChecking(p, ref, preset, "Starting \(ref)") })
+        let label = inPlace ? "Run in Place" : "Start"
+        return (label, false, {
+            startChecking(p, ref, preset, "Starting \(ref)", inPlace: inPlace)
+        })
     }
 
     var body: some View {
@@ -2443,9 +2460,12 @@ struct ContentView: View {
                         }
                     }
                     if let b = selectedBranch, let p = selectedProject, b.canRunInPlace {
-                        Button("Run in place (uses your checkout)…") {
-                            startChecking(p, b.ref, preset, "Running \(b.ref) in place",
-                                          inPlace: true)
+                        // In place is the default for this branch, so the menu
+                        // offers the other one.
+                        Button("Run in an isolated worktree instead…") {
+                            startChecking(p, b.ref, preset,
+                                          "Starting \(b.ref) in a worktree",
+                                          inPlace: false)
                         }
                         Divider()
                     }
@@ -2670,6 +2690,20 @@ struct ContentView: View {
         }
     }
 
+    /// End a run Runbranch did not start, target by target.
+    private func stopAdopted(_ snap: ProjectSnapshot) {
+        let pids = snap.state.targets.filter(\.alive).map { String($0.pid) }
+        Task {
+            for pid in pids {
+                let err = await Task.detached { Engine.failure(["kill-port", pid]) }.value
+                if let err { problem = err; break }
+            }
+            await syncProjectList()
+            await reload()
+            await refreshLive()
+        }
+    }
+
     private func stopSelected() {
         guard let snap = current, snap.state.running, let p = selectedProject else { return }
         run(["stop", p], "Stopping \(snap.state.ref)")
@@ -2849,35 +2883,35 @@ struct ContentView: View {
                     ForEach(favourites) { projectRow($0, isLive: false) }
                 }
             }
-            Section("Projects") {
+            Section {
                 ForEach(others) { projectRow($0, isLive: false) }
+            } header: {
+                HStack(spacing: 0) {
+                    Text("Projects")
+                    Spacer(minLength: 0)
+                    // Always visible, not on hover. Revealing it on hover was
+                    // tried and was fiddly to hit and easy to miss.
+                    Menu {
+                        Button("Add a Project…") { addProject() }
+                        Button("Scan for Projects…") { scanning = true }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Add or scan for projects")
+                }
             }
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
-        // A toolbar attached to the SIDEBAR lands above the sidebar, which is
-        // where macOS puts sidebar-scoped actions — Finder's new-folder button,
-        // Xcode's. The system sizes, insets and colours it; a hand-built
-        // accessory on a section header did none of that correctly, and fought
-        // the header's own collapse affordance besides.
-        .toolbar {
-            ToolbarItem {
-                Menu {
-                    Button("Add a Project…") { addProject() }
-                    Button("Scan for Projects…") { scanning = true }
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                }
-                .menuIndicator(.hidden)
-                .help("Add or scan for projects")
-            }
-        }
     }
 
     @ViewBuilder
     private func projectRow(_ p: Project, isLive: Bool) -> some View {
         ProjectRow(project: p, isLive: isLive,
-                   busyElsewhere: occupiedElsewhere.contains(p.id),
                    isSelected: selectedProject == p.id)
             .tag(p.id)
             .contextMenu { projectMenu(p) }

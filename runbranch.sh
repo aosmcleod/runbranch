@@ -1056,6 +1056,48 @@ $(list_projects)
 EOF
 }
 
+# A run this project has going that Runbranch did not start.
+#
+# Emitted in the same shape as a real run, so the front end shows it the same
+# way rather than pretending nothing is happening. Discovering an already-busy
+# port by failing to start is a poor way to find out.
+#
+# Nothing is invented: the ref is what the checkout is on (a server running from
+# the checkout can only be serving that), the start time comes from the process,
+# and it is flagged adopted so the UI can say who started it and offer the right
+# way to end it.
+emit_adopted_state() {
+  local t port pid owner_pair owner kind found=0 first_pid=''
+  local rows=''
+  for t in $(target_names); do
+    port="$(target_port "$t")" || continue
+    [ -n "$port" ] || continue
+    pid="$(port_holder "$port")"
+    [ -n "$pid" ] || continue
+    owner_pair="$(port_holder_owner "$pid")"
+    owner="${owner_pair%%"$(printf '\t')"*}"
+    kind="${owner_pair##*"$(printf '\t')"}"
+    # Only this project, and only started elsewhere. Another project on the
+    # port is a conflict, not a run of ours to adopt.
+    [ "$owner" = "$PROJECT" ] || continue
+    [ "$kind" = outside ] || continue
+    found=1
+    [ -n "$first_pid" ] || first_pid="$pid"
+    rows="$rows$(printf 'target\t%s\t%s\t%s\t%s\t1' \
+      "$t" "$port" "$(target_field "$t" health)" "$pid")
+"
+  done
+  [ "$found" = 1 ] || return 1
+
+  local started epoch
+  started="$(ps -o lstart= -p "$first_pid" 2>/dev/null | sed 's/^ *//')"
+  epoch="$(date -j -f '%a %b %d %T %Y' "$started" +%s 2>/dev/null || echo 0)"
+  printf 'run\t%s\t%s\t%s\t%s\t%s\t1\t1\n' \
+    "$(current_branch)" "" "$started" "$epoch" "$REPO"
+  printf '%s' "$rows"
+  return 0
+}
+
 check_ports() {
   local targets="$1"
   local t port pid owner owner_pair kind cmd overridable found=0
@@ -2109,7 +2151,11 @@ main() {
     state)
       local t pid
       need_project "${2:-}"
-      if ! demo_running; then printf 'idle\n'; exit 0; fi
+      if ! demo_running; then
+        # Nothing of ours, but the project may be up anyway.
+        emit_adopted_state && exit 0
+        printf 'idle\n'; exit 0
+      fi
       printf 'run\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$S_REF" "$S_PRESET" "$S_STARTED" "$S_EPOCH" "$S_WORKTREE" "$IN_PLACE"
       # TARGETS and PIDS are written in the same order, so they zip.
