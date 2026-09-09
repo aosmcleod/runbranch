@@ -146,3 +146,31 @@ ignores everything that writes:
 
 So an in-place run is the servers, and nothing else. If a project needs any of
 the above to be usable, run it from a worktree.
+
+## Worktrees, and what they cost
+
+A run gets a worktree under `RB_HOME/<project>/worktrees/<slug>`, and it stays
+there after the run stops. Nothing prunes it automatically.
+
+That is a choice rather than an oversight. The expensive part of a run is the
+install, and keeping the worktree is what makes the next run of that branch
+fast. Deleting it on stop would trade a few hundred megabytes for minutes on
+every re-run.
+
+The cost is real though — a full checkout plus its dependencies, commonly
+several hundred megabytes each:
+
+| Command | What it does |
+|---|---|
+| `runbranch.sh disk` | every worktree across every project: size, the ref it was made from, and whether it is running, `idle`, or `gone` |
+| `runbranch.sh cleanup <project>` | lists that project's worktrees with sizes and removes the ones you pick. Refuses the running one |
+| `runbranch.sh remove-worktree <project> <ref>` | removes exactly one |
+| `runbranch.sh remove <project>` | the config and everything under `RB_HOME` for it. Never the repository |
+
+`gone` means the ref no longer resolves in the repository — a deleted branch —
+so nothing will ever want that worktree again. Those are the safe ones to
+remove first.
+
+Deliberately absent is any notion of "merged". A squash-merge leaves the branch
+looking unmerged to `git branch --merged`, so a prune based on that would
+eventually delete a worktree for a branch still in use.

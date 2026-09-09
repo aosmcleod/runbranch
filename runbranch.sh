@@ -2033,6 +2033,46 @@ EOF
   PICKED_PRESET="${PRESET_LIST[$reply]}"
 }
 
+# Every worktree on disk, with what it costs and whether anything still wants it.
+#
+#   project <TAB> slug <TAB> ref <TAB> kbytes <TAB> state
+#
+# state is `running` for the one in use, `gone` when the ref it was made from
+# no longer resolves — a deleted branch, so nothing will ever want it again —
+# and `idle` otherwise.
+#
+# Deliberately not "merged". A squash-merge leaves the branch looking unmerged
+# to `git branch --merged`, so calling a worktree reclaimable on that basis
+# would eventually delete something someone still wanted. `gone` is a fact.
+report_disk() {
+  local n dir slug ref kb state running
+  while IFS="$(printf '\t')" read -r n _; do
+    [ -n "$n" ] || continue
+    (
+      load_project "$n" >/dev/null 2>&1 || exit 0
+      running=''
+      demo_running >/dev/null 2>&1 && running="$S_WORKTREE"
+      [ -d "$WORKTREES" ] || exit 0
+      for dir in "$WORKTREES"/*; do
+        [ -d "$dir" ] || continue
+        slug="$(basename "$dir")"
+        ref="$(cat "$META_DIR/$slug.ref" 2>/dev/null)"
+        kb="$(du -sk "$dir" 2>/dev/null | awk '{print $1}')"
+        if [ "$dir" = "$running" ]; then
+          state=running
+        elif [ -n "$ref" ] && ! repo_git rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1; then
+          state=gone
+        else
+          state=idle
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$n" "$slug" "${ref:-?}" "${kb:-0}" "$state"
+      done
+    )
+  done <<EOF
+$(list_projects)
+EOF
+}
+
 cleanup_worktrees() {
   local dir name size running='' i=0 reply n
   demo_running && running="$S_WORKTREE"
@@ -2097,6 +2137,7 @@ Runbranch — run any local project from a throwaway git worktree.
                                        --in-place uses the checkout, not a worktree
   runbranch.sh check-ports <p> <preset>
                                        what holds the ports, and a free offset
+  runbranch.sh disk                    every worktree, its size, and whether it is in use
   runbranch.sh ports                   every declared port, and what is on it
   runbranch.sh kill-port <pid>         end a port holder, if it belongs to a project
   runbranch.sh remove <project>        delete a project's config and state, never its repo
@@ -2251,6 +2292,22 @@ EOF
       exit "$any"
       ;;
     cleanup) need_project "${2:-}"; cleanup_worktrees ;;
+    disk)
+      if [ "$HAVE_TTY" = 1 ]; then
+        printf '\n%sWorktrees on disk%s\n\n' "$C_BLD" "$C_OFF"
+        report_disk | awk -F'\t' '
+          { total += $4; if ($5 != "running") spare += $4
+            printf "  %-14s %-30s %7.0f MB  %s\n", $1, $2, $4/1024, $5 }
+          END {
+            if (NR == 0) { print "  Nothing on disk yet."; exit }
+            printf "\n  %d worktrees, %.1f GB total, %.1f GB not in use\n",
+                   NR, total/1048576, spare/1048576
+          }'
+        printf '\n  Remove them with: %s cleanup <project>\n\n' "$SELF"
+      else
+        report_disk
+      fi
+      ;;
     scan)    scan_repos "${2:-$HOME/Development}" ;;
     add)
       # Propose and write it, so the CLI and the app take the same path.

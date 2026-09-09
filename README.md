@@ -152,6 +152,24 @@ holder rather than shrugging at "another app". If it is plainly the same
 project's own server, the conflict offers to take the port — naming the process
 it will end, never as the default action.
 
+**Worktrees are cheap to make and not free to keep.** Each one is a full
+checkout — several hundred megabytes for a typical Node project — and nothing
+removes them on its own. That is deliberate: a worktree with an installed
+`node_modules` is what makes the second run of a branch fast, so throwing it
+away the moment a run stops would be the wrong trade. But it does mean they
+accumulate.
+
+```bash
+./runbranch.sh disk               # every worktree, its size, and whether it is in use
+./runbranch.sh cleanup <project>  # pick which to remove
+```
+
+`disk` marks a worktree **gone** when the branch it was made from no longer
+exists, which is the clearest sign nothing will want it again. It does not
+claim to know what has been merged: a squash-merge leaves a branch looking
+unmerged to git, so calling those reclaimable would eventually delete something
+you still wanted.
+
 **Status that keeps being true.** Uptime ticks. Health is polled, not assumed.
 Processes and ports orphaned by a crash, a sleep or a force quit are found and
 reclaimed on next launch — you should never go hunting with `lsof`.
@@ -191,6 +209,7 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh add <repo>               # propose a config and write it
 ./runbranch.sh remove studio            # delete its config and state, never its repo
 ./runbranch.sh ports                    # every declared port, and what is on it
+./runbranch.sh disk                     # worktree sizes, and what is reclaimable
 ./runbranch.sh cleanup studio           # remove worktrees
 ```
 
