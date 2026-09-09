@@ -65,6 +65,14 @@ for _ in $(seq 1 30); do
 done
 curl -sfo /dev/null "http://localhost:4173/" \
   || echo "  !! port 4173 never answered; health will read as starting" >&2
+
+# A few more requests, so the log scene has something in it. The demo server
+# writes an access line per request and nothing otherwise, so a freshly started
+# run photographs an empty log viewer — which illustrates nothing.
+for _ in 1 2 3 4 5 6; do
+  curl -sfo /dev/null "http://localhost:4173/" 2>/dev/null
+  curl -so  /dev/null "http://localhost:4173/pricing" 2>/dev/null
+done
 trap 'demo_down; restore_presentation; rm -rf "$EMPTY"' EXIT
 
 # Onboarding has to be shot against an empty config directory, since the
@@ -138,6 +146,14 @@ case "$WANT" in
 esac
 case "$WANT" in
   all|scan)     shoot "scan.png"       scan     "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
+esac
+# One case block each, not one block with three patterns: case runs only the
+# first branch that matches, so "all" would have captured logs and nothing else.
+case "$WANT" in
+  all|logs)     shoot "logs.png"       logs     "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
+esac
+case "$WANT" in
+  all|disk)     shoot "disk.png"       disk     "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
 esac
 case "$WANT" in
   all|about)    shoot "about.png"      about    "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;

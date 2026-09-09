@@ -80,6 +80,7 @@ struct ContentView: View {
         case scan
         case editing(project: String)
         case resolvingPorts(PendingRun)
+        case disk
 
         /// Identity is the case, not the payload. A sheet does not become a
         /// different sheet because its title changed.
@@ -90,6 +91,7 @@ struct ContentView: View {
             case .ports:          return "ports"
             case .scan:           return "scan"
             case .editing(let p): return "editing:\(p)"
+            case .disk:           return "disk"
             case .resolvingPorts: return "port-conflict"
             }
         }
@@ -107,6 +109,29 @@ struct ContentView: View {
     @State private var problem: String?
     /// Every declared port and what is on it.
     @State private var portRows: [PortRow] = []
+    /// Every worktree on disk, or nil when it has not been measured.
+    ///
+    /// Deliberately NOT read on the refresh path. Measuring it means `du -sk`
+    /// per worktree, and a worktree holds node_modules — measured at 3.35s
+    /// across three worktrees on this machine, against 0.33s for every other
+    /// engine call in that sweep put together. Nothing outside the disk sheet
+    /// shows the number, so the hot path was paying three seconds for
+    /// something nobody could see.
+    ///
+    /// nil is "not measured yet" and distinct from measured-and-empty, which
+    /// is what lets the sheet say "Measuring…" rather than "nothing here".
+    @State private var diskRows: [DiskRow]?
+
+    /// A slow tick, so a server started while the window sits idle is noticed.
+    ///
+    /// Both pictures were read on launch and after every operation and never
+    /// otherwise, so they could sit wrong for as long as nobody touched
+    /// anything — which is most of the time, since a run is meant to outlive
+    /// your attention. Thirty seconds and not a tight poll: each read is one
+    /// `lsof` per declared port plus a `ps` to attribute the holder.
+    ///
+    /// Static, or it would be rebuilt on every render and never fire.
+    private static let tick = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     // Persisted: collapsing a section is a preference, and having it spring
     // back open on every launch would make it pointless.
     @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
@@ -332,7 +357,22 @@ struct ContentView: View {
                 case .about:
                     AboutPanel.shared.show()
                 case .logs:
-                    present(.logs)
+                    // Wait for the run, or the viewer opens over no targets and
+                    // sits at "0 lines" whatever the log actually holds.
+                    var waitedForRun = 0
+                    while !(snapshot?.state.running ?? false) && waitedForRun < 60 {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        waitedForRun += 1
+                    }
+                    if snapshot?.state.running ?? false {
+                        present(.logs)
+                    } else {
+                        // Photographing an empty viewer and calling it a log
+                        // scene is how this went unnoticed the first time.
+                        Screenshot.note("nothing is running; log viewer not opened")
+                    }
+                case .disk:
+                    present(.disk)
                 }
                 if Screenshot.scene != .main { try? await Task.sleep(for: .seconds(1.2)) }
                 // The first health poll can take up to its 3s timeout, and the
@@ -449,6 +489,7 @@ struct ContentView: View {
                     Button("Add project…") { addProject() }
                     Divider()
                     Button("Ports…") { present(.ports) }
+                    Button("Disk…") { diskRows = nil; present(.disk) }
                     Button("Open logs in Finder") { openLogs() }
                     if let p = project {
                         Button("Reveal repository in Finder") {
@@ -505,6 +546,11 @@ struct ContentView: View {
                     onCancel: { sheet = nil })
             case .ports:
                 PortsSheet(rows: portRows) { sheet = nil }
+            case .disk:
+                DiskSheet(rows: diskRows,
+                          onPrune: { pruneGone($0) },
+                          onClose: { sheet = nil })
+                    .task { await measureDisk() }
             case .scan:
                 ScanSheet { added in
                     sheet = nil
@@ -540,6 +586,21 @@ struct ContentView: View {
                  The repository at \(removing?.repo.abbreviatingHome ?? "") \
                  is not touched.
                  """)
+        }
+        .onReceive(Self.tick) { _ in
+            // Nobody is looking at an occluded window, so nothing here is
+            // worth the two processes it costs.
+            guard NSApp.occlusionState.contains(.visible) else { return }
+            switch sheet {
+            // The ports sheet is what this is for. The disk sheet is not: it
+            // costs seconds to measure and worktrees do not change size while
+            // you look at them.
+            case nil, .some(.ports): break
+            // A run sheet is streaming and the rest are modal edits. Moving
+            // the list under them is worse than being briefly out of date.
+            default: return
+            }
+            Task { await refreshLive() }
         }
         .alert("Runbranch could not do that", isPresented: Binding(
             get: { problem != nil },
@@ -624,6 +685,15 @@ struct ContentView: View {
                             Button("Open") { NSWorkspace.shared.open(url) }
                                 .buttonStyle(.glass).controlSize(.large)
                         }
+                        // Only when there is something to catch up on. An
+                        // always-present Update would be mistaken for Refresh,
+                        // which is the confusion this whole thing came out of.
+                        if state.running, state.behind > 0 {
+                            Button("Update") { updateRun() }
+                                .buttonStyle(.glass).controlSize(.large)
+                                .help("Re-check-out \(state.ref) at its latest commit "
+                                      + "and restart")
+                        }
                         if let p = primary(snap) {
                             Button(p.title, action: p.action)
                                 .buttonStyle(.glassProminent).controlSize(.large)
@@ -675,6 +745,33 @@ struct ContentView: View {
             }
             await syncProjectList()
             await reload()
+            await refreshLive()
+        }
+    }
+
+    /// Re-check-out the ref at its tip and start again.
+    ///
+    /// A stop and a start under the covers, which is why it is one engine call
+    /// rather than two from here: getting the ref, preset or port offset wrong
+    /// in between would start a different run than the one that was showing.
+    private func updateRun() {
+        guard let p = selectedProject, let snap = current, snap.state.running else { return }
+        cache[p] = nil
+        run(["update", p], "Updating \(snap.state.ref)")
+    }
+
+    /// Walk the worktrees and add up what they cost. Seconds, not milliseconds.
+    private func measureDisk() async {
+        diskRows = await Task.detached { Engine.disk() }.value
+    }
+
+    /// Remove one project's worktrees whose branch no longer exists.
+    private func pruneGone(_ project: String) {
+        Task {
+            let err = await Task.detached { Engine.failure(["prune-gone", project]) }.value
+            if let err { problem = err }
+            diskRows = nil
+            await measureDisk()
             await refreshLive()
         }
     }

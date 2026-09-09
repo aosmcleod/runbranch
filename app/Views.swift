@@ -87,6 +87,27 @@ struct RunStrip: View {
                     .help("Running your checkout — edits and uncommitted work are live")
             }
 
+            // A worktree is pinned to the commit it was cut at, so a run
+            // cannot see anything pushed since. Saying so is most of the value
+            // here; catching up is an action, and lives with the actions.
+            if state.behind > 0 {
+                Badge(text: state.behind == 1 ? "1 commit behind"
+                                              : "\(state.behind) commits behind",
+                      symbol: "arrow.down.circle", color: Badge.trunk)
+                    .help("The branch has moved on since this worktree was made")
+            }
+
+            // An in-place run whose checkout has been switched is still
+            // serving — from whatever is on the branch now. The run is not
+            // broken, so this is a warning rather than a failure: what is
+            // wrong is the label, and possibly what you believe is running.
+            if !state.switchedTo.isEmpty {
+                Badge(text: "now on \(state.switchedTo)",
+                      symbol: "exclamationmark.triangle.fill", color: .red)
+                    .help("Started for \(state.ref), but the checkout was switched "
+                          + "to \(state.switchedTo). The servers are serving that.")
+            }
+
             // TimelineView keeps the tick inside this label. Driving it from
             // ContentView re-rendered the whole detail every second, which
             // rebuilt the toolbar menus and dismissed any open submenu.

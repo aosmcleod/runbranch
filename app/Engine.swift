@@ -178,6 +178,9 @@ enum Engine {
     @discardableResult
     static func reclaim() -> String { capture(["reclaim"]).out }
 
+    /// Every worktree on disk across every project, and what it costs.
+    static func disk() -> [DiskRow] { DiskRow.parse(capture(["disk"]).out) }
+
     /// Git repos under a directory that are not already declared, as
     /// (name, path) pairs.
     static func scan(_ directory: String) -> [(name: String, path: String)] {

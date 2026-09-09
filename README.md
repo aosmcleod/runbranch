@@ -313,6 +313,16 @@ a vector, and the screenshots the README displays.
 </details>
 
 
+## Author
+
+Built by **Alec McLeod** ([@aosmcleod](https://github.com/aosmcleod)) — a
+product manager who got tired of `git stash` before a demo.
+
+Issues and pull requests are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md) for how the pieces fit together.
+
+---
+
 ## Licence
 
 [GPL-3.0](LICENSE). Use it, change it, redistribute it — including

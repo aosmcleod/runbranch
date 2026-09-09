@@ -151,6 +151,13 @@ struct RunState {
     /// reporting it rather than pretending otherwise. Stopping it means ending
     /// a process someone else started, so it goes through kill-port.
     var adopted = false
+    /// Commits the ref has gained since this run's worktree was cut. A
+    /// worktree is pinned to one commit, so a run cannot see anything pushed
+    /// after it started. Always 0 in place, where the working tree is live.
+    var behind = 0
+    /// The branch the checkout sits on now, when an in-place run is no longer
+    /// on the one it was started for. Empty when it is where it should be.
+    var switchedTo = ""
     var targets: [RunTarget] = []
 
     static let idle = RunState()
@@ -169,6 +176,10 @@ struct RunState {
                 worktree = f[5]
                 inPlace = f.count > 6 && f[6] == "1"
                 adopted = f.count > 7 && f[7] == "1"
+            case "behind" where f.count >= 2:
+                behind = Int(f[1]) ?? 0
+            case "switched" where f.count >= 2:
+                switchedTo = f[1]
             case "target" where f.count >= 6:
                 targets.append(RunTarget(name: f[1],
                                          port: Int(f[2]) ?? 0,
@@ -284,6 +295,45 @@ struct PortConflict {
 }
 
 /// A declared port and what is on it, from `runbranch.sh ports`.
+/// One worktree on disk: what it cost, and whether anything still wants it.
+struct DiskRow: Identifiable {
+    let project: String
+    let slug: String
+    let ref: String
+    let kb: Int
+    /// `running`, `gone` when the ref no longer exists, `idle` otherwise.
+    let state: String
+
+    var id: String { project + "/" + slug }
+    var isGone: Bool { state == "gone" }
+    var isRunning: Bool { state == "running" }
+
+    var size: String { Self.formatted(kb: kb) }
+
+    /// One formatter, and not the `ByteCountFormatter.string` class method:
+    /// that one spells zero as "Zero KB", which read as a bug in the sheet
+    /// footer and would read as one on any empty worktree too.
+    private static let bytes: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowsNonnumericFormatting = false
+        return f
+    }()
+
+    static func formatted(kb: Int) -> String {
+        bytes.string(fromByteCount: Int64(kb) * 1024)
+    }
+
+    static func parse(_ text: String) -> [DiskRow] {
+        text.split(separator: "\n").compactMap { line in
+            let f = line.components(separatedBy: "\t")
+            guard f.count >= 5 else { return nil }
+            return DiskRow(project: f[0], slug: f[1], ref: f[2],
+                           kb: Int(f[3]) ?? 0, state: f[4])
+        }
+    }
+}
+
 struct PortRow: Identifiable {
     let project: String
     let target: String
