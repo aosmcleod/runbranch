@@ -146,6 +146,75 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> a shifted run tells the server where to listen"
+# Two routes, because a config cannot be assumed to have anticipated a shift:
+# {port} in the command when it names one, and PORT in the environment when it
+# does not. The second covers most dev servers without any config change.
+cat > "$RB_PROJECTS_DIR/envport.conf" <<CONF
+NAME="Env Port"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4951:/:python3 -c 'import os,http.server,functools; h=functools.partial(http.server.SimpleHTTPRequestHandler, directory=\"public\"); http.server.HTTPServer((\"\",int(os.environ[\"PORT\"])),h).serve_forever()'"
+CONF
+CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
+is "no conflict when the port is free" "$CHK" ""
+
+python3 -m http.server 4951 --directory "$FIX/public" >/dev/null 2>&1 &
+ENVBLOCK=$!
+sleep 2
+CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
+has "reports the move as env-only" "$CHK" "	env"
+
+"$ENGINE" run envport main web 1 >/dev/null 2>&1
+is "shifts without {port} in the command" "$?" "0"
+is "and the shifted port answers" \
+   "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4952/ 2>/dev/null)" "200"
+"$ENGINE" stop envport >/dev/null 2>&1
+kill "$ENVBLOCK" 2>/dev/null || true
+pkill -f "http.server 4951" 2>/dev/null || true
+
+echo "==> a shifted run says so when the server ignores PORT"
+cat > "$RB_PROJECTS_DIR/hardport.conf" <<CONF
+NAME="Hard Port"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4953:/:python3 -m http.server 4953 --directory public"
+CONF
+python3 -m http.server 4953 --directory "$FIX/public" >/dev/null 2>&1 &
+HARDBLOCK=$!
+sleep 2
+IGN="$("$ENGINE" run hardport main web 1 2>&1)" || true
+has "blames the right thing"  "$IGN" "does not say where to"
+has "names the port it tried" "$IGN" "4954"
+has "suggests {port}"         "$IGN" "{port}"
+kill "$HARDBLOCK" 2>/dev/null || true
+pkill -f "http.server 4953" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/envport.conf" "$RB_PROJECTS_DIR/hardport.conf"
+rm -rf "$RB_HOME/envport" "$RB_HOME/hardport"
+
+echo "==> two branches that slug the same get separate worktrees"
+# slug_for is lossy, so feat/a-b and feat/a+b both want the directory
+# "feat-a-b". Sharing it mostly works — each run re-checks-out the ref — but
+# remove-worktree on one would delete the other's, and a per-run database keyed
+# the same way would be shared between branches with divergent migrations.
+git -C "$FIX" checkout -q -b "feat/a-b" 2>/dev/null || true
+git -C "$FIX" checkout -q main
+git -C "$FIX" checkout -q -b "feat/a+b" 2>/dev/null || true
+git -C "$FIX" checkout -q main
+
+"$ENGINE" run fixture "feat/a-b" web >/dev/null 2>&1
+"$ENGINE" stop fixture >/dev/null 2>&1
+"$ENGINE" run fixture "feat/a+b" web >/dev/null 2>&1
+"$ENGINE" stop fixture >/dev/null 2>&1
+
+WT_COUNT="$(ls "$RB_HOME/fixture/worktrees" 2>/dev/null | grep -c '^feat-a-b')" || WT_COUNT=0
+is "each ref gets its own worktree" "$WT_COUNT" "2"
+is "the first keeps the plain name" \
+   "$([ -d "$RB_HOME/fixture/worktrees/feat-a-b" ] && echo yes || echo no)" "yes"
+# And each records itself as the owner, which is how the collision is detected.
+OWNERS="$(cat "$RB_HOME/fixture/meta/"feat-a-b*.ref 2>/dev/null | sort | tr '\n' ' ')"
+has "both refs are recorded" "$OWNERS" "feat/a+b feat/a-b"
+
 echo "==> a config that will not parse says so"
 # An unclosed quote used to let bash print its own diagnostics and then apply
 # half the file, so the error that surfaced was whatever happened to be missing

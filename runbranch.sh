@@ -375,7 +375,35 @@ repo_git() { git -C "$REPO" "$@"; }
 
 current_branch() { repo_git rev-parse --abbrev-ref HEAD 2>/dev/null; }
 slug_for() { printf '%s' "$1" | sed -e 's#^origin/##' -e 's#[^A-Za-z0-9._-]#-#g'; }
-worktree_path() { printf '%s/%s' "$WORKTREES" "$(slug_for "$1")"; }
+
+# A short, stable digest of a ref, for when its slug is already taken.
+ref_digest() { printf '%s' "$1" | cksum | awk '{ printf "%04x", $1 % 65536 }'; }
+
+# The directory name a ref's worktree uses.
+#
+# slug_for is lossy — anything outside [A-Za-z0-9._-] becomes a dash — so
+# `feat/a-b` and `feat/a+b` both want `feat-a-b`, and a literal branch named
+# `feat-a-b` wants it too. Sharing a directory mostly works, since every run
+# re-checks-out the ref, but `remove-worktree` on one then deletes the other's
+# and the UI reports a worktree as present for a branch that does not own it.
+#
+# The meta file records which ref owns a slug, so only an actual collision pays
+# for it: the second ref gets a digest suffix, and everything else keeps the
+# readable name it already has. Nothing needs migrating.
+worktree_slug() {
+  local ref="$1"
+  local base owner
+  base="$(slug_for "$ref")"
+  if [ -f "$META_DIR/$base.ref" ]; then
+    owner="$(cat "$META_DIR/$base.ref" 2>/dev/null)"
+    if [ -n "$owner" ] && [ "$owner" != "$ref" ]; then
+      base="$base-$(ref_digest "$ref")"
+    fi
+  fi
+  printf '%s' "$base"
+}
+
+worktree_path() { printf '%s/%s' "$WORKTREES" "$(worktree_slug "$1")"; }
 
 # owner/repo, for gh. Empty when there is no GitHub remote, in which case PR
 # badges are simply absent rather than an error.
@@ -521,7 +549,7 @@ prepare_worktree() {
     ok "created"
   fi
 
-  printf '%s\n' "$ref" >"$META_DIR/$(slug_for "$ref").ref"
+  printf '%s\n' "$ref" >"$META_DIR/$(worktree_slug "$ref").ref"
 
   # Worktrees do not inherit untracked files, and this config is gitignored.
   # Copy it EVERY time, not just on create: it changes in the main checkout and
@@ -565,7 +593,7 @@ remove_worktree_for() {
     safe_rm_worktree "$wt"
     repo_git worktree prune >/dev/null 2>&1
   }
-  rm -f "$META_DIR/$(slug_for "$ref").ref"
+  rm -f "$META_DIR/$(worktree_slug "$ref").ref"
   ok "removed $wt"
 }
 
@@ -731,7 +759,7 @@ setup_run_database() {
     "grep $first $REPO/${COPY_FILES%% *}"
 
   base="$(db_name_from_url "$DB_BASE_URL")"
-  DB_RUN_NAME="$(db_name_for "$base" "$(slug_for "$ref")")"
+  DB_RUN_NAME="$(db_name_for "$base" "$(worktree_slug "$ref")")"
 
   step "Database  $DB_RUN_NAME"
   exists="$(psql_admin "$wt" "SELECT 1 FROM pg_database WHERE datname='$DB_RUN_NAME'" 2>/dev/null)"
@@ -773,7 +801,7 @@ drop_run_database() {
   DB_BASE_URL="$(db_source_url "${DB_URL_VARS%% *}")" || return 0
   [ -n "$DB_BASE_URL" ] || return 0
   base="$(db_name_from_url "$DB_BASE_URL")"
-  name="$(db_name_for "$base" "$(slug_for "$ref")")"
+  name="$(db_name_for "$base" "$(worktree_slug "$ref")")"
   # Never the base database, whatever the arithmetic said.
   [ "$name" = "$base" ] && return 0
   psql_admin "$wt" "DROP DATABASE IF EXISTS \"$name\" WITH (FORCE)" >/dev/null 2>&1 \
@@ -877,7 +905,10 @@ check_ports() {
     found=1
     owner="$(port_holder_project "$pid")"
     cmd="$(target_field "$t" command)"
-    case "$cmd" in *'{port}'*) overridable=1 ;; *) overridable=0 ;; esac
+    # `explicit` when the command names the port itself, `env` when the shift
+    # can only be offered through PORT and might be ignored. Both are worth
+    # offering; only one is a promise.
+    case "$cmd" in *'{port}'*) overridable=explicit ;; *) overridable=env ;; esac
     printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$port" "$owner" "$pid" "$overridable"
   done
   [ "$found" = 0 ] && return 0
@@ -955,27 +986,70 @@ If that is your own dev server, leave it alone and stop it yourself." \
 # ---------------------------------------------------------------------------
 
 STARTED_PID=''
+# Why a shifted run may have failed, when the target cannot be told its port.
+#
+# A server that hardcodes its port fails one of two ways: it refuses to bind and
+# exits at once, or it binds the port it always binds and the health check on
+# the shifted one times out. Both want the same explanation, so it lives here.
+# Prints nothing when the run was not shifted, or when the command takes {port}
+# and therefore did what it was told.
+shifted_port_note() {
+  local t="$1"
+  [ "$PORT_OFFSET" != 0 ] || return 1
+  case "$(target_field "$t" command)" in *'{port}'*) return 1 ;; esac
+  printf 'This run was shifted off its declared port, and %s does not say where to
+listen — Runbranch could only offer it through PORT in the environment, which
+this server appears to ignore.' "$t"
+}
+
+shifted_port_fix() {
+  local t="$1"
+  # A suggestion rather than a replacement: most tools take --port, some want
+  # -p or a positional, so the command has to be adapted rather than pasted.
+  printf 'edit %s/%s.conf so the command names its port, along these lines:
+    TARGETS="%s:%s:%s:%s --port {port}"' \
+    "$PROJECTS_DIR" "$PROJECT" "$t" \
+    "$(target_field "$t" port)" "$(target_field "$t" health)" \
+    "$(target_field "$t" command)"
+}
+
 start_server() {
   local wt="$1" name="$2"
   local cmd log pid
   cmd="$(target_field "$name" command)"
-  # A framework will not discover the offset on its own. `{port}` in the command
-  # is how a config says where to put it — without one, a shifted run would
-  # health-check a port nothing is listening on.
   local actual
   actual="$(target_port "$name")"
+
+  # Two ways to tell a server which port to use, and it needs both.
+  #
+  # `{port}` in the command is the explicit one: unambiguous, and it works for
+  # anything that takes a port on the command line. PORT in the environment is
+  # the implicit one, honoured by a lot of tooling (Next, CRA, Rails, most
+  # Express apps) and ignored by some (Vite wants --port). Exporting it costs
+  # nothing and means a shifted run has a chance of working without the config
+  # having anticipated it. When the server ignores it, the health check fails on
+  # the shifted port and says what to add — which is better than refusing to try.
   cmd="${cmd//\{port\}/$actual}"
   log="$LOG_DIR/$name.log"
   mkdir -p "$LOG_DIR"
   : >"$log"
   set -m
-  ( cd "$wt" && exec nohup /bin/bash -c "$(runtime_prelude)$cmd" ) >"$log" 2>&1 &
+  ( cd "$wt" && export PORT="$actual" \
+      && exec nohup /bin/bash -c "$(runtime_prelude)$cmd" ) >"$log" 2>&1 &
   pid=$!
   disown %% 2>/dev/null || true
   set +m
   sleep 1
   kill -0 "$pid" 2>/dev/null || {
     printf '\n'; tail -20 "$log"; printf '\n'
+    local note
+    if note="$(shifted_port_note "$name")"; then
+      die "$name exited immediately on port $actual.
+
+$note
+
+Its log is above and at $log." "$(shifted_port_fix "$name")"
+    fi
     die "$name exited immediately. Its log is above and at $log." "cd $wt && $cmd"
   }
   ok "$name started (pgid $pid) -> $log"
@@ -1076,9 +1150,19 @@ start_run() {
       printf '\n'; tail -25 "$LOG_DIR/$t.log"; printf '\n'
       local why="$t never answered within the timeout"
       [ "$rc" = 2 ] && why="$t exited while starting"
+
+      local hint note
+      hint="cd $wt && $(target_field "$t" command)"
+      if note="$(shifted_port_note "$t")"; then
+        why="$why on port $(target_port "$t").
+
+$note"
+        hint="$(shifted_port_fix "$t")"
+      fi
+
       stop_run quiet
       die "$why. The last log lines are above; the full log is at $LOG_DIR/$t.log." \
-        "cd $wt && $(target_field "$t" command)"
+        "$hint"
     fi
     [ -z "$first" ] && first="http://localhost:$port"
   done

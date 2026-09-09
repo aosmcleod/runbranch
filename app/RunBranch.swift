@@ -221,13 +221,14 @@ struct PortConflictSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                if !conflict.canShift {
-                    // Saying why the option is missing beats showing a disabled
-                    // button with no explanation.
+                if conflict.shiftIsBestEffort {
+                    // An honest caveat beats a button that silently might not
+                    // work — and the failure, if it comes, is immediate and
+                    // names the fix.
                     Text("""
-                         Running alongside needs the command to accept a port. \
-                         Put {port} in this project's target and Runbranch will \
-                         substitute it.
+                         Running alongside passes the new port as PORT. Most \
+                         dev servers honour it; if this one does not, the run \
+                         stops straight away and says what to change.
                          """)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -298,7 +299,12 @@ struct PortClash: Identifiable {
     let port: Int
     let owner: String
     let pid: Int
-    let overridable: Bool
+    /// How the target can be told a different port: `explicit` when its command
+    /// names one itself, `env` when the only route is PORT in the environment,
+    /// which a lot of tooling honours and some ignores.
+    let move: PortClash.Move
+
+    enum Move: String { case explicit, env }
     var id: String { target }
 }
 
@@ -307,8 +313,15 @@ struct PortConflict {
     /// The smallest shift that clears every port in the preset.
     let freeOffset: Int
 
-    /// Only worth offering when every clashing target can actually be moved.
-    var canShift: Bool { !clashes.isEmpty && clashes.allSatisfy(\.overridable) }
+    /// Always offer to move. Every target gets PORT in its environment, so a
+    /// shift has a real chance even when the config never anticipated one —
+    /// and when the server ignores it, the run fails immediately and says
+    /// exactly what to add. Refusing to try was the worse default.
+    var canShift: Bool { !clashes.isEmpty }
+
+    /// True when at least one target can only be moved through PORT, so the
+    /// offer is a good chance rather than a certainty.
+    var shiftIsBestEffort: Bool { clashes.contains { $0.move == .env } }
     /// The projects of ours holding these ports, in order, without repeats.
     var owners: [String] {
         var seen: [String] = []
@@ -326,7 +339,8 @@ struct PortConflict {
             if f.first == "OFFSET", f.count >= 2 { offset = Int(f[1]) ?? 1; continue }
             guard f.count >= 5, let port = Int(f[1]), let pid = Int(f[3]) else { continue }
             clashes.append(PortClash(target: f[0], port: port, owner: f[2],
-                                     pid: pid, overridable: f[4] == "1"))
+                                     pid: pid,
+                                     move: PortClash.Move(rawValue: f[4]) ?? .env))
         }
         return clashes.isEmpty ? nil : PortConflict(clashes: clashes, freeOffset: offset)
     }
@@ -494,8 +508,32 @@ enum Engine {
     }
 
     @discardableResult
-    static func favourite(_ project: String, _ on: Bool) -> Int32 {
-        capture(["favourite", project, on ? "on" : "off"]).code
+    static func favourite(_ project: String, _ on: Bool) -> String? {
+        failure(["favourite", project, on ? "on" : "off"])
+    }
+
+    /// Runs a subcommand and returns what it complained about, or nil if it
+    /// worked.
+    ///
+    /// The engine names the command that fixes every failure it reports, which
+    /// is worth nothing if the caller throws it away. Anything that is not a
+    /// streamed run goes through here.
+    static func failure(_ args: [String]) -> String? {
+        let p = process(args)
+        let err = Pipe()
+        p.standardOutput = Pipe()
+        p.standardError = err
+        do { try p.run() } catch { return "Could not run \(scriptPath)." }
+        let data = err.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus != 0 else { return nil }
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let tidy = text
+            .replacingOccurrences(of: "FAILED", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return tidy.isEmpty
+            ? "\(args.first ?? "The engine") failed, with nothing to say why."
+            : tidy
     }
 
     /// Reads a repo, writes a proposed config, returns (name, file).
@@ -1925,6 +1963,9 @@ struct ContentView: View {
     @State private var presentation = Presentation.current
     @State private var removing: Project?
     @State private var pendingRun: PendingRun?
+    /// What the engine last complained about, for anything that is not a
+    /// streamed run. Without this the app simply swallowed those failures.
+    @State private var problem: String?
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -2258,6 +2299,15 @@ struct ContentView: View {
                  is not touched.
                  """)
         }
+        .alert("Runbranch could not do that", isPresented: Binding(
+            get: { problem != nil },
+            set: { if !$0 { problem = nil } })) {
+            Button("OK", role: .cancel) { problem = nil }
+        } message: {
+            // The engine's own words, including the command it suggests. A
+            // paraphrase would lose the useful half.
+            Text(problem ?? "")
+        }
         .sheet(item: $pendingRun) { pending in
             PortConflictSheet(
                 pending: pending,
@@ -2403,7 +2453,13 @@ struct ContentView: View {
         pendingRun = nil
         Task {
             for owner in owners {
-                _ = await Task.detached { Engine.capture(["stop", owner]) }.value
+                let stopErr = await Task.detached { Engine.failure(["stop", owner]) }.value
+                if let stopErr {
+                    // Carrying on would hit the same ports and fail again, with
+                    // a less useful message than this one.
+                    problem = stopErr
+                    return
+                }
             }
             await syncProjectList()
             run(["run", pending.project, pending.ref, pending.preset], pending.title)
@@ -2576,7 +2632,11 @@ struct ContentView: View {
 
     private func toggleFavourite(_ p: Project) {
         Task {
-            _ = await Task.detached { Engine.favourite(p.id, !p.favourite) }.value
+            let favErr = await Task.detached { Engine.favourite(p.id, !p.favourite) }.value
+            if let favErr {
+                problem = favErr
+                return
+            }
             projects = await Task.detached { Engine.projects() }.value
         }
     }
