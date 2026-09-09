@@ -203,9 +203,7 @@ struct LogViewer: View {
                 Spacer(minLength: 8)
                 TextField("Filter", text: $filter)
                     .textFieldStyle(.roundedBorder).frame(width: 120)
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) { controls }
-                }
+                HStack(spacing: 8) { controls }
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
 
@@ -331,9 +329,18 @@ struct LogViewer: View {
                 .foregroundStyle(off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .frame(width: 15, height: 15)
         }
-        // Glass, like every other button in this app. `.bordered` was mine
-        // and it is the odd one out.
-        .buttonStyle(.glass)
+        // Not glass, and not GlassEffectContainer either.
+        //
+        // Both were tried, and glass in this header did two unwanted things:
+        // it did not actually render as glass — it came out as a flat dark
+        // chip — and the header stopped being painted on the sheet's first
+        // frames, so the log appeared and the whole control row arrived after
+        // it. The header's LAYOUT was measured as stable throughout (one
+        // geometry event, 680x56, never changing), so what was late was the
+        // drawing, not the position.
+        //
+        // The other sheets' headers are plain and none of them do this.
+        .buttonStyle(.bordered)
         .disabled(disabled)
         .help(help)
     }
