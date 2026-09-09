@@ -866,22 +866,54 @@ port_holder_desc() { ps -o pid=,command= -p "$1" 2>/dev/null | sed -e 's/^ *//' 
 # worktree under RB_HOME, and the first path segment after it is the project —
 # so a port conflict can name the run holding the port rather than leaving the
 # user to work it out from a command line.
-port_holder_project() {
+# Everything known about a process holding a port, as
+#   project <TAB> ours|outside|unknown
+#
+# Two ways to attribute one. A process running inside a worktree under RB_HOME
+# is a run of ours. A process running inside a project's own checkout is that
+# project too, but started by something else — a terminal, an editor, an agent —
+# and saying so beats reporting "another app".
+#
+# The command line carries the path only when the process was started with an
+# absolute one (`node /path/to/.bin/vite` does, `python3 -m http.server` does
+# not), so the working directory is checked as well.
+port_holder_owner() {
   local pid="$1"
   local cmd cwd hay
   cmd="$(ps -o command= -p "$pid" 2>/dev/null)"
-  # The command line carries the worktree path only when the process was
-  # started with an absolute one — `node /path/to/.bin/vite` does, `python3 -m
-  # http.server` does not. The working directory is the worktree either way.
   cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
   hay="$cmd $cwd"
+
   case "$hay" in
     *"$RB_HOME/"*)
       local after
       after="${hay#*"$RB_HOME"/}"
-      printf '%s' "${after%%/*}"
+      printf '%s\tours' "${after%%/*}"
+      return 0
       ;;
   esac
+
+  # Nothing under RB_HOME, so ask each project whether this is its checkout.
+  local n repo
+  while IFS="$(printf '\t')" read -r n _; do
+    [ -n "$n" ] || continue
+    repo="$( ( load_project "$n" >/dev/null 2>&1; printf '%s' "$REPO" ) 2>/dev/null )"
+    [ -n "$repo" ] || continue
+    case "$hay" in
+      *"$repo"*) printf '%s\toutside' "$n"; return 0 ;;
+    esac
+  done <<EOF
+$(list_projects)
+EOF
+
+  printf '\tunknown'
+}
+
+# Just the project name, for callers that need only that.
+port_holder_project() {
+  local owner
+  owner="$(port_holder_owner "$1")"
+  printf '%s' "${owner%%"$(printf '\t')"*}"
 }
 
 # Ports declared by more than one project.
@@ -934,28 +966,117 @@ cannot run at the same time:"
 # What stands between a preset and starting, in a form the front end can act on.
 #
 # One line per conflicted target:
-#   target <TAB> declared <TAB> owner <TAB> pid <TAB> overridable
+#   target <TAB> declared <TAB> owner <TAB> kind <TAB> pid <TAB> overridable
 # `owner` is the project whose run holds the port, or empty for something the
 # user started. `overridable` is 1 when the command contains {port}, meaning the
 # run can be shifted; 0 when shifting it would just health-check an empty port.
 #
 # A trailing OFFSET line gives the smallest shift that clears every conflict.
+# End a process holding a port, when the user has explicitly asked for it.
+#
+# Deliberately narrow. It refuses anything it cannot attribute to a project,
+# because "kill whatever is on this port" is a footgun and a tool that offers it
+# will eventually be pointed at a database or an editor. What it will end is a
+# server running inside a project we know about — the same test that let us name
+# it in the first place.
+#
+# TERM first, and only that: this is someone else's process and a dev server
+# that wants to clean up should be allowed to.
+kill_port_holder() {
+  local pid="$1"
+  case "$pid" in
+    ''|*[!0-9]*) die "Not a process id: \"$pid\"." "$SELF check-ports <project> <preset>" ;;
+  esac
+  # `ps`, not `alive`: alive uses kill -0, which fails with EPERM for a process
+  # owned by someone else — so a root process reported itself as already gone.
+  ps -p "$pid" >/dev/null 2>&1 || { info "pid $pid is already gone."; return 0; }
+
+  local owner_pair owner kind
+  owner_pair="$(port_holder_owner "$pid")"
+  owner="${owner_pair%%"$(printf '\t')"*}"
+  kind="${owner_pair##*"$(printf '\t')"}"
+
+  if [ -z "$owner" ] || [ "$kind" = unknown ]; then
+    die "Refusing to end pid $pid — it does not belong to a project Runbranch knows about.
+
+$(port_holder_desc "$pid")" \
+      "kill $pid      # if that is really what you want"
+  fi
+
+  info "ending $owner (pid $pid), started outside Runbranch"
+  kill -TERM "$pid" 2>/dev/null || true
+  local waited=0
+  while [ "$waited" -lt 10 ] && alive "$pid"; do sleep 1; waited=$((waited + 1)); done
+  if alive "$pid"; then
+    die "pid $pid did not stop within 10s." "kill -9 $pid"
+  fi
+  ok "stopped"
+}
+
+# Every port any project declares, and what is on it.
+#
+#   project <TAB> target <TAB> port <TAB> state <TAB> owner <TAB> kind <TAB> pid <TAB> what
+#
+# state is `free`, `ours` when this project's own run holds it, `outside` when
+# something else is on it. The point is to answer "what is using 5173" without
+# reaching for lsof, and to say whose it is — which Runbranch can do and lsof
+# cannot, because it knows which directory belongs to which project.
+report_ports() {
+  local n t port pid owner_pair owner kind state what
+  while IFS="$(printf '\t')" read -r n _; do
+    [ -n "$n" ] || continue
+    (
+      load_project "$n" >/dev/null 2>&1 || exit 0
+      load_state >/dev/null 2>&1 || true
+      for t in $(target_names); do
+        port="$(target_port "$t")" || continue
+        [ -n "$port" ] || continue
+        pid="$(port_holder "$port")"
+        if [ -z "$pid" ]; then
+          printf '%s\t%s\t%s\tfree\t\t\t\t\n' "$n" "$t" "$port"
+          continue
+        fi
+        owner_pair="$(port_holder_owner "$pid")"
+        owner="${owner_pair%%"$(printf '\t')"*}"
+        kind="${owner_pair##*"$(printf '\t')"}"
+        # Ours means this project's own run, not merely a Runbranch one: another
+        # project holding the port is still a conflict.
+        if [ "$kind" = ours ] && [ "$owner" = "$n" ]; then
+          state=ours
+        else
+          state=outside
+        fi
+        what="$(port_holder_desc "$pid" | cut -c1-70)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$n" "$t" "$port" "$state" "$owner" "$kind" "$pid" "$what"
+      done
+    )
+  done <<EOF
+$(list_projects)
+EOF
+}
+
 check_ports() {
   local targets="$1"
-  local t port pid owner cmd overridable found=0
+  local t port pid owner owner_pair kind cmd overridable found=0
   for t in $targets; do
     port="$(target_port "$t")"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
     found=1
-    owner="$(port_holder_project "$pid")"
+    # project and kind together: whether this is a run of ours or the same
+    # project started by something else entirely changes what can be offered.
+    owner_pair="$(port_holder_owner "$pid")"
+    owner="${owner_pair%%"$(printf '\t')"*}"
+    kind="${owner_pair##*"$(printf '\t')"}"
     cmd="$(target_field "$t" command)"
     # `explicit` when the command names the port itself, `env` when the shift
     # can only be offered through PORT and might be ignored. Both are worth
     # offering; only one is a promise.
     case "$cmd" in *'{port}'*) overridable=explicit ;; *) overridable=env ;; esac
-    printf '%s\t%s\t%s\t%s\t%s\n' "$t" "$port" "$owner" "$pid" "$overridable"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$t" "$port" "$owner" "$kind" "$pid" "$overridable"
   done
   [ "$found" = 0 ] && return 0
 
@@ -977,16 +1098,23 @@ check_ports() {
 
 ensure_ports_free() {
   local targets="$1"
-  local t port pid owner busy='' owners=''
+  local t port pid owner owner_pair kind busy='' owners=''
   for t in $targets; do
     port="$(target_port "$t")"
     [ -n "$port" ] || continue
     pid=$(port_holder "$port")
     [ -n "$pid" ] || continue
-    owner="$(port_holder_project "$pid")"
+    owner_pair="$(port_holder_owner "$pid")"
+    owner="${owner_pair%%"$(printf '\t')"*}"
+    kind="${owner_pair##*"$(printf '\t')"}"
     if [ -n "$owner" ]; then
-      busy="$busy
+      if [ "$kind" = ours ]; then
+        busy="$busy
   $t on port $port  ->  Runbranch is running $owner here (pid $pid)"
+      else
+        busy="$busy
+  $t on port $port  ->  $owner is running already, started outside Runbranch (pid $pid)"
+      fi
       case " $owners " in *" $owner "*) ;; *) owners="$owners $owner" ;; esac
     else
       busy="$busy
@@ -1913,6 +2041,8 @@ Runbranch — run any local project from a throwaway git worktree.
                                        --in-place uses the checkout, not a worktree
   runbranch.sh check-ports <p> <preset>
                                        what holds the ports, and a free offset
+  runbranch.sh ports                   every declared port, and what is on it
+  runbranch.sh kill-port <pid>         end a port holder, if it belongs to a project
   runbranch.sh remove <project>        delete a project's config and state, never its repo
   runbranch.sh reclaim [<project>]     reclaim ports and clear state a crash left
   runbranch.sh state <project>
@@ -2023,6 +2153,20 @@ main() {
         shift
       done
       do_run "$rp" "$rpreset"
+      ;;
+    ports)
+      if [ "$HAVE_TTY" = 1 ]; then
+        printf '\n%sPorts%s\n\n' "$C_BLD" "$C_OFF"
+        report_ports | awk -F'\t' '
+          { printf "  %-16s %-8s %-6s %-8s %s\n", $1, $2, $3, $4, ($4=="free" ? "" : $8) }'
+        printf '\n'
+      else
+        report_ports
+      fi
+      ;;
+    kill-port)
+      [ $# -eq 2 ] || { usage; exit 2; }
+      kill_port_holder "$2"
       ;;
     check-ports)
       [ $# -eq 3 ] || { usage; exit 2; }

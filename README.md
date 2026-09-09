@@ -143,6 +143,15 @@ next to its uptime.
 migrations need not share a database. A project can declare one per run, seeded
 from the same source and thrown away with the worktree.
 
+**It knows what else is running.** A dev server you started in a terminal, or
+an editor did, or an agent did, is not invisible to Runbranch: it can tell whose
+it is, because it knows which directory belongs to which project. A project
+whose ports are taken shows a warning in the sidebar before you press Start,
+**Ports…** lists every declared port and what is on it, and a conflict names the
+holder rather than shrugging at "another app". If it is plainly the same
+project's own server, the conflict offers to take the port — naming the process
+it will end, never as the default action.
+
 **Status that keeps being true.** Uptime ticks. Health is polled, not assumed.
 Processes and ports orphaned by a crash, a sleep or a force quit are found and
 reclaimed on next launch — you should never go hunting with `lsof`.
@@ -181,6 +190,7 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh scan                     # repos not yet declared
 ./runbranch.sh add <repo>               # propose a config and write it
 ./runbranch.sh remove studio            # delete its config and state, never its repo
+./runbranch.sh ports                    # every declared port, and what is on it
 ./runbranch.sh cleanup studio           # remove worktrees
 ```
 

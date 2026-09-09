@@ -199,6 +199,7 @@ extension String {
 struct PortConflictSheet: View {
     let pending: PendingRun
     let onSwitch: () -> Void
+    let onTakeOver: () -> Void
     let onShift: () -> Void
     let onCancel: () -> Void
 
@@ -229,7 +230,7 @@ struct PortConflictSheet: View {
                         Text("port \(String(c.port))")
                             .font(.system(size: 12, design: .monospaced))
                         Spacer()
-                        Text(c.owner.isEmpty ? "another app (pid \(c.pid))" : c.owner)
+                        Text(describe(c))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -262,12 +263,21 @@ struct PortConflictSheet: View {
                         .buttonStyle(.glass).controlSize(.large)
                 }
                 if !conflict.owners.isEmpty {
-                    // Stopping someone else's running server is the
-                    // destructive option here, whatever else it also is.
+                    // Stopping a run of ours is the routine resolution, and
+                    // still destructive enough to be red.
                     Button("Stop and Switch", action: onSwitch)
                         .buttonStyle(.glassProminent).controlSize(.large)
                         .tint(.red)
                         .keyboardShortcut(.defaultAction)
+                } else if !conflict.outsiders.isEmpty {
+                    // A server something else started. Offered, because
+                    // refusing outright is unhelpful when it is plainly the
+                    // same project — but never the default action, and it says
+                    // what it will kill rather than hiding behind a verb.
+                    Button(takeOverLabel, action: onTakeOver)
+                        .buttonStyle(.glassProminent).controlSize(.large)
+                        .tint(.red)
+                        .help("Ends the process listed above, then starts this run")
                 }
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
@@ -275,11 +285,29 @@ struct PortConflictSheet: View {
         .frame(width: 460, height: 300)
     }
 
+    private var takeOverLabel: String {
+        conflict.outsiders.count > 1 ? "Take Over Ports" : "Take Over Port"
+    }
+
+    private func describe(_ c: PortClash) -> String {
+        switch c.kind {
+        case .ours:    return "\(c.owner) — a Runbranch run"
+        case .outside: return "\(c.owner) — started outside Runbranch"
+        case .unknown: return "another app (pid \(c.pid))"
+        }
+    }
+
     private var subtitle: String {
-        let owners = conflict.owners
-        if owners.isEmpty { return "Something outside Runbranch is using them." }
-        if owners.count == 1 { return "Runbranch is running \(owners[0]) on them." }
-        return "Runbranch is running \(owners.joined(separator: " and ")) on them."
+        let ours = conflict.owners, outside = conflict.outsiders
+        if !ours.isEmpty && outside.isEmpty {
+            return "Runbranch is running \(ours.joined(separator: " and ")) on them."
+        }
+        if ours.isEmpty && !outside.isEmpty {
+            return "\(outside.joined(separator: " and ")) is already running, "
+                 + "started by something other than Runbranch."
+        }
+        if !ours.isEmpty && !outside.isEmpty { return "Some are ours, some are not." }
+        return "Something outside Runbranch is using them."
     }
 
     /// The port the first target would move to, so the button names a number
@@ -288,6 +316,92 @@ struct PortConflictSheet: View {
         (conflict.clashes.first?.port ?? 0) + conflict.freeOffset
     }
 
+}
+
+/// What is on every declared port, across every project.
+///
+/// Answers "what is using 5173" without reaching for lsof, and says whose it is
+/// — which lsof cannot, because it does not know which directory belongs to
+/// which project.
+struct PortsSheet: View {
+    let rows: [PortRow]
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "network").font(.system(size: 18)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ports").font(.system(size: 14, weight: .semibold))
+                    Text("Every port your projects declare, and what is on it")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+
+            Divider()
+
+            if rows.isEmpty {
+                VStack {
+                    Text("No ports declared yet.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(rows) { r in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(String(r.port))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .frame(width: 52, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack(spacing: 6) {
+                                        Text("\(r.project) · \(r.target)")
+                                            .font(.system(size: 12))
+                                        badge(for: r)
+                                    }
+                                    if !r.isFree && !r.what.isEmpty {
+                                        Text(r.what)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1).truncationMode(.middle)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 18).padding(.vertical, 7)
+                            Divider().padding(.leading, 18)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done", action: onClose).buttonStyle(.glass).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 12)
+        }
+        .frame(width: 520, height: 420)
+    }
+
+    @ViewBuilder
+    private func badge(for r: PortRow) -> some View {
+        if r.isFree {
+            Badge(text: "free")
+        } else if r.isOurs {
+            Badge(text: "running", symbol: "bolt.fill", color: .green)
+        } else {
+            // Not ours: either another project of yours, or the same project
+            // started by something else. Either way it blocks this one.
+            Badge(text: r.owner.isEmpty ? "in use" : "\(r.owner), outside",
+                  symbol: "exclamationmark.triangle.fill", color: .orange)
+        }
+    }
 }
 
 /// A start that is waiting on the user to resolve a port conflict.
@@ -312,7 +426,14 @@ struct PortClash: Identifiable {
     let target: String
     let port: Int
     let owner: String
+    /// Whether the holder is a run of ours, the same project started by
+    /// something else, or unattributable. It decides what can be offered:
+    /// stopping our own run is routine, killing a server someone else started
+    /// is not.
+    let kind: Kind
     let pid: Int
+
+    enum Kind: String { case ours, outside, unknown }
     /// How the target can be told a different port: `explicit` when its command
     /// names one itself, `env` when the only route is PORT in the environment,
     /// which a lot of tooling honours and some ignores.
@@ -336,10 +457,21 @@ struct PortConflict {
     /// True when at least one target can only be moved through PORT, so the
     /// offer is a good chance rather than a certainty.
     var shiftIsBestEffort: Bool { clashes.contains { $0.move == .env } }
-    /// The projects of ours holding these ports, in order, without repeats.
-    var owners: [String] {
+    /// Projects whose own Runbranch run holds these ports — the ones we can
+    /// stop as a matter of course.
+    var owners: [String] { names(where: .ours) }
+
+    /// Projects already running outside Runbranch on these ports. Stopping one
+    /// means killing a server something else started, which is the user's call
+    /// and not a routine one.
+    var outsiders: [String] { names(where: .outside) }
+
+    /// Processes we cannot attribute, and would not presume to kill.
+    var strangers: [PortClash] { clashes.filter { $0.kind == .unknown } }
+
+    private func names(where kind: PortClash.Kind) -> [String] {
         var seen: [String] = []
-        for c in clashes where !c.owner.isEmpty && !seen.contains(c.owner) {
+        for c in clashes where c.kind == kind && !c.owner.isEmpty && !seen.contains(c.owner) {
             seen.append(c.owner)
         }
         return seen
@@ -351,12 +483,38 @@ struct PortConflict {
         for line in text.split(separator: "\n") {
             let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             if f.first == "OFFSET", f.count >= 2 { offset = Int(f[1]) ?? 1; continue }
-            guard f.count >= 5, let port = Int(f[1]), let pid = Int(f[3]) else { continue }
+            guard f.count >= 6, let port = Int(f[1]), let pid = Int(f[4]) else { continue }
             clashes.append(PortClash(target: f[0], port: port, owner: f[2],
+                                     kind: PortClash.Kind(rawValue: f[3]) ?? .unknown,
                                      pid: pid,
-                                     move: PortClash.Move(rawValue: f[4]) ?? .env))
+                                     move: PortClash.Move(rawValue: f[5]) ?? .env))
         }
         return clashes.isEmpty ? nil : PortConflict(clashes: clashes, freeOffset: offset)
+    }
+}
+
+/// A declared port and what is on it, from `runbranch.sh ports`.
+struct PortRow: Identifiable {
+    let project: String
+    let target: String
+    let port: Int
+    /// `free`, `ours` when this project's own run holds it, `outside` otherwise.
+    let state: String
+    let owner: String
+    let pid: Int
+    let what: String
+
+    var id: String { project + target }
+    var isFree: Bool { state == "free" }
+    var isOurs: Bool { state == "ours" }
+
+    static func parse(_ text: String) -> [PortRow] {
+        text.split(separator: "\n").compactMap { line in
+            let f = line.components(separatedBy: "\t")
+            guard f.count >= 8, let port = Int(f[2]) else { return nil }
+            return PortRow(project: f[0], target: f[1], port: port, state: f[3],
+                           owner: f[4], pid: Int(f[6]) ?? 0, what: f[7])
+        }
     }
 }
 
@@ -1534,6 +1692,11 @@ struct ProjectEditor: View {
     @State private var loading = true
     @State private var saving = false
     @State private var problem: String?
+    /// Every declared port and what is on it.
+    @State private var portRows: [PortRow] = []
+    /// Projects whose ports are held by something Runbranch did not start.
+    @State private var occupiedElsewhere: Set<String> = []
+    @State private var showingPorts = false
 
     private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
 
@@ -1953,6 +2116,10 @@ struct WindowSizer: NSViewRepresentable {
 struct ProjectRow: View {
     let project: Project
     let isLive: Bool
+    /// Something Runbranch did not start is on this project's ports — a
+    /// terminal, an editor, an agent. Worth seeing before you press Start, and
+    /// worth seeing without asking for it.
+    var busyElsewhere: Bool = false
     var isSelected: Bool = false
 
     var body: some View {
@@ -1965,6 +2132,13 @@ struct ProjectRow: View {
             Spacer(minLength: 0)
             if isLive {
                 ProgressView().controlSize(.small).frame(width: 16, height: 16)
+            } else if busyElsewhere {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.9))
+                                                : AnyShapeStyle(Color.orange))
+                    .frame(width: 16, height: 16)
+                    .help("Its ports are in use by something Runbranch did not start")
             }
         }
     }
@@ -2004,6 +2178,11 @@ struct ContentView: View {
     /// What the engine last complained about, for anything that is not a
     /// streamed run. Without this the app simply swallowed those failures.
     @State private var problem: String?
+    /// Every declared port and what is on it.
+    @State private var portRows: [PortRow] = []
+    /// Projects whose ports are held by something Runbranch did not start.
+    @State private var occupiedElsewhere: Set<String> = []
+    @State private var showingPorts = false
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -2186,12 +2365,8 @@ struct ContentView: View {
                     Button("") { selectedProject = pair.id }
                         .keyboardShortcut(pair.key, modifiers: .command)
                 }
-                Button("") {
-                    if let snap = current, snap.state.running, let p = selectedProject {
-                        run(["stop", p], "Stopping \(snap.state.ref)")
-                    }
-                }
-                .keyboardShortcut(".", modifiers: .command)
+                Button("", action: stopSelected)
+                    .keyboardShortcut(".", modifiers: .command)
 
                 Button("") { if let p = selectedProject { editingProject = .init(id: p) } }
                     .keyboardShortcut(",", modifiers: .command)
@@ -2276,6 +2451,7 @@ struct ContentView: View {
                     }
                     Button("Add project…") { addProject() }
                     Divider()
+                    Button("Ports…") { showingPorts = true }
                     Button("Open logs in Finder") { openLogs() }
                     if let p = project {
                         Button("Reveal repository in Finder") {
@@ -2357,8 +2533,12 @@ struct ContentView: View {
             PortConflictSheet(
                 pending: pending,
                 onSwitch: { resolveBySwitching(pending) },
+                onTakeOver: { resolveByTakingOver(pending) },
                 onShift: { resolveByShifting(pending) },
                 onCancel: { pendingRun = nil })
+        }
+        .sheet(isPresented: $showingPorts) {
+            PortsSheet(rows: portRows) { showingPorts = false }
         }
         .sheet(isPresented: $scanning) {
             ScanSheet { added in
@@ -2490,12 +2670,37 @@ struct ContentView: View {
         }
     }
 
+    private func stopSelected() {
+        guard let snap = current, snap.state.running, let p = selectedProject else { return }
+        run(["stop", p], "Stopping \(snap.state.ref)")
+    }
+
     private func runArgs(_ project: String, _ ref: String, _ preset: String,
                          inPlace: Bool, offset: Int? = nil) -> [String] {
         var args = ["run", project, ref, preset]
         if let offset { args.append(String(offset)) }
         if inPlace { args.append("--in-place") }
         return args
+    }
+
+    /// End a server something else started, then start ours.
+    ///
+    /// Only ever reached from an explicit button naming what it will kill. The
+    /// engine does the killing so the rule about which processes are fair game
+    /// lives in one place.
+    private func resolveByTakingOver(_ pending: PendingRun) {
+        let pids = pending.conflict.clashes
+            .filter { $0.kind == .outside }
+            .map { String($0.pid) }
+        pendingRun = nil
+        Task {
+            for pid in pids {
+                let err = await Task.detached { Engine.failure(["kill-port", pid]) }.value
+                if let err { problem = err; return }
+            }
+            run(runArgs(pending.project, pending.ref, pending.preset,
+                        inPlace: pending.inPlace), pending.title)
+        }
     }
 
     /// Stop whatever of ours holds the ports, then start. The engine refuses to
@@ -2576,6 +2781,13 @@ struct ContentView: View {
             Set(ids.filter { Engine.state($0).running })
         }.value
         liveProjects = live
+
+        // Whatever is on the ports, including servers Runbranch did not start.
+        // Read in the same sweep that finds live runs, so it is right on launch
+        // and after every operation without anyone pressing anything.
+        let rows = await Task.detached { PortRow.parse(Engine.capture(["ports"]).out) }.value
+        portRows = rows
+        occupiedElsewhere = Set(rows.filter { $0.state == "outside" }.map(\.project))
     }
 
     /// Builds the whole snapshot, then assigns it in one go. Nothing is
@@ -2664,7 +2876,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private func projectRow(_ p: Project, isLive: Bool) -> some View {
-        ProjectRow(project: p, isLive: isLive, isSelected: selectedProject == p.id)
+        ProjectRow(project: p, isLive: isLive,
+                   busyElsewhere: occupiedElsewhere.contains(p.id),
+                   isSelected: selectedProject == p.id)
             .tag(p.id)
             .contextMenu { projectMenu(p) }
     }

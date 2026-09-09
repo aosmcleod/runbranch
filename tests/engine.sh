@@ -146,6 +146,39 @@ is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
 
+echo "==> a port held from a checkout is attributed to that project"
+# The common real case: a dev server started by a terminal or an agent, inside
+# the project's own checkout. Reporting that as "another app" is unhelpful when
+# we can see whose it is.
+( cd "$FIX" && python3 -m http.server 4991 --directory public >/dev/null 2>&1 & echo $! > "$TMP/outside.pid" )
+sleep 2
+cat > "$RB_PROJECTS_DIR/attrib.conf" <<CONF
+NAME="Attrib"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4991:/:python3 -m http.server {port} --directory public"
+CONF
+ATT="$("$ENGINE" check-ports attrib web 2>&1)" || true
+has "names the project"        "$ATT" "attrib"
+has "says it is not ours"      "$ATT" "outside"
+RUNMSG="$("$ENGINE" run attrib main web 2>&1)" || true
+has "and says so in the error" "$RUNMSG" "started outside Runbranch"
+
+echo "==> kill-port only ends what belongs to a project"
+REFUSE="$("$ENGINE" kill-port 1 2>&1)" || true
+has "refuses an unattributable process" "$REFUSE" "does not belong to a project"
+is  "and launchd survives"              "$(ps -p 1 >/dev/null 2>&1 && echo alive)" "alive"
+BADPID="$("$ENGINE" kill-port notanumber 2>&1)" || true
+has "rejects a non-numeric pid"         "$BADPID" "Not a process id"
+# The attributable one it will end.
+OUTSIDE_PID="$(lsof -nP -iTCP:4991 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+"$ENGINE" kill-port "$OUTSIDE_PID" >/dev/null 2>&1
+sleep 1
+curl -sfo /dev/null http://localhost:4991/ 2>/dev/null
+is  "ends one it can attribute"         "$?" "7"
+rm -f "$RB_PROJECTS_DIR/attrib.conf"
+pkill -f "http.server 4991" 2>/dev/null || true
+
 echo "==> an in-place run uses the checkout, and only starts servers"
 # The point of in-place is that uncommitted work is live, so the assertion is
 # that a file written in the checkout and never committed is served.
