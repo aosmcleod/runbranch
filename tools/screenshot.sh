@@ -103,7 +103,7 @@ shoot() {  # file, scene, projects-dir, state-dir
   # the app's stderr is not connected to this terminal.
   local log="$OUT/.capture.log"
   : > "$log"
-  run_limited 75 open -n -W \
+  run_limited 75 open ${RB_SHOT_QUIET:+-g} -n -W \
     --env "RB_PROJECTS_DIR=$pdir" \
     --env "RB_HOME=$sdir" \
     --env "RB_MY_EMAILS=dana@example.com" \

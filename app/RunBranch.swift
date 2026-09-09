@@ -2335,6 +2335,44 @@ struct ContentView: View {
                 guard let p = selectedProject else { return }
                 editingProject = .init(id: p)
             }
+            if SelfTest.requested {
+                SelfTest.armWatchdog()
+                // Wait for the things a launch is supposed to produce, rather
+                // than sleeping a fixed amount and hoping.
+                var waited = 0
+                while waited < 120 {
+                    let ready = !projects.isEmpty && selectedProject != nil
+                        && !(snapshot?.state.running ?? false ? health.status.isEmpty : false)
+                    if ready && waited > 10 { break }
+                    try? await Task.sleep(for: .milliseconds(100))
+                    waited += 1
+                }
+
+                let realWindows = NSApp.windows.filter {
+                    $0.isVisible && $0.parent == nil && !($0 is NSPanel)
+                        && $0.frame.width > 200
+                }
+                let st = snapshot?.state
+                let worst = st.map { s -> String in
+                    let all = s.targets.compactMap { health.status[$0.name] }
+                    if all.isEmpty { return "unknown" }
+                    if all.contains(.failing) { return "failing" }
+                    if all.contains(.starting) { return "starting" }
+                    return all.allSatisfy { $0 == .healthy } ? "healthy" : "mixed"
+                } ?? "no-state"
+
+                SelfTest.report([
+                    ("windows", String(realWindows.count)),
+                    ("projects", String(projects.count)),
+                    ("selected", selectedProject ?? ""),
+                    ("running", (st?.running ?? false) ? "1" : "0"),
+                    ("targets", String(st?.targets.count ?? 0)),
+                    ("health", worst),
+                    ("problem", problem ?? ""),
+                ])
+                exit(0)
+            }
+
             if let path = Screenshot.path {
                 // Open whatever the requested scene needs, then let it settle.
                 switch Screenshot.scene {
@@ -2792,10 +2830,12 @@ struct ContentView: View {
             projects = found
             loadingProjects = false
             if selectedProject == nil {
-                // For a screenshot, show a project that is actually running —
-                // the status strip is the most informative thing on screen and
-                // an idle project hides it.
-                let live = Screenshot.path != nil
+                // For a screenshot or a self-test, prefer a project that is
+                // actually running: the status strip is the most informative
+                // thing on screen, and an idle project hides it — along with
+                // anything a test wanted to assert about it.
+                let unattended = Screenshot.path != nil || SelfTest.requested
+                let live = unattended
                     ? found.first(where: { Engine.state($0.id).running })
                     : nil
                 selectedProject = live?.id ?? found.first?.id
@@ -3232,6 +3272,44 @@ final class MenuBridge: ObservableObject {
     var refresh: (() -> Void)?
     /// Nil when nothing is selected, so the menu can disable what needs one.
     var hasSelection: () -> Bool = { false }
+}
+
+/// Reports what the app actually managed to do, then exits.
+///
+/// The two bugs that nearly shipped were both in this layer and neither was
+/// found by looking for it: a health indicator that never updated because the
+/// view did not observe its monitor, and a duplicate window at every launch.
+/// Both are one assertion each — if you can ask the running app how many
+/// windows it has and whether health resolved.
+///
+/// Deliberately does not activate. A test that steals focus is a test nobody
+/// runs while working.
+enum SelfTest {
+    static var requested: Bool {
+        ProcessInfo.processInfo.arguments.contains("--selftest")
+    }
+
+    /// `key <TAB> value` per line, for a shell test to assert on.
+    ///
+    /// Written to RB_SELFTEST_OUT when set, because the app has to be launched
+    /// through `open` to reliably get a window and `open` does not give the
+    /// caller its stdout.
+    static func report(_ pairs: [(String, String)]) {
+        let text = pairs.map { "\($0.0)\t\($0.1)" }.joined(separator: "\n") + "\n"
+        FileHandle.standardOutput.write(text.data(using: .utf8)!)
+        if let out = ProcessInfo.processInfo.environment["RB_SELFTEST_OUT"] {
+            try? text.write(toFile: out, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Nothing here should take 20 seconds. If it does, that is the finding.
+    static func armWatchdog() {
+        Task.detached {
+            try? await Task.sleep(for: .seconds(20))
+            FileHandle.standardError.write("selftest timed out\n".data(using: .utf8)!)
+            exit(3)
+        }
+    }
 }
 
 /// Owns the About panel. One instance, built on first use.
