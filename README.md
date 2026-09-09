@@ -115,6 +115,18 @@ worktree, install, infrastructure, migrations, seed, servers. It closes itself
 when the thing is up and stays put when it isn't — which is the only moment the
 log matters.
 
+**A snapshot, not a live view.** A run is a separate copy of the repository at
+one commit, in its own directory under `~/.runbranch`. That is what keeps it
+away from your checkout — and it cuts both ways: **edits you make in your
+checkout do not reach a running demo**, and neither do new commits on the
+branch. The server is watching a different directory, so its hot reload has
+nothing to react to. Start the branch again to pick up whatever is newest.
+(*Refresh* re-reads pull request metadata, not code.)
+
+If you want a server watching the files you are editing, run it yourself in
+your checkout — that is what `npm run dev` is for. Runbranch is for the other
+thing: a branch that isn't the one you're working on.
+
 **Data that doesn't leak between branches.** Two branches with divergent
 migrations need not share a database. A project can declare one per run, seeded
 from the same source and thrown away with the worktree.

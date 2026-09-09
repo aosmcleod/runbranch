@@ -84,6 +84,7 @@ refactor is precisely the kind of change that silently alters behaviour.
 | | Item | Why |
 |---|---|---|
 | 2.1 | ✅ **Menu bar mode** — Dock, both, or menu bar only; status item with the current run, Stop, and a way back to the window | A demo runs for an hour while you use other apps. The window is not where you want the status |
+| 2.12 | **Update a run to the branch's latest commit** — one action that re-checks-out the tip and restarts, plus showing in the strip when the worktree is behind | A worktree is pinned to the commit it was made at, so new commits need a stop and a start. Alec hit this expecting *Refresh* to do it, which only re-reads pull request metadata. Being able to see "3 commits behind" is half the value |
 | 2.2 | **Per-target restart** — restart web without restarting the api | Overmind's best idea. A Next rebuild should not cost a database connection |
 | 2.3 | **Notifications** — ready, failed, and "still running after an hour" | The run outlives the window on purpose; it should be able to say so |
 | 2.4 | **Log improvements** — follow toggle, wrap toggle, jump to first error | The viewer works; it does not yet help you read |

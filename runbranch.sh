@@ -1455,11 +1455,12 @@ remove_project() {
   # Worktrees, logs and metadata — all of it ours. Leashed the same way worktree
   # deletion is: this is an rm -rf built from a name, and a name that came out
   # empty would take every project's state with it.
-  local work="$RB_HOME/$name"
-  if [ -n "$name" ] && [ -d "$work" ]; then
-    case "$work" in
-      "$RB_HOME"/?*) rm -rf "$work" ;;
-      *) die "Refusing to delete $work — it is not a project directory under $RB_HOME." \
+  # WORK_ROOT, not a path rebuilt here: load_project above has already set it,
+  # and rebuilding is what caused the guard bug directly above this.
+  if [ -n "$name" ] && [ -d "$WORK_ROOT" ]; then
+    case "$WORK_ROOT" in
+      "$RB_HOME"/?*) rm -rf "$WORK_ROOT" ;;
+      *) die "Refusing to delete $WORK_ROOT — not a project directory under $RB_HOME." \
            "Remove it by hand if that is really what you want." ;;
     esac
   fi
