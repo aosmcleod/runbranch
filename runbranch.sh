@@ -870,6 +870,39 @@ drop_run_database() {
 # ---------------------------------------------------------------------------
 
 port_holder() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1; }
+
+# Every TCP listener on the machine at this moment, as `port<TAB>pid`.
+#
+# lsof costs the same whether it is asked about one port or all of them —
+# 29ms either way on this machine — so asking once and matching in shell beats
+# asking per port. `ports` across six projects was a dozen spawns; worse, the
+# free-offset search in check_ports probes up to 200 offsets and was spawning
+# one lsof per offset per target.
+#
+# Passed around rather than cached in a global on purpose. A snapshot that
+# outlives its caller is a stale answer waiting to happen, and some callers
+# here reap processes based on what they find.
+listeners_now() {
+  # -Fpn, not the human table. In the table the last field is the state —
+  # "(LISTEN)" — rather than the address, so reading $NF as the address found
+  # no ports at all and reported every one of them free.
+  lsof -nP -iTCP -sTCP:LISTEN -Fpn 2>/dev/null | awk '
+    /^p/ { pid = substr($0, 2); next }
+    /^n/ {
+      name = substr($0, 2)
+      # *:5173, 127.0.0.1:5173, [::1]:5173. An established socket carries a
+      # -> and is not a listener.
+      if (name ~ /->/) next
+      port = name
+      sub(/^.*:/, "", port)
+      if (port ~ /^[0-9]+$/ && pid != "") print port "\t" pid
+    }'
+}
+
+# The pid listening on a port, according to a snapshot from listeners_now.
+holder_in() {
+  printf '%s\n' "$1" | awk -F'\t' -v want="$2" '$1 == want { print $2; exit }'
+}
 port_holder_desc() { ps -o pid=,command= -p "$1" 2>/dev/null | sed -e 's/^ *//' | cut -c1-110; }
 
 # Which project owns a process, if any. Anything we started runs inside a
@@ -1032,7 +1065,8 @@ $(port_holder_desc "$pid")" \
 # reaching for lsof, and to say whose it is — which Runbranch can do and lsof
 # cannot, because it knows which directory belongs to which project.
 report_ports() {
-  local n t port pid owner_pair owner kind state what
+  local n t port pid owner_pair owner kind state what listeners
+  listeners="$(listeners_now)"
   while IFS="$(printf '\t')" read -r n _; do
     [ -n "$n" ] || continue
     (
@@ -1041,7 +1075,7 @@ report_ports() {
       for t in $(target_names); do
         port="$(target_port "$t")" || continue
         [ -n "$port" ] || continue
-        pid="$(port_holder "$port")"
+        pid="$(holder_in "$listeners" "$port")"
         if [ -z "$pid" ]; then
           printf '%s\t%s\t%s\tfree\t\t\t\t\n' "$n" "$t" "$port"
           continue
@@ -1078,11 +1112,12 @@ EOF
 # way to end it.
 emit_adopted_state() {
   local t port pid owner_pair owner kind found=0 first_pid=''
-  local rows=''
+  local rows='' listeners
+  listeners="$(listeners_now)"
   for t in $(target_names); do
     port="$(target_port "$t")" || continue
     [ -n "$port" ] || continue
-    pid="$(port_holder "$port")"
+    pid="$(holder_in "$listeners" "$port")"
     [ -n "$pid" ] || continue
     owner_pair="$(port_holder_owner "$pid")"
     owner="${owner_pair%%"$(printf '\t')"*}"
@@ -1110,11 +1145,12 @@ emit_adopted_state() {
 
 check_ports() {
   local targets="$1"
-  local t port pid owner owner_pair kind cmd overridable found=0
+  local t port pid owner owner_pair kind cmd overridable found=0 listeners
+  listeners="$(listeners_now)"
   for t in $targets; do
     port="$(target_port "$t")"
     [ -n "$port" ] || continue
-    pid=$(port_holder "$port")
+    pid=$(holder_in "$listeners" "$port")
     [ -n "$pid" ] || continue
 
     # project and kind together: whether this is a run of ours or the same
@@ -1153,7 +1189,7 @@ check_ports() {
     for t in $targets; do
       port="$(target_field "$t" port)"
       [ -n "$port" ] || continue
-      [ -n "$(port_holder "$((port + try))")" ] && { clash=1; break; }
+      [ -n "$(holder_in "$listeners" "$((port + try))")" ] && { clash=1; break; }
     done
     [ "$clash" = 0 ] && break
     try=$((try + 1))
