@@ -1709,6 +1709,7 @@ struct ProjectEditor: View {
     /// Projects whose ports are held by something Runbranch did not start.
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
+    @State private var hoveringProjects = false
 
     private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
 
@@ -2184,6 +2185,7 @@ struct ContentView: View {
     /// Projects whose ports are held by something Runbranch did not start.
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
+    @State private var hoveringProjects = false
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -2929,23 +2931,38 @@ struct ContentView: View {
             Section {
                 ForEach(others) { projectRow($0, isLive: false) }
             } header: {
+                // macOS gives a Section header its small-caps styling and a
+                // collapse control on hover, but there is no API for putting
+                // anything else in one — so the plus has to match the header by
+                // hand. Same secondary colour, same weight as the label beside
+                // it, and revealed on hover the way the system's own control is.
                 HStack(spacing: 0) {
                     Text("Projects")
                     Spacer(minLength: 0)
-                    // Always visible, not on hover. Revealing it on hover was
-                    // tried and was fiddly to hit and easy to miss.
                     Menu {
                         Button("Add a Project…") { addProject() }
                         Button("Scan for Projects…") { scanning = true }
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
+                            // Header labels are ~11pt semibold secondary; the
+                            // glyph reads a shade small at that size, so 12.
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            // A hit area worth aiming at, without the glyph
+                            // growing to match.
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
+                    .opacity(hoveringProjects ? 1 : 0)
                     .help("Add or scan for projects")
                 }
+                // The whole row is the hover target, so the button does not
+                // have to be found before it appears.
+                .contentShape(Rectangle())
+                .onHover { hoveringProjects = $0 }
             }
         }
         .listStyle(.sidebar)
