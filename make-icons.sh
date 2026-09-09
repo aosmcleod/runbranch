@@ -121,9 +121,14 @@ if [ -n "$DEST" ]; then
   xcrun actool "$ICON" --compile "$DEST/Contents/Resources" \
     --platform macosx --minimum-deployment-target 14.0 --app-icon AppIcon \
     --output-partial-info-plist "$BUILD/icon.plist" >/dev/null
-  # The source bundle too, the way shipping apps do.
+  # Only the compiled form. The source .icon used to be copied in beside it
+  # "the way shipping apps do", which is not a thing shipping apps do: nothing
+  # in /System/Applications carries a .icon in Resources. The system reads
+  # Assets.car via CFBundleIconName, which actool has just written above.
+  #
+  # Still removed rather than merely not copied, so a bundle built before this
+  # does not keep it forever.
   rm -rf "$DEST/Contents/Resources/AppIcon.icon"
-  cp -R "$ICON" "$DEST/Contents/Resources/AppIcon.icon"
   echo "    compiled into the bundle (Assets.car + AppIcon.icns)"
 fi
 
