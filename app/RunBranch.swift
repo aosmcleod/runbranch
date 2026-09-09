@@ -1710,6 +1710,11 @@ struct ProjectEditor: View {
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
     @State private var hoveringProjects = false
+    // Persisted: collapsing a section is a preference, and having it spring
+    // back open on every launch would make it pointless.
+    @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
+    @AppStorage("sidebar.favourites.expanded") private var favouritesExpanded = true
+    @AppStorage("sidebar.projects.expanded")   private var projectsExpanded = true
 
     private static let runtimes = ["", "mise", "fnm", "asdf", "nvm"]
 
@@ -2186,6 +2191,11 @@ struct ContentView: View {
     @State private var occupiedElsewhere: Set<String> = []
     @State private var showingPorts = false
     @State private var hoveringProjects = false
+    // Persisted: collapsing a section is a preference, and having it spring
+    // back open on every launch would make it pointless.
+    @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
+    @AppStorage("sidebar.favourites.expanded") private var favouritesExpanded = true
+    @AppStorage("sidebar.projects.expanded")   private var projectsExpanded = true
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -2918,24 +2928,30 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebar: some View {
         List(selection: $selectedProject) {
+            // Collapsible, which is what was missing.
+            //
+            // Mail puts a new-folder icon beside the collapse chevron in its
+            // sidebar headers, and the reason ours had no chevron to sit beside
+            // is that a Section only gets one when it is given an isExpanded
+            // binding. With one, SwiftUI supplies the control and lays it out
+            // after the header content — so the plus lands to its left, which
+            // is the arrangement Mail has.
             if !live.isEmpty {
-                Section("Running") {
+                Section("Running", isExpanded: $runningExpanded) {
                     ForEach(live) { projectRow($0, isLive: true) }
                 }
             }
             if !favourites.isEmpty {
-                Section("Favourites") {
+                Section("Favourites", isExpanded: $favouritesExpanded) {
                     ForEach(favourites) { projectRow($0, isLive: false) }
                 }
             }
-            Section {
+            Section(isExpanded: $projectsExpanded) {
                 ForEach(others) { projectRow($0, isLive: false) }
             } header: {
-                // macOS gives a Section header its small-caps styling and a
-                // collapse control on hover, but there is no API for putting
-                // anything else in one — so the plus has to match the header by
-                // hand. Same secondary colour, same weight as the label beside
-                // it, and revealed on hover the way the system's own control is.
+                // The system styles the automatic label but not content given
+                // to it, so the plus matches by hand: same secondary colour and
+                // weight as the label, revealed on hover like the chevron.
                 HStack(spacing: 0) {
                     Text("Projects")
                     Spacer(minLength: 0)
