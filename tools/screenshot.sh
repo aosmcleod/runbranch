@@ -12,7 +12,7 @@
 # taking focus five times a run makes the machine unusable alongside — so set
 # RB_SHOT_QUIET for that, and accept inactive-looking chrome.
 #
-# The app photographs its own window (see Screenshot in app/RunBranch.swift).
+# The app photographs its own window (see app/Screenshot.swift).
 # It needs Screen Recording permission, which macOS will not prompt for on a
 # binary launched from a terminal. Grant it by hand, once:
 #   System Settings > Privacy & Security > Screen Recording > + > Runbranch.app

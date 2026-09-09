@@ -57,7 +57,7 @@ bugs live, and this project has better evidence than guesses. Examples:
 ## Before committing
 
 ```bash
-./tools/lint.sh && ./tests/engine.sh && swiftc -parse-as-library -O app/RunBranch.swift -o /tmp/rb
+./tools/lint.sh && ./tests/engine.sh && swiftc -parse-as-library -O app/*.swift -o /tmp/rb
 ```
 
 Roughly 40 seconds, most of it the lifecycle test starting and stopping a

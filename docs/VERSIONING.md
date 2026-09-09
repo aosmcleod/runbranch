@@ -10,7 +10,9 @@ of view of someone whose projects it runs.
 | **Patch** | A fix, a message, a document. Nothing new to learn |
 
 The version lives in one place — `CFBundleShortVersionString` and
-`CFBundleVersion` in `make-app.sh` — and is what About shows.
+`CFBundleVersion` in `make-app.sh` — and is what About shows. `make-dmg.sh`
+reads it back out of the built bundle rather than repeating it, so the file
+name and the About panel cannot disagree.
 
 ## What counts as breaking
 
@@ -27,12 +29,21 @@ a minor release.
 
 ## Releasing
 
-1. `./tools/lint.sh && ./tests/engine.sh && ./tests/ui.sh` — all green
+1. Bump both version keys in `make-app.sh`
 2. `./make-app.sh` — builds and signs
-3. Bump both version keys in `make-app.sh`
-4. Update `CHANGELOG.md`: what changed, and for a major, what to do about it
-5. Commit as `Release vX.Y.Z`, tag `vX.Y.Z`, push the tag
-6. `./tools/screenshot.sh` if the window changed, so the README matches the app
+3. `./tools/lint.sh && ./tests/engine.sh && ./tests/ui.sh` — all green.
+   If `ui.sh` reports SKIPPED, the render was not checked: grant this build
+   Screen Recording and run it again before releasing
+4. `./tools/screenshot.sh` if the window changed, so the README matches the app
+5. Update `CHANGELOG.md`: what changed, and for a major, what to do about it
+6. Commit as `Release vX.Y.Z`, tag `vX.Y.Z`, push both
+7. `./make-dmg.sh` — packages, verifies, and mounts the image to check the
+   signature survived
+8. `gh release create vX.Y.Z --notes-file …` and upload the disk image, because
+   a release with no artifact is a tag
+
+A release nobody can install is not a release, which is why the disk image is a
+step rather than an afterthought.
 
 ## Pre-1.0 and 1.0
 

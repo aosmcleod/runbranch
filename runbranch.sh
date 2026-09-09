@@ -26,7 +26,7 @@
 #   ~/.runbranch/<project>/worktrees/<branch>/   <- throwaway
 #
 # This script is the ENGINE. Its only UI is a plain terminal picker; the front
-# end is "runbranch.app" (app/RunBranch.swift), which runs this as
+# end is "runbranch.app" (the Swift sources in app/), which runs this as
 # a subprocess and streams its output into a window. Every message here is
 # written to be read by a person either way.
 #

@@ -19,7 +19,7 @@ No package manager, no project file, no dependencies to install.
 
 ```
 runbranch.sh          the engine. bash 3.2, no UI of its own
-app/RunBranch.swift   the front end. A window over the engine
+app/                  the front end. A window over the engine, one file per area
 projects/*.conf       one file per project
 tools/                trim/centre, crop, demo data, screenshots, lint
 tests/engine.sh       engine tests

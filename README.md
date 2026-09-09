@@ -47,20 +47,27 @@ installed, servers started, and a window that tells you when it's actually up.
 
 ## Install
 
-You need the Xcode command line tools (`xcode-select --install`). Nothing else.
+Download the disk image from the [latest
+release](https://github.com/aosmcleod/runbranch/releases/latest) and drag
+Runbranch to Applications.
+
+Or build it, which takes about five seconds and needs only the Xcode command
+line tools (`xcode-select --install`):
 
 ```bash
 git clone https://github.com/aosmcleod/runbranch
 cd runbranch && ./make-app.sh && open .
 ```
 
-Drag `Runbranch.app` to the Dock.
-
-> [!NOTE]
-> The build is signed locally, not notarised, so the first launch needs
-> **right-click → Open** rather than a double-click. Notarising it would need an
-Apple Developer account; until then that prompt is the honest cost of building
-it yourself.
+> [!IMPORTANT]
+> Either way, the first launch is refused — macOS says it cannot check the app
+> for malicious software. The build is signed with a self-signed certificate
+> rather than a paid Apple Developer ID, which is a statement about the
+> certificate and not about the app. Open **System Settings → Privacy &
+> Security**, scroll to Security, and press **Open Anyway** on the line about
+> Runbranch. Once, then it opens normally. Removing that step needs
+> notarisation, which needs a paid Apple Developer account; it is on the
+> [roadmap](docs/ROADMAP.md) and not done.
 
 By default `make-app.sh` signs ad-hoc, which means a new identity on every
 build — and macOS ties privacy permissions to the signature, so anything you
@@ -284,14 +291,15 @@ and tell you when it's up.**
 
 ```
 runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
-app/RunBranch.swift   the front end
+app/                  the front end. One file per area; App.swift has @main
 projects/*.conf       one file per project (yours are gitignored)
 tests/engine.sh       engine tests; every case is a bug that really happened
+tests/ui.sh           app smoke test; the last two checks read the screen
 make-app.sh           builds Runbranch.app
+make-dmg.sh           packages it as dist/Runbranch-<version>.dmg
 make-icons.sh         the graphic set, rendered from assets/mark.svg
-assets/               the mark: colour PNG, and vectors for the mono templates
-tools/                svg render, icon processing, signing identity, demo, screenshots
 assets/mark.svg       the mark. Every raster asset is rendered from it
+tools/                svg render, icon processing, signing identity, demo, screenshots
 docs/config.md        every config key
 docs/TESTING.md       what is covered, what is not, and how to add a case
 docs/ROADMAP.md       what ships when, and why each item is worth doing

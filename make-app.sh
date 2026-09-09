@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build "Runbranch.app" -- the front end, compiled from
-# app/RunBranch.swift. All the actual work stays in runbranch.sh;
+# the Swift sources in app/. All the actual work stays in runbranch.sh;
 # the app runs it as a subprocess and streams it into a window.
 #
 # Needs only the Xcode command line tools (swiftc) plus sips and iconutil,
@@ -68,8 +68,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key>              <string>Runbranch</string>
   <key>CFBundleDisplayName</key>       <string>Runbranch</string>
   <key>CFBundleIdentifier</key>        <string>dev.runbranch.app</string>
-  <key>CFBundleVersion</key>           <string>1.0.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key>           <string>1.0.1</string>
+  <key>CFBundleShortVersionString</key><string>1.0.1</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>CFBundleExecutable</key>        <string>RunBranch</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>

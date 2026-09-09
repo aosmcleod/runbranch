@@ -3,6 +3,32 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.0.1
+
+**A release you can install**
+
+- `make-dmg.sh` packages the app as a verified disk image and checks the
+  signature survived, so the release has something in it. 1.0.0 was a tag
+- The disk image says how to get past Gatekeeper, since a self-signed build is
+  refused on a machine that did not build it and otherwise just looks broken
+
+**Fixed**
+
+- The default-branch badge was tinted with the accent colour, which is what
+  fills a selected row, so it disappeared when selected
+
+**Under it**
+
+- The app's single 3,591-line source is now ten files, and the main view holds
+  20 pieces of state rather than 31. Five sheets and a loose title string
+  became one value, because only one sheet can be up at a time and the old
+  shape could represent six at once
+- A set computed on every port sweep and read nowhere is gone. It lost its only
+  consumer when the port alert icon came out
+- The app smoke test reads its own window through Vision text recognition, so a
+  stale render fails the suite. It was written for a bug where the app thought
+  correctly and drew something else, and until now it could not see that
+
 ## 1.0.0
 
 First published version. Built over several weeks before this point; the
