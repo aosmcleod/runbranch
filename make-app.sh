@@ -39,6 +39,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # app tile is redundant and its light backing sits badly on a dark splash.
 cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
 
+# The engine, inside the bundle.
+#
+# The app used to find it through an absolute path written into Info.plist at
+# build time, which works on the machine that built it and nowhere else — a
+# copy handed to anyone else would launch and find no engine at all. Bundling
+# it also means the app under test is the app that ships.
+cp "$REPO/runbranch.sh" "$APP/Contents/Resources/runbranch.sh"
+chmod +x "$APP/Contents/Resources/runbranch.sh"
+
 # Menu bar template glyph, from the seamed vector: the two petals and the lens
 # where they cross are separate paths, so the silhouette reads as two shapes
 # rather than one blob. The solid version is also here
@@ -51,8 +60,6 @@ swiftc -parse-as-library -O "$SOURCE" -o "$APP/Contents/MacOS/RunBranch"
 echo "    binary built"
 
 # --- Info.plist -----------------------------------------------------------
-# FLScriptPath is how the app finds its engine. Baked at build time; re-run
-# make-app.sh if the repo moves.
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -76,7 +83,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <dict>
     <key>NSAllowsLocalNetworking</key>  <true/>
   </dict>
-  <key>FLScriptPath</key>              <string>$SCRIPT</string>
 </dict>
 </plist>
 PLIST

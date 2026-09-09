@@ -550,12 +550,28 @@ struct PortRow: Identifiable {
 /// So resolve the login environment exactly once, with a deadline, and run the
 /// script directly from then on.
 enum Engine {
+    /// The engine, which ships inside the bundle.
+    ///
+    /// It used to be found through an absolute path written into Info.plist at
+    /// build time, falling back to a guess at ~/Development/runbranch. Both
+    /// only ever worked on the machine that did the building: a copy given to
+    /// anyone else would launch and find nothing to run.
+    ///
+    /// RB_ENGINE overrides it, for pointing a built app at a working copy
+    /// without rebuilding.
     static var scriptPath: String {
-        if let p = Bundle.main.object(forInfoDictionaryKey: "FLScriptPath") as? String,
-           FileManager.default.isExecutableFile(atPath: p) {
-            return p
+        let fm = FileManager.default
+        if let override = ProcessInfo.processInfo.environment["RB_ENGINE"],
+           fm.isExecutableFile(atPath: override) {
+            return override
         }
-        return NSHomeDirectory() + "/Development/runbranch/runbranch.sh"
+        if let bundled = Bundle.main.url(forResource: "runbranch", withExtension: "sh"),
+           fm.isExecutableFile(atPath: bundled.path) {
+            return bundled.path
+        }
+        // Nothing to run. Say so rather than failing later with a confusing
+        // error from every engine call.
+        return Bundle.main.bundlePath + "/Contents/Resources/runbranch.sh"
     }
 
     /// The user's login shell environment, read once. Interactive, because

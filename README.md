@@ -294,8 +294,7 @@ tools/                icon processing, signing identity, demo data, screenshots
 docs/config.md        every config key
 docs/TESTING.md       what is covered, what is not, and how to add a case
 docs/ROADMAP.md       what ships when, and why each item is worth doing
-docs/PLAN.md          design notes
-docs/VISION.md        the README the tool should earn
+docs/VERSIONING.md    what the version numbers mean
 ```
 
 Nothing generated is committed. `Runbranch.app`, `build/` and `demo/` are all

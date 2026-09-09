@@ -46,8 +46,11 @@ bugs live, and this project has better evidence than guesses. Examples:
   in [ROADMAP.md](ROADMAP.md).
 - **The install path.** `pnpm install` against a real registry is slow and
   network-dependent; the fixture uses `python3 -m http.server` instead.
-- **Per-run databases.** Needs a live Postgres. Covered manually against
-  Studio, and the result recorded in `PLAN.md`.
+- **Per-run databases.** Needs a live Postgres, so it is verified by hand
+  rather than in the suite. The check that matters: run a branch whose
+  migrations differ from the shared database and confirm the two diverge. Done
+  against a real project — the run database took the branch's 169 migrations
+  while the shared one kept its 173, which is the whole point of the feature.
 - **`gh` interaction.** The PR cache is seeded directly in tests and in the
   demo, so nothing here needs a GitHub token.
 

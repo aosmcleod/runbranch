@@ -4,8 +4,10 @@ A pipeline rather than a wishlist: what ships in v1, what earns a point
 release, and what is a year out. Each item says why it is worth doing, because
 an idea with no reason behind it tends to get built badly.
 
-Written 2026-09-06, revised 2026-09-08. `PLAN.md` holds the design notes this
-came out of; `VISION.md` holds the README the tool should earn.
+Written 2026-09-06, revised through publication. The design notes and the
+aspirational README this came out of are in the git history — they described
+building the thing rather than the thing, and the README covers what exists
+while this covers what does not.
 
 The revision is not a re-plan. Menus and menu bar mode shipped, so they are
 marked as such; and two days of building surfaced one thing the original list
