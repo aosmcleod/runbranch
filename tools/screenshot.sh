@@ -34,6 +34,18 @@ DEMO_ENV=(RB_PROJECTS_DIR="$REPO/demo/projects" RB_HOME="$REPO/demo/state" RB_NO
 demo_down() {
   env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" stop northwind-web >/dev/null 2>&1 || true
 }
+# Captures must not depend on how the app was last configured. A menu bar item
+# is a window too, and it stretched one crop from 1140x860 to 2174x1720.
+SAVED_PRESENTATION="$(defaults read dev.runbranch.app presentation 2>/dev/null || echo)"
+defaults write dev.runbranch.app presentation dock
+restore_presentation() {
+  if [ -n "$SAVED_PRESENTATION" ]; then
+    defaults write dev.runbranch.app presentation "$SAVED_PRESENTATION"
+  else
+    defaults delete dev.runbranch.app presentation 2>/dev/null || true
+  fi
+}
+
 echo "==> starting the demo run so health and uptime are real"
 demo_down
 env "${DEMO_ENV[@]}" "$REPO/runbranch.sh" run northwind-web feat/checkout-summary web \
@@ -47,7 +59,7 @@ for _ in $(seq 1 30); do
 done
 curl -sfo /dev/null "http://localhost:4173/" \
   || echo "  !! port 4173 never answered; health will read as starting" >&2
-trap 'demo_down; rm -rf "$EMPTY"' EXIT
+trap 'demo_down; restore_presentation; rm -rf "$EMPTY"' EXIT
 
 # Onboarding has to be shot against an empty config directory, since the
 # welcome screen only appears when nothing is declared.
@@ -69,7 +81,11 @@ shoot() {  # file, scene, projects-dir, state-dir
   # until it is killed. The old pattern missed plain instances, so a single
   # stray one silently broke every capture that followed.
   pkill -f 'Runbranch.app/Contents/MacOS/RunBranch' 2>/dev/null
-  /bin/sleep 0.4
+  # Long enough for the window server to actually let go. At 0.4s the first
+  # capture after a rebuild failed while a retry of the same scene worked,
+  # which is the signature of racing the previous instance rather than of
+  # anything being wrong with the capture.
+  /bin/sleep 1.5
   rm -f "$OUT/$file"
   # Launch through LaunchServices, not by exec'ing Contents/MacOS/RunBranch.
   # Exec'ing it proved unreliable: the process starts, never creates a window,

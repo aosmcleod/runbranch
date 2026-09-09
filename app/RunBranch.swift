@@ -30,6 +30,14 @@ struct Branch: Identifiable, Hashable {
     /// The pull request title, or the tip commit's subject when there is none.
     let subject: String
     let isRemote: Bool
+    /// Where this branch is checked out, when that is a worktree someone made
+    /// themselves. Empty otherwise. Git will not check one branch out twice, so
+    /// this is also why an in-place run of it is not on offer.
+    let checkedOutAt: String
+
+    /// Runnable in place — in the real checkout, with whatever is in the
+    /// working tree right now, rather than from a snapshot.
+    var canRunInPlace: Bool { isCurrent && !isRemote }
 
     var id: String { ref }
     var display: String { isRemote ? String(ref.dropFirst("origin/".count)) : ref }
@@ -50,6 +58,7 @@ struct Branch: Identifiable, Hashable {
         prNumber = f.count > 9 ? f[9] : ""
         subject = f.count > 10 ? f[10] : ""
         isRemote = f.count > 11 && f[11] == "1"
+        checkedOutAt = f.count > 12 ? f[12] : ""
     }
 }
 
@@ -136,6 +145,9 @@ struct RunState {
     var started = ""
     var epoch: TimeInterval = 0
     var worktree = ""
+    /// Running in the real checkout rather than a worktree, so what is served
+    /// is whatever is on disk — uncommitted work included.
+    var inPlace = false
     var targets: [RunTarget] = []
 
     static let idle = RunState()
@@ -152,6 +164,7 @@ struct RunState {
                 ref = f[1]; preset = f[2]; started = f[3]
                 epoch = TimeInterval(f[4]) ?? 0
                 worktree = f[5]
+                inPlace = f.count > 6 && f[6] == "1"
             case "target" where f.count >= 6:
                 targets.append(RunTarget(name: f[1],
                                          port: Int(f[2]) ?? 0,
@@ -283,6 +296,7 @@ struct PendingRun: Identifiable {
     let ref: String
     let preset: String
     let title: String
+    let inPlace: Bool
     let conflict: PortConflict
     var id: String { project + ref + preset }
 }
@@ -839,6 +853,14 @@ struct RunStrip: View {
             Text(worst.label.capitalized)
                 .font(.system(size: 13, weight: .medium))
 
+            // Which kind of run this is, because the two behave differently in
+            // the way that matters: a worktree run is a snapshot and will not
+            // see your edits, an in-place run is your checkout and will.
+            if state.inPlace {
+                Badge(text: "in place", symbol: "pencil", color: .orange)
+                    .help("Running your checkout — edits and uncommitted work are live")
+            }
+
             // TimelineView keeps the tick inside this label. Driving it from
             // ContentView re-rendered the whole detail every second, which
             // rebuilt the toolbar menus and dismissed any open submenu.
@@ -906,6 +928,16 @@ struct BranchRow: View {
                         Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color, onSelection: isSelected)
                     }
                     Badge(text: branch.owner, onSelection: isSelected)
+                    // What is actually being worked on. This is the branch your
+                    // checkout is sitting on, so it is the one whose edits are
+                    // live on disk — and the only one that can be run in place.
+                    if branch.isCurrent {
+                        Badge(text: "checked out", symbol: "pencil",
+                              color: .orange, onSelection: isSelected)
+                    } else if !branch.checkedOutAt.isEmpty {
+                        Badge(text: "in another worktree", symbol: "arrow.triangle.branch",
+                              color: .purple, onSelection: isSelected)
+                    }
                     if !isLive && branch.ready {
                         Badge(text: "ready", symbol: "bolt.fill", color: .green, onSelection: isSelected)
                     }
@@ -1316,10 +1348,16 @@ enum Screenshot {
                 filter = SCContentFilter(display: display,
                                          including: [me],
                                          exceptingWindows: [])
-                // Union of our windows, padded so the drop shadow is not
-                // sheared off, then clamped to the display.
-                let union = ourWindows.dropFirst().reduce(
-                    ourWindows.first?.frame ?? target.frame) { $0.union($1.frame) }
+                // Union of the target and whatever is presented OVER it —
+                // sheets overlap their parent, a status item in the menu bar
+                // does not. Unioning everything the process owns stretched the
+                // crop from 1140x860 to 2174x1720 to take in a 38x34 window up
+                // by the clock.
+                let overlapping = ourWindows.filter {
+                    $0.frame.intersects(target.frame) || $0.windowID == target.windowID
+                }
+                let union = overlapping.dropFirst().reduce(
+                    overlapping.first?.frame ?? target.frame) { $0.union($1.frame) }
                 region = union.insetBy(dx: -70, dy: -70)
                     .intersection(CGRect(origin: .zero, size: display.frame.size))
             } else {
@@ -1847,10 +1885,10 @@ struct WelcomeView: View {
                     .padding(.bottom, 16)
             }
             Text("Runbranch").font(.system(size: 24, weight: .semibold))
-            Text("Run a branch that isn't the one you're working on.")
+            Text("Run any branch of any project, on a real port.")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary)
                 .padding(.top, 4)
-            Text("On a real port, beside your work, without touching your checkout.")
+            Text("Isolated in a throwaway worktree, or in place in your checkout.")
                 .font(.system(size: 11.5)).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.top, 2)
@@ -2229,6 +2267,13 @@ struct ContentView: View {
                             Divider()
                         }
                     }
+                    if let b = selectedBranch, let p = selectedProject, b.canRunInPlace {
+                        Button("Run in place (uses your checkout)…") {
+                            startChecking(p, b.ref, preset, "Running \(b.ref) in place",
+                                          inPlace: true)
+                        }
+                        Divider()
+                    }
                     Button("Add project…") { addProject() }
                     Divider()
                     Button("Open logs in Finder") { openLogs() }
@@ -2430,7 +2475,7 @@ struct ContentView: View {
     /// and the failure could not offer to fix itself because by then it was
     /// just text in a log.
     private func startChecking(_ project: String, _ ref: String, _ preset: String,
-                               _ title: String) {
+                               _ title: String, inPlace: Bool = false) {
         Task {
             let result = await Task.detached {
                 Engine.capture(["check-ports", project, preset])
@@ -2438,11 +2483,19 @@ struct ContentView: View {
             if result.code != 0, let conflict = PortConflict.parse(result.out) {
                 pendingRun = PendingRun(project: project, ref: ref,
                                         preset: preset, title: title,
-                                        conflict: conflict)
+                                        inPlace: inPlace, conflict: conflict)
             } else {
-                run(["run", project, ref, preset], title)
+                run(runArgs(project, ref, preset, inPlace: inPlace), title)
             }
         }
+    }
+
+    private func runArgs(_ project: String, _ ref: String, _ preset: String,
+                         inPlace: Bool, offset: Int? = nil) -> [String] {
+        var args = ["run", project, ref, preset]
+        if let offset { args.append(String(offset)) }
+        if inPlace { args.append("--in-place") }
+        return args
     }
 
     /// Stop whatever of ours holds the ports, then start. The engine refuses to
@@ -2462,15 +2515,16 @@ struct ContentView: View {
                 }
             }
             await syncProjectList()
-            run(["run", pending.project, pending.ref, pending.preset], pending.title)
+            run(runArgs(pending.project, pending.ref, pending.preset,
+                        inPlace: pending.inPlace), pending.title)
         }
     }
 
     private func resolveByShifting(_ pending: PendingRun) {
         let offset = pending.conflict.freeOffset
         pendingRun = nil
-        run(["run", pending.project, pending.ref, pending.preset, String(offset)],
-            pending.title)
+        run(runArgs(pending.project, pending.ref, pending.preset,
+                    inPlace: pending.inPlace, offset: offset), pending.title)
     }
 
     private func run(_ args: [String], _ title: String) {

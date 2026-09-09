@@ -2,8 +2,9 @@
 
 # Runbranch
 
-**Run a branch that isn't the one you're working on.** On a real port, beside
-your work, without touching your checkout.
+**Run any branch of any project, on a real port.** Isolated by default — a
+throwaway git worktree, so your checkout is never touched. Or in place, in the
+checkout itself, when what you want to see is what you are typing.
 
 A native macOS app for the thing every developer improvises badly.
 
@@ -115,17 +116,28 @@ worktree, install, infrastructure, migrations, seed, servers. It closes itself
 when the thing is up and stays put when it isn't — which is the only moment the
 log matters.
 
-**A snapshot, not a live view.** A run is a separate copy of the repository at
-one commit, in its own directory under `~/.runbranch`. That is what keeps it
-away from your checkout — and it cuts both ways: **edits you make in your
-checkout do not reach a running demo**, and neither do new commits on the
-branch. The server is watching a different directory, so its hot reload has
-nothing to react to. Start the branch again to pick up whatever is newest.
-(*Refresh* re-reads pull request metadata, not code.)
+**Two kinds of run, and the difference matters.**
 
-If you want a server watching the files you are editing, run it yourself in
-your checkout — that is what `npm run dev` is for. Runbranch is for the other
-thing: a branch that isn't the one you're working on.
+A **worktree run** is the default and the interesting one: a separate copy of
+the repository at one commit, in its own directory under `~/.runbranch`. That
+is what keeps it away from your checkout — and it cuts both ways. Edits you
+make in your checkout do not reach it, and neither do new commits on the
+branch; the server is watching a different directory, so its hot reload has
+nothing to react to. Start it again to pick up whatever is newest. (*Refresh*
+re-reads pull request metadata, not code.)
+
+An **in-place run** uses the checkout itself, so what you see is what is on
+disk — uncommitted work included. It is offered only for the branch your
+checkout is actually on, because git will not have a branch checked out twice.
+It starts your servers and manages their ports, health and logs, and does
+nothing else: no install, no copied files, no per-run database. Those all write
+somewhere, and not writing to your checkout is the promise the rest of this
+depends on.
+
+The app says which is which. A branch your checkout is on is badged **checked
+out**; one sitting in a worktree you made yourself is badged accordingly, since
+it cannot be checked out twice; and a live in-place run is badged **in place**
+next to its uptime.
 
 **Data that doesn't leak between branches.** Two branches with divergent
 migrations need not share a database. A project can declare one per run, seeded
@@ -161,6 +173,8 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ```bash
 ./runbranch.sh                          # interactive
 ./runbranch.sh run studio main both
+./runbranch.sh run studio main both --in-place    # the checkout, not a worktree
+./runbranch.sh run studio main both 1             # shift every port by 1
 ./runbranch.sh stop studio
 ./runbranch.sh status                   # every project
 ./runbranch.sh doctor                   # check every config resolves
@@ -197,8 +211,8 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
   real database, and not waiting on a build queue;
 - a sharing tool — what's running is on your machine, for you.
 
-Runbranch does the narrow thing none of them do: **put a branch on a port, and
-tell you when it's up.**
+Runbranch does the narrow thing none of them do: **put any branch on a port,
+and tell you when it's up.**
 
 ---
 

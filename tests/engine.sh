@@ -65,7 +65,7 @@ is "marks the default branch"  "$("$ENGINE" branches fixture | awk -F'\t' '$1=="
 is "attributes them to me"     "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $4}')" "me"
 # Regression: `git for-each-ref` does not interpret \t, so the row used to
 # collapse into a single field.
-is "row has every column"      "$("$ENGINE" branches fixture | head -1 | awk -F'\t' '{print NF}')" "12"
+is "row has every column"      "$("$ENGINE" branches fixture | head -1 | awk -F'\t' '{print NF}')" "13"
 has "carries the commit subject" "$("$ENGINE" branches fixture | awk -F'\t' '$1=="feature/one"{print $11}')" "a second commit"
 
 echo "==> set preserves the file"
@@ -145,6 +145,65 @@ is "the state file lingers"    "$([ -f "$RB_HOME/fixture/state" ] && echo yes)" 
 is "state reports idle"        "$("$ENGINE" state fixture)" "idle"
 "$ENGINE" reclaim fixture >/dev/null 2>&1
 is "reclaim removes the file"  "$([ -f "$RB_HOME/fixture/state" ] && echo yes || echo no)" "no"
+
+echo "==> an in-place run uses the checkout, and only starts servers"
+# The point of in-place is that uncommitted work is live, so the assertion is
+# that a file written in the checkout and never committed is served.
+git -C "$FIX" checkout -q main
+printf 'uncommitted\n' > "$FIX/public/scratch.txt"
+cat > "$RB_PROJECTS_DIR/inplace.conf" <<CONF
+NAME="In Place"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+INSTALL="false"
+TARGETS="web:4981:/:python3 -m http.server {port} --directory public"
+CONF
+# INSTALL is deliberately `false`: if an in-place run ever runs it, the run
+# fails and this test says so.
+"$ENGINE" run inplace main web --in-place >/dev/null 2>&1
+is "starts without running INSTALL" "$?" "0"
+is "serves uncommitted work" \
+   "$(curl -sf http://localhost:4981/scratch.txt 2>/dev/null | tr -d '\n')" "uncommitted"
+is "state records the mode"   "$(grep -c '^IN_PLACE=1$' "$RB_HOME/inplace/state" 2>/dev/null)" "1"
+is "state points at the checkout" \
+   "$(grep '^WORKTREE=' "$RB_HOME/inplace/state" | cut -d= -f2-)" "$FIX"
+is "and made no worktree"     "$([ -d "$RB_HOME/inplace/worktrees" ] && ls "$RB_HOME/inplace/worktrees" | wc -l | tr -d ' ' || echo 0)" "0"
+"$ENGINE" stop inplace >/dev/null 2>&1
+sleep 1
+curl -sfo /dev/null http://localhost:4981/ 2>/dev/null
+is "stop really stops it"     "$?" "7"
+# Never the checkout: the working tree and its untracked files must survive.
+is "the checkout is intact"   "$([ -f "$FIX/public/scratch.txt" ] && echo yes || echo no)" "yes"
+is "and still on its branch"  "$(git -C "$FIX" rev-parse --abbrev-ref HEAD)" "main"
+
+echo "==> in-place refuses a branch the checkout is not on"
+OFFBR="$("$ENGINE" run inplace feature/one web --in-place 2>&1)" || true
+has "says what is checked out" "$OFFBR" "has main checked out"
+has "offers the way forward"   "$OFFBR" "git switch"
+rm -f "$RB_PROJECTS_DIR/inplace.conf" "$FIX/public/scratch.txt"
+rm -rf "$RB_HOME/inplace"
+
+echo "==> branches say where they are checked out"
+# Field 9 is the checkout branch, field 13 a worktree someone made themselves.
+# git will not let one branch be checked out twice, so a branch sitting in
+# another worktree cannot be run from ours either — worth saying rather than
+# letting the run fail.
+git -C "$FIX" checkout -q -b "held/elsewhere" 2>/dev/null || true
+git -C "$FIX" checkout -q main
+OUTSIDE="$TMP/outside-worktree"
+git -C "$FIX" worktree add -q "$OUTSIDE" "held/elsewhere" 2>/dev/null
+
+ROWS="$("$ENGINE" branches fixture 2>/dev/null)"
+CUR_ROW="$(printf '%s\n' "$ROWS" | awk -F'\t' '$1=="main"{print $9}')"
+is "the checkout branch is flagged" "$CUR_ROW" "1"
+ELSEWHERE="$(printf '%s\n' "$ROWS" | awk -F'\t' '$1=="held/elsewhere"{print $13}')"
+has "a foreign worktree is reported" "$ELSEWHERE" "outside-worktree"
+# Our own worktrees must not be reported as foreign, or every branch we have
+# ever run would look like it was checked out somewhere else.
+OURS="$(printf '%s\n' "$ROWS" | awk -F'\t' '$1=="feature/one"{print $13}')"
+is "our own worktrees are not" "$OURS" ""
+
+git -C "$FIX" worktree remove --force "$OUTSIDE" 2>/dev/null || true
 
 echo "==> a shifted run tells the server where to listen"
 # Two routes, because a config cannot be assumed to have anticipated a shift:

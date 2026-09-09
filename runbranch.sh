@@ -168,6 +168,7 @@ expand_repo() { case "$REPO" in "~"*) REPO="$HOME${REPO#\~}" ;; esac; }
 # in-repo file and the local one both start from the same place.
 reset_project_defaults() {
   PORT_OFFSET=0
+  IN_PLACE=0
   NAME=""; REPO=""; DEFAULT_BRANCH="main"; INSTALL=""; COPY_FILES=""
   COMPOSE_FILE="docker-compose.yml"; COMPOSE_PROJECT=""; COMPOSE_SERVICES=""
   MIGRATE=""; SEED=""; TARGETS=""; ALWAYS=""; PRESETS=""; OPENS_ITSELF=0; SYMBOL=""
@@ -290,6 +291,9 @@ list_projects() {
 # depend on survives: api 4000 and web 3000 become 4001 and 3001, not 4001 and
 # 4002.
 PORT_OFFSET=0
+
+# Run in the real checkout rather than a worktree. See do_run.
+IN_PLACE=0
 
 # The port a target actually listens on, as opposed to the one it declares.
 # Runtime paths use this; `doctor` reports the declared one, since that is what
@@ -455,10 +459,36 @@ ensure_pr_cache() {
 # Local branches first, then remote-tracking branches with no local twin —
 # reviewing a colleague's pull request is the whole use case, and it does not
 # start with a local branch.
+# Branches checked out in a worktree that is not ours.
+#
+# `git worktree list` reports the main checkout and every linked worktree,
+# including the ones Runbranch made. The interesting ones are the others: a
+# worktree the user set up themselves is somewhere they may be working, and a
+# branch checked out there cannot be checked out anywhere else — git will not
+# allow it — so it is worth saying so rather than letting a run fail.
+#
+# Emits " ref|path ref|path " for lookup, with the main checkout and our own
+# worktrees left out.
+foreign_worktrees() {
+  repo_git worktree list --porcelain 2>/dev/null | awk -v ours="$WORKTREES" -v repo="$REPO" '
+    /^worktree /  { path = substr($0, 10); next }
+    /^branch /    {
+      ref = substr($0, 8)
+      sub(/^refs\/heads\//, "", ref)
+      if (path == repo) next                       # the checkout itself
+      if (index(path, ours) == 1) next             # one of ours
+      printf " %s|%s", ref, path
+      next
+    }
+  '
+  printf ' '
+}
+
 collect_branch_data() {
-  local out="$1" now ready_slugs dir cur
+  local out="$1" now ready_slugs dir cur foreign
   now=$(date +%s)
   cur=$(current_branch)
+  foreign="$(foreign_worktrees)"
   ensure_pr_cache
 
   ready_slugs=' '
@@ -481,7 +511,7 @@ collect_branch_data() {
       refs/remotes/origin 2>/dev/null
   } | awk -F'\t' -v OFS='\t' \
         -v now="$now" -v emails="$MY_EMAILS" -v ready="$ready_slugs" \
-        -v cur="$cur" -v defbr="$DEFAULT_BRANCH" '
+        -v cur="$cur" -v defbr="$DEFAULT_BRANCH" -v foreign="$foreign" '
     function age(ts,   d) {
       d = now - ts
       if (d < 3600)    return int(d / 60) "m"
@@ -496,6 +526,18 @@ collect_branch_data() {
       return 0
     }
     function firstname(w,   p) { split(w, p, " "); return p[1] }
+    # The path a branch is checked out in, when that is a worktree someone set
+    # up themselves rather than ours or the checkout. No apostrophes in here:
+    # the awk program is single-quoted, so one would end it early.
+    function elsewhere(ref,   i, n, p, q) {
+      n = split(foreign, p, " ")
+      for (i = 1; i <= n; i++) {
+        if (p[i] == "") continue
+        split(p[i], q, "|")
+        if (q[1] == ref) return q[2]
+      }
+      return ""
+    }
     $1 == "P" { pr[$2] = $3; num[$2] = $4; title[$2] = $5; next }
     function emit(ref, key, email, ts, who, subject, isRemote,   isMine) {
       isMine = mine(email)
@@ -505,7 +547,7 @@ collect_branch_data() {
             (ref == defbr ? 1 : 0), (ref == cur ? 1 : 0), \
             ((key in num) ? num[key] : ""), \
             ((key in title) ? title[key] : subject), \
-            isRemote
+            isRemote, elsewhere(ref)
     }
     $1 == "B" { seen[$2] = 1; emit($2, $2, $3, $4, $5, $6, 0); next }
     $1 == "R" {
@@ -1092,6 +1134,7 @@ write_state() {
     printf 'TARGETS=%s\n'  "$4"
     printf 'PIDS=%s\n'     "$5"
     printf 'PORT_OFFSET=%s\n' "$PORT_OFFSET"
+    printf 'IN_PLACE=%s\n' "$IN_PLACE"
     printf 'STARTED=%s\n'  "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'EPOCH=%s\n'    "$(date +%s)"
   } >"$STATE_FILE"
@@ -1099,10 +1142,12 @@ write_state() {
 
 load_state() {
   S_REF=''; S_WORKTREE=''; S_PRESET=''; S_TARGETS=''; S_PIDS=''; S_STARTED=''; S_EPOCH=0
-  # PORT_OFFSET is deliberately NOT reset here. load_project already zeroes it,
+  # PORT_OFFSET and IN_PLACE are deliberately NOT reset here. load_project
+  # already zeroes both,
   # and do_run reads state (through demo_running) AFTER the caller has asked for
-  # an offset — resetting it here silently discarded the request and the run
-  # then checked, and started on, the declared ports.
+  # a mode — resetting them here silently discards the request. It cost the port
+  # offset once and then --in-place a second time: the flag was set, the state
+  # read wiped it, and the run went to a worktree while reporting success.
   [ -f "$STATE_FILE" ] || return 1
   local line key val
   while IFS= read -r line || [ -n "$line" ]; do
@@ -1114,6 +1159,7 @@ load_state() {
       # Restore the offset the run was started with, so stop, status and health
       # look at the ports it is really on rather than the declared ones.
       PORT_OFFSET) PORT_OFFSET="$val" ;;
+      IN_PLACE) IN_PLACE="$val" ;;
     esac
   done <"$STATE_FILE"
   return 0
@@ -1248,6 +1294,30 @@ do_run() {
   fi
 
   ensure_ports_free "$targets"
+
+  if [ "$IN_PLACE" = 1 ]; then
+    # In place: the servers run in the checkout, against whatever is in the
+    # working tree right now — uncommitted included. That is the point, and it
+    # is the one mode where hot reload sees what you are typing.
+    #
+    # Deliberately nothing else. No install, because that writes into a
+    # directory being worked in and can move a lockfile. No copied files,
+    # because they are already there. No per-run database, because that works
+    # by rewriting COPY_FILES, which here would mean editing a real .env.local
+    # — and never modifying the checkout is the promise the rest of the tool is
+    # built on. Infrastructure is left alone for the same reason: whatever the
+    # checkout is already pointed at is what it gets.
+    [ "$ref" = "$(current_branch)" ] || die \
+      "$REPO has $(current_branch) checked out, not $ref." \
+      "cd $REPO && git switch $ref      # or run it from a worktree instead"
+    WORKTREE="$REPO"
+    step "In place   $REPO"
+    info "the checkout as it stands, uncommitted work included"
+    warn "no install, no copied files, no per-run database"
+    start_run "$WORKTREE" "$ref" "$preset" "$targets"
+    return
+  fi
+
   prepare_worktree "$ref"
   install_deps      "$WORKTREE"
   bring_up_infra    "$WORKTREE"
@@ -1838,8 +1908,9 @@ Runbranch — run any local project from a throwaway git worktree.
   runbranch.sh get <project>                   every editable field
   runbranch.sh set <project> <KEY> [value]     rewrite one key in the local conf
   runbranch.sh paths <project> [<ref>]
-  runbranch.sh run <p> <ref> <preset> [offset]
-                                       offset shifts every port in the run
+  runbranch.sh run <p> <ref> <preset> [offset] [--in-place]
+                                       offset shifts every port in the run;
+                                       --in-place uses the checkout, not a worktree
   runbranch.sh check-ports <p> <preset>
                                        what holds the ports, and a free offset
   runbranch.sh remove <project>        delete a project's config and state, never its repo
@@ -1909,8 +1980,8 @@ main() {
       local t pid
       need_project "${2:-}"
       if ! demo_running; then printf 'idle\n'; exit 0; fi
-      printf 'run\t%s\t%s\t%s\t%s\t%s\n' \
-        "$S_REF" "$S_PRESET" "$S_STARTED" "$S_EPOCH" "$S_WORKTREE"
+      printf 'run\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$S_REF" "$S_PRESET" "$S_STARTED" "$S_EPOCH" "$S_WORKTREE" "$IN_PLACE"
       # TARGETS and PIDS are written in the same order, so they zip.
       set -- $S_PIDS
       for t in $S_TARGETS; do
@@ -1934,18 +2005,24 @@ main() {
       load_project "$2"; remove_worktree_for "$3"
       ;;
     run)
-      # An optional fifth argument shifts every port in the run by that much,
-      # for when the declared ones are taken by another project.
-      [ $# -eq 4 ] || [ $# -eq 5 ] || { usage; exit 2; }
+      # run <project> <ref> <preset> [offset] [--in-place]
+      #
+      # offset shifts every port in the run, for when the declared ones are
+      # taken. --in-place runs in the checkout instead of a worktree.
+      [ $# -ge 4 ] || { usage; exit 2; }
       load_project "$2"
-      if [ $# -eq 5 ]; then
-        case "$5" in
-          ''|*[!0-9]*) die "Port offset must be a number, got \"$5\"." \
-            "$SELF run $2 $3 $4 1" ;;
+      local rp="$3" rpreset="$4"
+      shift 4
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --in-place) IN_PLACE=1 ;;
+          ''|*[!0-9]*) die "Unexpected argument \"$1\"." \
+            "$SELF run <project> <ref> <preset> [offset] [--in-place]" ;;
+          *) PORT_OFFSET="$1" ;;
         esac
-        PORT_OFFSET="$5"
-      fi
-      do_run "$3" "$4"
+        shift
+      done
+      do_run "$rp" "$rpreset"
       ;;
     check-ports)
       [ $# -eq 3 ] || { usage; exit 2; }

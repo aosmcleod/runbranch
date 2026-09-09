@@ -124,3 +124,25 @@ A config is sourced as shell, so it can run arbitrary code. That is the price
 of an engine you can read, and it is the same trust you already extend to a
 repo's `postinstall` scripts. Treat a config from a repo you do not trust the
 way you would treat that repo.
+
+## Worktree runs and in-place runs
+
+By default a run happens in a throwaway worktree: a separate copy of the
+repository at one commit, under `RB_HOME`. Everything in this reference
+applies to it.
+
+`--in-place` runs in the checkout instead, and is accepted only for the branch
+the checkout is on — git will not check a branch out twice. It starts the
+declared `TARGETS` and manages their ports, health and logs. It deliberately
+ignores everything that writes:
+
+| Key | In place |
+|---|---|
+| `INSTALL` | not run — it writes into a directory you are working in, and can move a lockfile |
+| `COPY_FILES` | not copied — they are already there |
+| `DB_URL_VARS` | no per-run database — the mechanism rewrites `COPY_FILES`, which here would mean editing your real config |
+| `MIGRATE`, `SEED` | not run, for the same reason: they act on whatever database the checkout already points at |
+| `COMPOSE_SERVICES` | left alone — whatever the checkout is pointed at is what it gets |
+
+So an in-place run is the servers, and nothing else. If a project needs any of
+the above to be usable, run it from a worktree.
