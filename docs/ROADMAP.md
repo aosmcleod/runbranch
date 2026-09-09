@@ -36,15 +36,14 @@ demo a colleague's branch without reading anything.
 | 1.7 | ✅ **Tests (engine)** — `tests/engine.sh`, 112 assertions, each remembering a real bug; `tools/lint.sh` for the mistake this file keeps making | Six engine bugs reached the app before this existed, and one of them ate a config file |
 | 1.8 | ✅ **Open-source guidelines** — CONTRIBUTING, CODE_OF_CONDUCT, TESTING, issue and PR templates | A repo without them asks every contributor to guess |
 | 1.6 | ✅ **Design and code review** — one duplicated engine block removed, dead code deleted, home abbreviation commonised; the structural half is 1.10 | Two months of accreted decisions want one pass |
-| 1.11 | ✅ **Publish it** — public at `aosmcleod/runbranch` under GPL-3.0, v1.0.0 tagged | Every other v1 item was justified by "it is going public". The release still has no installable artifact, which is [#3](https://github.com/aosmcleod/runbranch/issues/3) |
-| 1.10 | **Decompose ContentView** — [#1](https://github.com/aosmcleod/runbranch/issues/1). 918 lines and 31 state properties in one view, in a 3,504-line file | Both bugs behind 1.9 lived in this view's state wiring. Splitting it is where the next ones stop happening |
-| 1.9 | ⚠️ **A UI smoke test** — [#2](https://github.com/aosmcleod/runbranch/issues/2). `tests/ui.sh`, 8 assertions. Catches the duplicate window; does NOT catch the stale-render bug it was also written for | Half done, and the half it misses is recorded in the test file. Asserting the monitor passes while the render is stale — reintroducing that bug left the suite green. Catching it needs the drawn text, which neither an in-process accessibility walk nor System Events can reach |
+| 1.11 | ✅ **Publish it** — public at `aosmcleod/runbranch` under GPL-3.0, and v1.0.1 ships a verified disk image | Every other v1 item was justified by "it is going public". 1.0.0 was a tag with nothing attached, which failed the bar this section sets |
+| 1.10 | ✅ **Decompose ContentView** — ten files; 20 state properties rather than 31, with five sheets and a title string collapsed into one value | Both bugs behind 1.9 lived in this view's state wiring. A shape that could represent six open sheets at once is where the next one would have |
+| 1.9 | ✅ **A UI smoke test** — `tests/ui.sh`, 10 assertions, the last two read the window back through Vision text recognition | The eight state assertions pass with the stale-render bug reintroduced; the two that read the screen fail. That asymmetry is the whole point, and it is why the gap took a second attempt |
 
 ### Why 1.9
 
-The engine has 112 assertions. The app — around 3,500 lines of Swift — has
-eight, none of which can see what is drawn, and on 2026-09-08 that cost two
-real bugs:
+The engine has 112 assertions. The app had none, and on 2026-09-08 that cost
+two real bugs:
 
 - The run strip held the health monitor as a plain property rather than an
   `@ObservedObject`, so it never subscribed to changes and kept whatever it drew
@@ -60,32 +59,36 @@ was a second window. Both would have shipped.
 
 The lesson is not "write more tests" in general. It is specific: this app's
 state flows through `@Published` properties and window lifecycle, and both bugs
-were in that wiring rather than in logic a unit test would reach. A smoke test
-that launches the real app against the demo config and asserts four things
-about the result would have caught both, and the screenshot pipeline already
-does the hard part — it launches the app unattended and knows when it failed.
+were in that wiring rather than in logic a unit test would reach.
+
+The first attempt caught the duplicate window and missed the stale render
+entirely, because it asked the app what it thought and the app thought
+correctly. Closing it needed the pixels: the app photographs its own window
+through the capture path the documentation already used, runs text recognition
+over it, and reports what came back. That read needs the Screen Recording
+grant, so it skips loudly when it cannot look rather than passing.
 
 ### Why 1.10
 
 The review found the engine in reasonable shape — one duplicated block, since
-removed, and no dead functions. The app is the imbalance:
+removed, and no dead functions. The app was the imbalance: `ContentView` at 918
+lines and 31 state properties, inside a single file of 3,591 that had grown
+while sitting on this list.
 
-- `ContentView` is 918 lines with 31 state properties, in a file of 3,504 —
-  both larger than when this was written, which is the argument making itself.
-- `Screenshot` and `Engine` are cohesive and would move out cleanly;
-  `ProjectEditor` and `ScanSheet` are already separate types sharing one file
-  only by habit.
+"Nothing here is broken" turned out to be half right. Splitting the file was
+mechanical, but two of the state reductions were defects rather than tidying:
 
-Nothing here is broken, which is why it is 1.10 and not urgent. But it is the
-same place both bugs behind 1.9 lived — a view holding 23 pieces of state has
-no way to make an invalid combination unrepresentable, and the fix for the
-earlier "mixed data while switching projects" bug was exactly that: collapsing
-six independent properties into one atomically-swapped `ProjectSnapshot`.
+- Five sheets and a loose title string could all be raised at once, and a run
+  title could exist with no run sheet to put it on. They are one value now, and
+  raising one goes through a single function — which is also where the reason
+  for care lives: replacing a sheet inside one update leaves SwiftUI presenting
+  neither, and the "Run on N" path would have hit exactly that.
+- A set was computed on every port sweep and read nowhere, orphaned when the
+  port alert icon came out.
 
-The remaining state wants the same treatment, and the file wants splitting on
-the boundaries the MARK comments already draw. Doing it needs a quiet session
-rather than the end of a long one, because a mechanical-looking SwiftUI
-refactor is precisely the kind of change that silently alters behaviour.
+The precedent was already in the codebase: the earlier "mixed data while
+switching projects" bug was fixed by collapsing six independent properties into
+one atomically-swapped `ProjectSnapshot`.
 
 ---
 
