@@ -956,13 +956,6 @@ struct Badge: View {
     let text: String
     var symbol: String? = nil
     var color: Color = .secondary
-    /// A selected row is painted in the accent colour, so a badge that paints
-    /// itself the accent colour disappears into it — which is exactly what
-    /// happened to `default`. On selection every badge drops its own colour
-    /// and becomes translucent white, which reads against any accent the user
-    /// has chosen, including the ones we cannot predict.
-    var onSelection: Bool = false
-
     var body: some View {
         HStack(spacing: 3) {
             if let symbol, !symbol.isEmpty {
@@ -970,11 +963,10 @@ struct Badge: View {
             }
             Text(text).font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(onSelection ? AnyShapeStyle(.white) : AnyShapeStyle(color))
+        .foregroundStyle(color)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(onSelection ? Color.white.opacity(0.22) : color.opacity(0.14),
-                    in: Capsule())
+        .background(color.opacity(0.14), in: Capsule())
     }
 }
 
@@ -1090,23 +1082,23 @@ struct BranchRow: View {
                         .truncationMode(.middle)
 
                     if branch.isDefault {
-                        Badge(text: "default", color: .accentColor, onSelection: isSelected)
+                        Badge(text: "default", color: .accentColor)
                     } else if let l = branch.pr.label {
-                        Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color, onSelection: isSelected)
+                        Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
                     }
-                    Badge(text: branch.owner, onSelection: isSelected)
+                    Badge(text: branch.owner)
                     // What is actually being worked on. This is the branch your
                     // checkout is sitting on, so it is the one whose edits are
                     // live on disk — and the only one that can be run in place.
                     if branch.isCurrent {
                         Badge(text: "checked out", symbol: "pencil",
-                              color: .orange, onSelection: isSelected)
+                              color: .orange)
                     } else if !branch.checkedOutAt.isEmpty {
                         Badge(text: "in another worktree", symbol: "arrow.triangle.branch",
-                              color: .purple, onSelection: isSelected)
+                              color: .purple)
                     }
                     if !isLive && branch.ready {
-                        Badge(text: "ready", symbol: "bolt.fill", color: .green, onSelection: isSelected)
+                        Badge(text: "ready", symbol: "bolt.fill", color: .green)
                     }
                 }
 
