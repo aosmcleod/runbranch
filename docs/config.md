@@ -164,6 +164,7 @@ several hundred megabytes each:
 |---|---|
 | `runbranch.sh disk` | every worktree across every project: size, the ref it was made from, and whether it is running, `idle`, or `gone` |
 | `runbranch.sh cleanup <project>` | lists that project's worktrees with sizes and removes the ones you pick. Refuses the running one |
+| `runbranch.sh prune-gone <project>` | removes every worktree whose ref no longer exists, without asking. `gone` and not `merged`: a squash-merge leaves a branch looking unmerged, so that heuristic would either miss the common case or delete work |
 | `runbranch.sh remove-worktree <project> <ref>` | removes exactly one |
 | `runbranch.sh remove <project>` | the config and everything under `RB_HOME` for it. Never the repository |
 

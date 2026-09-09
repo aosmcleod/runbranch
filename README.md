@@ -229,6 +229,7 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh run studio main both --in-place    # the checkout, not a worktree
 ./runbranch.sh run studio main both 1             # shift every port by 1
 ./runbranch.sh stop studio
+./runbranch.sh update studio            # re-check-out the ref at its tip and restart
 ./runbranch.sh status                   # every project
 ./runbranch.sh doctor                   # check every config resolves
 ./runbranch.sh scan                     # repos not yet declared
@@ -236,7 +237,8 @@ The app is a window over `runbranch.sh`. Anything it does, you can do here.
 ./runbranch.sh remove studio            # delete its config and state, never its repo
 ./runbranch.sh ports                    # every declared port, and what is on it
 ./runbranch.sh disk                     # worktree sizes, and what is reclaimable
-./runbranch.sh cleanup studio           # remove worktrees
+./runbranch.sh cleanup studio           # remove worktrees, interactively
+./runbranch.sh prune-gone studio        # remove the ones whose branch no longer exists
 ```
 
 ---

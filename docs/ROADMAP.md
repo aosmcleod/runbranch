@@ -119,9 +119,10 @@ checkout you are working in, and those are different products.
   because the port conflict dialogue needed the data anyway, and once the
   engine can answer the question there is no reason not to show it.
 
-The follow-ups these opened are filed rather than planned here:
-[#13](https://github.com/aosmcleod/runbranch/issues/13) — an in-place run does
-not notice its branch being switched underneath it, and
+Of the follow-ups these opened, the first is fixed: an in-place run now says,
+in red, when the checkout has been switched to another branch underneath it.
+The servers keep running and keep serving, so what is wrong is the label and
+possibly what you believe is running. Still open is
 [#14](https://github.com/aosmcleod/runbranch/issues/14) — Vite resolves a
 different project root in place than it does in a worktree.
 
@@ -132,12 +133,12 @@ different project root in place than it does in a worktree.
 | | Item | Why |
 |---|---|---|
 | 2.1 | ✅ **Menu bar mode** — Dock, both, or menu bar only; status item with the current run, Stop, and a way back to the window | A demo runs for an hour while you use other apps. The window is not where you want the status |
-| 2.13 | [#5](https://github.com/aosmcleod/runbranch/issues/5) **Keep the ports view current on a timer** — it is read on launch and after every operation, so a server started while the window sits idle is not noticed until something else happens | Each read is one `lsof` per declared port plus a `ps` to attribute it, so a tight poll is wasteful. Thirty seconds, or watching for a `kqueue` event, would do |
-| 2.12 | [#6](https://github.com/aosmcleod/runbranch/issues/6) **Update a run to the branch's latest commit** — one action that re-checks-out the tip and restarts, plus showing in the strip when the worktree is behind | A worktree is pinned to the commit it was made at, so new commits need a stop and a start. Alec hit this expecting *Refresh* to do it, which only re-reads pull request metadata. Being able to see "3 commits behind" is half the value |
+| 2.13 | ✅ **Keep the ports view current on a timer** — thirty seconds, skipped while the window is occluded or a modal sheet is up | Each read is one `lsof` per declared port plus a `ps` to attribute it. That cost is why it is thirty seconds and not a tight poll — and why measuring disk, which walks node_modules, is deliberately not on it |
+| 2.12 | ✅ **Update a run to the branch's latest commit** — the strip says how many commits behind, and an Update button appears only when there is something to catch up on | A worktree is pinned to the commit it was cut at. Refresh only re-reads pull request metadata and was reasonably mistaken for this, so a run could sit on old code looking current. An always-present Update would have made the same confusion |
 | 2.2 | [#7](https://github.com/aosmcleod/runbranch/issues/7) **Per-target restart** — restart web without restarting the api | Overmind's best idea. A Next rebuild should not cost a database connection |
 | 2.3 | [#8](https://github.com/aosmcleod/runbranch/issues/8) **Notifications** — ready, failed, and "still running after an hour" | The run outlives the window on purpose; it should be able to say so |
-| 2.4 | [#9](https://github.com/aosmcleod/runbranch/issues/9) **Log improvements** — follow toggle, wrap toggle, jump to first error | The viewer works; it does not yet help you read |
-| 2.5 | [#10](https://github.com/aosmcleod/runbranch/issues/10) **Disk usage in the app** — `runbranch.sh disk` reports it; the app does not show it, and there is no prompt when it grows | On this machine: 3 worktrees, 1.9GB, 1.1GB of it not in use. The engine can now say so and nothing asks it. A prune of `gone` worktrees could be offered rather than waiting to be asked; "merged" deliberately stays out of it, since a squash-merge leaves a branch looking unmerged |
+| 2.4 | ✅ **Log improvements** — follow, wrap, jump to the first error, errors tinted; and it tails from an offset rather than re-reading the file every 1.5s | The viewer worked and did not help you read. Re-reading whole cost 133.9ms per tick on a 16 MB log, on the main thread; a tick now costs what arrived rather than what exists |
+| 2.5 | ✅ **Disk usage in the app** — a Disk sheet with every worktree, what it costs, and `prune-gone` behind a Reclaim menu | Measured when the sheet opens, never on the refresh path: `du -sk` per worktree walks node_modules, at 3.35s against 0.58s for every other engine call put together. "Merged" deliberately stays out of the pruning, since a squash-merge leaves a branch looking unmerged |
 | 2.6 | ✅ **Remove a project** — right-click → Remove Project, with a confirmation naming the repository it will not touch; refused while running | Adding is in the app; removing still means deleting a file by hand |
 | 2.7 | [#11](https://github.com/aosmcleod/runbranch/issues/11) **Quick Look the diff** — space on a branch shows what changed against the default | Deciding whether to run a branch is the step before running it |
 | 2.10 | ✅ **Worktree names can collide** — `worktree_slug` now records the owning ref in a meta file and gives a second, colliding ref a digest suffix | Found by probing, not by hitting it. The per-run *database* name had the same bug and was fixed with it, which is the part that would have corrupted data rather than just confusing the UI |
