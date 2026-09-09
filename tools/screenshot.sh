@@ -5,6 +5,12 @@
 #
 #   ./tools/screenshot.sh            all scenes into docs/img/
 #   ./tools/screenshot.sh main       just one
+#   RB_SHOT_QUIET=1 ./tools/screenshot.sh   without taking focus
+#
+# A docs capture has to take focus: a window that is not frontmost photographs
+# with grey traffic lights and dimmed controls. Checking a layout does not, and
+# taking focus five times a run makes the machine unusable alongside — so set
+# RB_SHOT_QUIET for that, and accept inactive-looking chrome.
 #
 # The app photographs its own window (see Screenshot in app/RunBranch.swift).
 # It needs Screen Recording permission, which macOS will not prompt for on a
@@ -104,6 +110,7 @@ shoot() {  # file, scene, projects-dir, state-dir
     --env "RB_SCAN_ROOT=/Users/you/Development" \
     --env "RB_NO_OPEN=1" \
     --env "RB_SHOT_LOG=$log" \
+    ${RB_SHOT_QUIET:+--env "RB_SHOT_QUIET=$RB_SHOT_QUIET"} \
     "$REPO/Runbranch.app" --args --screenshot "$OUT/$file" --scene "$scene" \
     >/dev/null 2>&1
   [ -s "$log" ] && sed 's/^/    /' "$log"

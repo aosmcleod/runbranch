@@ -1416,14 +1416,25 @@ enum Screenshot {
                                    width: size.width, height: size.height), display: true)
         }
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Focus is taken only when the capture is for documentation.
+        //
+        // A window that is not frontmost photographs with grey traffic
+        // lights and dimmed controls, so a docs shot needs this. But the
+        // pipeline also gets used to check a layout while working, and
+        // there it steals focus five times a run, which makes the machine
+        // unusable alongside. RB_SHOT_QUIET is for that.
+        if ProcessInfo.processInfo.environment["RB_SHOT_QUIET"] == nil {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         try? await Task.sleep(for: .seconds(3.5))     // layout, health poll, glass
 
         // Re-assert focus. Anything that grabbed it during the settle above
         // leaves the window looking inactive — grey traffic lights, dimmed
         // controls — which reads as a broken app rather than a screenshot.
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if ProcessInfo.processInfo.environment["RB_SHOT_QUIET"] == nil {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         // Raising the main window buries any panel the scene opened, which is
         // how the About shot came back showing the window behind it.
         // The panel opens over the main window, so it needs raising after the
