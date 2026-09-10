@@ -141,14 +141,6 @@ struct LogViewer: View {
     /// visible hitch on a chatty dev server, on the main thread, forever.
     @State private var offset: UInt64 = 0
     @State private var filter = ""
-    @State private var jumpTarget: Int?
-    /// Pinned to the tail, until you jump to an error.
-    ///
-    /// This was a button, and it read as a download glyph that did nothing —
-    /// fairly, since it is on by default and the tail is where you already
-    /// are. It only ever needed to be off for one reason, which is that
-    /// jumping somewhere while pinned scrolls straight back.
-    @State private var following = true
 
     /// Retained lines. 250,000 lines measured at 36.6 MB, which would more
     /// than double the app's whole footprint to hold output nobody scrolls
@@ -204,7 +196,31 @@ struct LogViewer: View {
                 Spacer(minLength: 8)
                 TextField("Filter", text: $filter)
                     .textFieldStyle(.roundedBorder).frame(width: 120)
-                HStack(spacing: 8) { controls }
+                // One button, so it is written here rather than behind a
+                // helper and a wrapper. The controls this header used to have
+                // came off one at a time: wrap, because there is no longer a
+                // non-wrapping mode; follow, because it was on by default and
+                // the tail is where you already are; copy, because the log is
+                // selectable text and ⌘A ⌘C already do it; and
+                // jump-to-first-error, whose glyph read as a plain loupe next
+                // to a filter field that does the same job better — typing
+                // "error" shows every error line, not just the first. Errors
+                // are still tinted red and the footer still counts them.
+                //
+                // Not glass and not a capsule group: glass composites what is
+                // behind it and a sheet is an opaque window, and the grouped
+                // capsule in the main window comes from a ToolbarItemGroup,
+                // which a sheet has no toolbar to hold. Both were tried.
+                Button {
+                    NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
+                                                  inFileViewerRootedAtPath: logDir)
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                        .frame(width: 15, height: 15)
+                }
+                .buttonStyle(.bordered)
+                .help("Reveal in Finder")
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
 
@@ -235,25 +251,13 @@ struct LogViewer: View {
                 // sheet was measured opening at 680x460 and staying there, so
                 // this is not fixing an observed resize.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Always pinned to the tail. The `following` flag that used
+                // to gate this existed for one reason — jumping to an error
+                // while pinned scrolls straight back — and there is nothing
+                // left that jumps.
                 .onChange(of: lines.last?.id) { _, last in
-                    guard following, let last else { return }
-                    // Bottom LEFT, not `.bottom`. `.bottom` is (0.5, 1) and
-                    // the x half of it matters now that this scroll view has
-                    // a horizontal axis: following the tail scrolled the log
-                    // to horizontally centred, so every line sat indented
-                    // halfway across the sheet.
-                    withAnimation { proxy.scrollTo(last, anchor: .bottomLeading) }
-                }
-                // Jumping while pinned to the tail scrolls straight back, so
-                // unpin first. Following is what you want while waiting and
-                // exactly not what you want while reading.
-                .onChange(of: jumpTarget) { _, row in
-                    guard let row else { return }
-                    // Unpin first, or the next poll scrolls straight back to
-                    // the tail and the error you jumped to is gone again.
-                    following = false
-                    withAnimation { proxy.scrollTo(row, anchor: .center) }
-                    jumpTarget = nil
+                    guard let last else { return }
+                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                 }
             }
 
@@ -310,56 +314,6 @@ struct LogViewer: View {
             selected = targets.first?.name ?? ""
             reset()
             load()
-        }
-    }
-
-    /// One control, so the row matches.
-    ///
-    /// These were a mix of Button and Toggle(.button). The toggles filled with
-    /// the accent colour when on, and both defaulted to on, so the header
-    /// opened with two buttons lit up as though something wanted attention.
-    /// They also padded differently from Button, and SF Symbols have different
-    /// intrinsic widths, so a row that should have matched did not.
-    ///
-    /// The fixed box is what keeps a wide symbol and a narrow one the same
-    /// size.
-    private func iconButton(_ symbol: String, help: String,
-                            disabled: Bool = false,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12))
-                .frame(width: 15, height: 15)
-        }
-        // Not glass, and not GlassEffectContainer either.
-        //
-        // Both were tried. Glass composites what is behind it, and a sheet is
-        // an opaque window — so there was nothing behind it but the sheet's own
-        // fill, and it came out as a flat dark chip. The same reason sheets in
-        // this app look flat generally, which is its own roadmap item.
-        .buttonStyle(.bordered)
-        .disabled(disabled)
-        .help(help)
-    }
-
-    /// Two, down from five.
-    ///
-    /// Wrap went because there is no longer a non-wrapping mode. Follow went
-    /// because it was on by default and the tail is where you already are, so
-    /// it looked like a download button that did nothing. Copy went because
-    /// the log is selectable text: ⌘A and ⌘C already do it, and a button for
-    /// something the keyboard does is a button in the way.
-    @ViewBuilder
-    private var controls: some View {
-        iconButton("exclamationmark.magnifyingglass",
-                   help: errorLines.isEmpty ? "No errors in this log"
-                                            : "Jump to the first error",
-                   disabled: errorLines.isEmpty) {
-            jumpTarget = errorLines.first?.id
-        }
-        iconButton("folder", help: "Reveal in Finder") {
-            NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
-                                          inFileViewerRootedAtPath: logDir)
         }
     }
 
