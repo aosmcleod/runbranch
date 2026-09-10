@@ -125,4 +125,15 @@ hdiutil detach "$MOUNT" -quiet || true
 rmdir "$MOUNT" 2>/dev/null || true
 [ "$mounted_ok" = 1 ] || die "the image built but did not check out"
 
+# The release build has served its purpose — it is inside the image now. Put
+# the working copy back to a development build, so the app sitting in this
+# folder is never mistakable for the one in /Applications.
+#
+# Only once the image has checked out. Failing earlier leaves the release build
+# in place, which is what you want to inspect when packaging has gone wrong.
+step "back to a development build"
+"$REPO/make-app.sh" >/dev/null \
+  && info "done" \
+  || echo "    could not rebuild; $APP is still a release build" >&2
+
 printf '\nUpload it:\n  gh release upload v%s %s\n' "$VERSION" "$DMG"

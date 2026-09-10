@@ -239,4 +239,17 @@ esac
 case "$WANT" in
   all|whatsnew) shoot "whats-new.png"  whatsNew "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
 esac
+
+# Put the working copy back to a development build. Capturing needs a release
+# build (see the channel check at the top), and leaving one here afterwards is
+# the confusion the channel exists to prevent: the app you run while working
+# and the one in /Applications become indistinguishable in the Dock.
+#
+# Only on success. A failed capture is usually retried straight away, and this
+# script refuses a development build — restoring after a failure would mean
+# every retry started by rebuilding the release again.
+if [ "$FAIL" = 0 ]; then
+  echo "==> back to a development build"
+  "$REPO/make-app.sh" >/dev/null || echo "  !! could not rebuild; $REPO/Runbranch.app is still a release build" >&2
+fi
 exit "$FAIL"
