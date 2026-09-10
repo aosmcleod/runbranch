@@ -165,7 +165,7 @@ different project root in place than it does in a worktree.
 |---|---|---|
 | 4.1 | **Notarisation and a signed release** — needs a Developer ID; local builds already sign with a self-signed identity via `tools/make-signing-identity.sh`, which is what makes a TCC grant survive a rebuild | Right-click-to-open is a bad first impression for a tool about first impressions |
 | 4.2 | **Homebrew cask** | `brew install --cask runbranch` is the difference between trying it and not |
-| 4.3 | **Sparkle updates** | Nobody returns to a GitHub releases page |
+| 4.3 | ✅ **In-app updates** — a launch check against the GitHub releases API, a sheet with the release notes, download / checksum / install / restart, and a what's-new sheet built from the changelog bundled at build time. Not Sparkle, which is what this line used to say: Sparkle is built around a Developer ID, its docs are explicit that its own EdDSA signing does not substitute for one, and a self-signed build hits library validation loading the framework — so it would have added a framework and a signing key without addressing the thing that is actually missing. The swap itself is a detached shell script, because the bundle being replaced is the one the code is running from | Nobody returns to a GitHub releases page |
 | 4.4 | **Windows/Linux engine** — the bash engine is close to portable; the UI is not | The engine is the valuable half. A CLI-only Linux port is plausible |
 
 ---

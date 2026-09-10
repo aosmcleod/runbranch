@@ -218,4 +218,13 @@ esac
 case "$WANT" in
   all|about)    shoot "about.png"      about    "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
 esac
+# Both show a stand-in release rather than a real one: on the machine that
+# builds the docs the installed version IS the latest, so a real check finds
+# nothing to photograph.
+case "$WANT" in
+  all|update)   shoot "update.png"     update   "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
+esac
+case "$WANT" in
+  all|whatsnew) shoot "whats-new.png"  whatsNew "$REPO/demo/projects" "$REPO/demo/state" || FAIL=1 ;;
+esac
 exit "$FAIL"

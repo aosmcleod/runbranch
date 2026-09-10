@@ -48,6 +48,41 @@ cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
 cp "$REPO/runbranch.sh" "$APP/Contents/Resources/runbranch.sh"
 chmod +x "$APP/Contents/Resources/runbranch.sh"
 
+# The changelog, as data, for the "what's new" sheet.
+#
+# Bundled rather than fetched at runtime: it has to work with no network, and
+# it has to work for a build from source, which has no release to read notes
+# off. CHANGELOG.md stays the only copy anyone edits.
+python3 - "$REPO/CHANGELOG.md" "$APP/Contents/Resources/ReleaseNotes.json" <<'NOTES'
+import json, re, sys
+
+source, dest = sys.argv[1], sys.argv[2]
+entries, version, body = [], None, []
+
+def keep():
+    if version:
+        entries.append({"version": version, "notes": "\n".join(body).strip()})
+
+for line in open(source):
+    m = re.match(r'^##\s+v?(\d+(?:\.\d+)*)\s*$', line.rstrip())
+    if m:
+        keep()
+        version, body = m.group(1), []
+        continue
+    if version is not None:
+        body.append(line.rstrip())
+keep()
+
+json.dump(entries, open(dest, "w"), indent=1)
+print("    release notes: %d versions" % len(entries))
+NOTES
+
+# The script that swaps a downloaded build in for this one. It runs from a copy
+# in /tmp rather than from here, because by the time it does its work this
+# bundle is what it is deleting.
+cp "$REPO/tools/install-update.sh" "$APP/Contents/Resources/install-update.sh"
+chmod +x "$APP/Contents/Resources/install-update.sh"
+
 # Menu bar template glyph, from the seamed vector: the two petals and the lens
 # where they cross are separate paths, so the silhouette reads as two shapes
 # rather than one blob. The solid version is also here

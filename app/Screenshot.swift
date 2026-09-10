@@ -36,7 +36,7 @@ enum Screenshot {
 
     /// Which screen to photograph. The docs need more than one, and opening a
     /// sheet by hand before every capture is not automation.
-    enum Scene: String { case main, settings, scan, logs, about, disk, ports }
+    enum Scene: String { case main, settings, scan, logs, about, disk, ports, update, whatsNew }
 
     /// Capture diagnostics. Launched via LaunchServices the app has no useful
     /// stderr, so mirror everything into RB_SHOT_LOG for the script to show.

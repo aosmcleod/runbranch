@@ -65,9 +65,11 @@ cd runbranch && ./make-app.sh && open .
 > rather than a paid Apple Developer ID, which is a statement about the
 > certificate and not about the app. Open **System Settings → Privacy &
 > Security**, scroll to Security, and press **Open Anyway** on the line about
-> Runbranch. Once, then it opens normally. Removing that step needs
-> notarisation, which needs a paid Apple Developer account; it is on the
-> [roadmap](docs/ROADMAP.md) and not done.
+> Runbranch. Once, then it opens normally — and only once ever: Runbranch
+> updates itself from here, and an update it installs does not ask again.
+> Removing the step for the *first* launch needs notarisation, which needs a
+> paid Apple Developer account; it is on the [roadmap](docs/ROADMAP.md) and not
+> done.
 
 By default `make-app.sh` signs ad-hoc, which means a new identity on every
 build — and macOS ties privacy permissions to the signature, so anything you

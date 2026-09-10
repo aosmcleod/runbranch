@@ -81,6 +81,8 @@ struct ContentView: View {
         case editing(project: String)
         case resolvingPorts(PendingRun)
         case disk
+        case update
+        case whatsNew([ReleaseNotes.Entry])
 
         /// Identity is the case, not the payload. A sheet does not become a
         /// different sheet because its title changed.
@@ -93,6 +95,8 @@ struct ContentView: View {
             case .editing(let p): return "editing:\(p)"
             case .disk:           return "disk"
             case .resolvingPorts: return "port-conflict"
+            case .update:         return "update"
+            case .whatsNew:       return "whats-new"
             }
         }
     }
@@ -140,6 +144,11 @@ struct ContentView: View {
     @AppStorage("sidebar.running.expanded")    private var runningExpanded = true
     @AppStorage("sidebar.favourites.expanded") private var favouritesExpanded = true
     @AppStorage("sidebar.projects.expanded")   private var projectsExpanded = true
+    // On by default. An update nobody hears about is not an update, and the
+    // sheet that announces one carries its own way to turn this off.
+    @AppStorage(Updater.checkKey)  private var checkForUpdates = true
+    @AppStorage(Updater.seenKey)   private var lastSeenVersion = ""
+    @StateObject private var updater = Updater.shared
 
     private static let week = 7 * 24 * 60 * 60
 
@@ -290,6 +299,36 @@ struct ContentView: View {
                 guard let p = selectedProject else { return }
                 present(.editing(project: p))
             }
+            bridge.checkForUpdates = {
+                Task {
+                    await updater.checkNow()
+                    if sheet == nil { present(.update) }
+                }
+            }
+
+            // Neither the self-test nor the screenshot pipeline should reach
+            // the network, and neither should have a sheet land on the window
+            // it is measuring or photographing.
+            if !SelfTest.requested && Screenshot.path == nil {
+                showWhatsNew()
+                Task {
+                    await updater.checkOnLaunch()
+                    guard updater.available != nil else { return }
+                    // Never over something else: an update is not so urgent
+                    // that it should interrupt a run in progress. But not
+                    // dropped either — the first launch after an update shows
+                    // the changelog, and the offer used to be thrown away
+                    // behind it and not seen again until the menu was used.
+                    var waited = 0
+                    while sheet != nil && waited < 120 {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        waited += 1
+                    }
+                    // A minute of some other sheet means they are working.
+                    // Check for Updates… is still there when they are not.
+                    if sheet == nil, updater.available != nil { present(.update) }
+                }
+            }
             if SelfTest.requested {
                 SelfTest.phase("selftest-branch")
                 SelfTest.armWatchdog()
@@ -382,6 +421,11 @@ struct ContentView: View {
                     present(.disk)
                 case .ports:
                     present(.ports)
+                case .update:
+                    updater.offer(.sample)
+                    present(.update)
+                case .whatsNew:
+                    present(.whatsNew(Array(ReleaseNotes.all.prefix(1))))
                 }
                 if Screenshot.scene != .main { try? await Task.sleep(for: .seconds(1.2)) }
                 // The first health poll can take up to its 3s timeout, and the
@@ -509,6 +553,7 @@ struct ContentView: View {
                         Button("Open config in a text editor") { editConfig(p.id) }
                     }
                     Divider()
+                    Toggle("Check for updates on launch", isOn: $checkForUpdates)
                     Picker("Show Runbranch in", selection: Binding(
                         get: { presentation },
                         set: { presentation = $0; MenuBarController.shared.apply($0) })) {
@@ -583,6 +628,13 @@ struct ContentView: View {
             case .logs:
                 LogViewer(logDir: current?.logDir ?? "",
                           targets: current?.state.targets ?? []) { sheet = nil }
+            case .update:
+                UpdateSheet(updater: updater) {
+                    sheet = nil
+                    updater.dismiss()
+                }
+            case .whatsNew(let entries):
+                WhatsNewSheet(entries: entries) { sheet = nil }
             }
         }
         .confirmationDialog(
@@ -903,6 +955,30 @@ struct ContentView: View {
         guard sheet != nil else { sheet = next; return }
         sheet = nil
         Task { @MainActor in sheet = next }
+    }
+
+    /// The changelog, on the first launch after the version changes.
+    ///
+    /// An empty stored version is a fresh install, not a hundred missed
+    /// releases: someone opening Runbranch for the first time is told what
+    /// changed since a version they never had. So the first launch records
+    /// where it starts and shows nothing.
+    private func showWhatsNew() {
+        let installed = Version.installed
+        guard !lastSeenVersion.isEmpty, let seen = Version(lastSeenVersion) else {
+            lastSeenVersion = installed.description
+            return
+        }
+        guard seen < installed else {
+            // Also covers a downgrade, where the stored version is ahead. Move
+            // the mark rather than leaving it to fire on every launch.
+            if seen > installed { lastSeenVersion = installed.description }
+            return
+        }
+        lastSeenVersion = installed.description
+        let entries = ReleaseNotes.since(seen)
+        guard !entries.isEmpty else { return }
+        present(.whatsNew(entries))
     }
 
     /// Re-read the project list and drop a selection that no longer resolves.

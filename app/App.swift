@@ -233,6 +233,7 @@ final class MenuBridge: ObservableObject {
     var scanForProjects: (() -> Void)?
     var editProject: (() -> Void)?
     var refresh: (() -> Void)?
+    var checkForUpdates: (() -> Void)?
     /// Nil when nothing is selected, so the menu can disable what needs one.
     var hasSelection: () -> Bool = { false }
 }
@@ -366,6 +367,7 @@ struct RunBranchApp: App {
             }
             CommandGroup(replacing: .appInfo) {
                 Button("About Runbranch") { AboutPanel.shared.show() }
+                Button("Check for Updates…") { MenuBridge.shared.checkForUpdates?() }
             }
             // Replacing .newItem drops "New Window" with it, which is the
             // right call: a second window on the same projects would show the
