@@ -3,6 +3,38 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.3.0
+
+**Runbranch updates itself**
+
+Nobody returns to a releases page, so 1.2.0 is what most people who installed
+it are still running. The app looks for a newer release once when it opens, and
+installs the one it finds.
+
+- A newer release raises a sheet with its notes, and **Update** does the rest:
+  download, checksum, install, restart. There is no step where you are handed a
+  disk image and left to it
+- The first launch after an update opens on what changed — every version
+  between the one you had and the one you have, not only the newest, so
+  skipping two releases cannot hide one of them
+- **Check for Updates…** sits beside About, for when you would rather ask
+- The check is on by default and turned off from either the update sheet or the
+  ••• menu. It is one unauthenticated request to the GitHub releases API at
+  launch and nothing else
+
+An update does not repeat the Open Anyway dance. The quarantine flag that
+triggers it is attached by whatever downloads the file, and browsers opt into
+that where an app fetching its own update does not — so the version Runbranch
+installs opens normally. You do that once, on first install, and never again.
+
+Deliberately not Sparkle, which is what the roadmap asked for. Sparkle is built
+around a Developer ID: its own documentation says its EdDSA signing is not a
+substitute for one, and an ad-hoc or self-signed build runs into library
+validation loading the framework at all. Both answers in its docs are "sign
+with a Developer ID", which is the thing this project does not have — so it
+would have added a framework, an XPC service and a signing key without solving
+the problem. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## 1.2.0
 
 **Two projects that want the same port**
