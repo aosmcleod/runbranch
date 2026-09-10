@@ -139,9 +139,13 @@ Full reference: **[docs/config.md](docs/config.md)**. Check any project with
 
 **A window that tells the truth.** Branches for the selected project, newest
 first, each with its pull request state, who wrote it, and what it's actually
-about — the PR title, not just the branch name. Remote branches with an open
-pull request are listed too, because reviewing someone else's work is the whole
-point. Merged and stale branches stay out of the way until you ask.
+about — the PR title, not just the branch name. Each says how far it has drifted
+from the default branch, in commits ahead and behind, so a branch you don't
+recognise says whether it is live work or a leftover. Remote branches with an
+open pull request are listed too, because reviewing someone else's work is the
+whole point. Merged and stale branches stay out of the way until you ask —
+merged by the pull request record or by the commit graph, which is the only
+thing that sees a branch someone landed by hand.
 
 **A run you can watch.** Press Start and the work happens in front of you:
 worktree, install, infrastructure, migrations, seed, servers. It closes itself

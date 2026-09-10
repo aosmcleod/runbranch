@@ -464,7 +464,11 @@ ensure_pr_cache() {
 }
 
 # Tab separated, one branch per line:
-#   ref  age  ts  owner  mine  pr  ready  isDefault  isCurrent  prNumber  subject  remote
+#   ref  age  ts  owner  mine  pr  ready  isDefault  isCurrent  prNumber  subject
+#   remote  checkedOutAt  ahead  behind
+#
+# `ahead` and `behind` are commits relative to the trunk, and are BOTH empty on
+# a git too old for `%(ahead-behind:)` — see ahead_behind_atom.
 #
 # Local branches first, then remote-tracking branches with no local twin —
 # reviewing a colleague's pull request is the whole use case, and it does not
@@ -494,11 +498,47 @@ foreign_worktrees() {
   printf ' '
 }
 
+# What every branch is measured against: origin's copy of the default branch
+# when there is one, the local copy otherwise.
+#
+# Not the local one by preference. A checkout whose `main` has not been fetched
+# in a fortnight would report every branch as behind by nothing, which is the
+# opposite of the truth and worse than saying nothing at all. Measuring against
+# origin also means the default branch's own row says how stale the checkout is.
+trunk_ref() {
+  local remote="refs/remotes/origin/$DEFAULT_BRANCH"
+  if repo_git rev-parse --verify --quiet "$remote" >/dev/null 2>&1; then
+    printf '%s' "$remote"; return
+  fi
+  if repo_git rev-parse --verify --quiet "refs/heads/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    printf '%s' "refs/heads/$DEFAULT_BRANCH"; return
+  fi
+  printf ''
+}
+
+# The `%(ahead-behind:)` atom counts divergence for every ref in ONE walk,
+# which is the only reason this is affordable — a repo with three hundred
+# remote branches would otherwise want three hundred `rev-list` calls.
+#
+# It landed in git 2.41. An unknown atom is fatal to for-each-ref, not
+# ignorable, so it is probed once against a ref that certainly exists rather
+# than by parsing `git --version`: the whole branch listing would fail, not
+# just the column. Older git simply gets no counts.
+ahead_behind_atom() {
+  local trunk="$1"
+  [ -n "$trunk" ] || return 1
+  repo_git for-each-ref --count=1 --format="%(ahead-behind:$trunk)" \
+    "$trunk" >/dev/null 2>&1 || return 1
+  printf '%%09%%(ahead-behind:%s)' "$trunk"
+}
+
 collect_branch_data() {
-  local out="$1" now ready_slugs dir cur foreign
+  local out="$1" now ready_slugs dir cur foreign trunk divergence
   now=$(date +%s)
   cur=$(current_branch)
   foreign="$(foreign_worktrees)"
+  trunk="$(trunk_ref)"
+  divergence="$(ahead_behind_atom "$trunk" || true)"
   ensure_pr_cache
 
   ready_slugs=' '
@@ -514,14 +554,15 @@ collect_branch_data() {
     # %09 is a tab. git for-each-ref does NOT interpret \t — it emits the two
     # characters literally, which silently collapses every row into one field.
     repo_git for-each-ref --sort=-committerdate \
-      --format="B%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)%09%(contents:subject)" \
+      --format="B%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)$divergence%09%(contents:subject)" \
       refs/heads 2>/dev/null
     repo_git for-each-ref --sort=-committerdate \
-      --format="R%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)%09%(contents:subject)" \
+      --format="R%09%(refname:short)%09%(authoremail)%09%(committerdate:unix)%09%(authorname)$divergence%09%(contents:subject)" \
       refs/remotes/origin 2>/dev/null
   } | awk -F'\t' -v OFS='\t' \
         -v now="$now" -v emails="$MY_EMAILS" -v ready="$ready_slugs" \
-        -v cur="$cur" -v defbr="$DEFAULT_BRANCH" -v foreign="$foreign" '
+        -v cur="$cur" -v defbr="$DEFAULT_BRANCH" -v foreign="$foreign" \
+        -v hasab="${divergence:+1}" '
     function age(ts,   d) {
       d = now - ts
       if (d < 3600)    return int(d / 60) "m"
@@ -549,7 +590,13 @@ collect_branch_data() {
       return ""
     }
     $1 == "P" { pr[$2] = $3; num[$2] = $4; title[$2] = $5; next }
-    function emit(ref, key, email, ts, who, subject, isRemote,   isMine) {
+    # `%(ahead-behind:)` prints the two counts in one field, space separated.
+    # Empty when the atom was left out of the format, and left empty here too
+    # rather than faked as 0/0 — "no answer" and "level with the trunk" are
+    # different things, and only one of them means the branch is disposable.
+    function ahead(ab,   p) { return split(ab, p, " ") == 2 ? p[1] : "" }
+    function behind(ab,   p) { return split(ab, p, " ") == 2 ? p[2] : "" }
+    function emit(ref, key, email, ts, who, ab, subject, isRemote,   isMine) {
       isMine = mine(email)
       print ref, age(ts), ts, (isMine ? "me" : firstname(who)), isMine, \
             ((key in pr) ? pr[key] : "NONE"), \
@@ -557,14 +604,18 @@ collect_branch_data() {
             (ref == defbr ? 1 : 0), (ref == cur ? 1 : 0), \
             ((key in num) ? num[key] : ""), \
             ((key in title) ? title[key] : subject), \
-            isRemote, elsewhere(ref)
+            isRemote, elsewhere(ref), ahead(ab), behind(ab)
     }
-    $1 == "B" { seen[$2] = 1; emit($2, $2, $3, $4, $5, $6, 0); next }
+    $1 == "B" {
+      seen[$2] = 1
+      emit($2, $2, $3, $4, $5, hasab ? $6 : "", hasab ? $7 : $6, 0)
+      next
+    }
     $1 == "R" {
       short = $2; sub(/^origin\//, "", short)
       if (short == "" || $2 == "origin" || $2 == "origin/HEAD") next
       if (seen[short]) next          # a local branch already stands for it
-      emit($2, short, $3, $4, $5, $6, 1)
+      emit($2, short, $3, $4, $5, hasab ? $6 : "", hasab ? $7 : $6, 1)
     }
   ' > "$out"
 }

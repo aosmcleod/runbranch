@@ -65,8 +65,16 @@ is "marks the default branch"  "$("$ENGINE" branches fixture | awk -F'\t' '$1=="
 is "attributes them to me"     "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $4}')" "me"
 # Regression: `git for-each-ref` does not interpret \t, so the row used to
 # collapse into a single field.
-is "row has every column"      "$("$ENGINE" branches fixture | head -1 | awk -F'\t' '{print NF}')" "13"
+is "row has every column"      "$("$ENGINE" branches fixture | head -1 | awk -F'\t' '{print NF}')" "15"
 has "carries the commit subject" "$("$ENGINE" branches fixture | awk -F'\t' '$1=="feature/one"{print $11}')" "a second commit"
+
+# Fields 14 and 15 are commits ahead of and behind the trunk. The subject sits
+# between them and the rest, and a subject is the one field a user writes, so
+# these also guard the column order against a subject with a tab in it.
+is "counts commits ahead"      "$("$ENGINE" branches fixture | awk -F'\t' '$1=="feature/one"{print $14}')" "1"
+is "counts commits behind"     "$("$ENGINE" branches fixture | awk -F'\t' '$1=="feature/one"{print $15}')" "0"
+is "the trunk diverges from itself by nothing" \
+                               "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $14 "/" $15}')" "0/0"
 
 echo "==> set preserves the file"
 BEFORE_COMMENTS=$(grep -c '^#' "$RB_PROJECTS_DIR/fixture.conf")

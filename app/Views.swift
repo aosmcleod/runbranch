@@ -15,14 +15,23 @@ import SwiftUI
 import AppKit
 
 struct Badge: View {
-    /// The default branch. A fixed hue rather than a semantic colour, for the
-    /// reason the call site gives, and teal because every other badge colour
-    /// here is taken.
-    static let trunk = Color(red: 0.09, green: 0.58, blue: 0.64)
+    /// The default branch, and anything else measured against it. System blue
+    /// rather than `.accentColor`: a selected row is filled with the accent,
+    /// and a badge tinted with it would disappear into the fill — whatever the
+    /// user has set the accent to. Blue on a blue fill has the same problem,
+    /// which is what `onFill` is for.
+    static let trunk = Color(nsColor: .systemBlue)
 
     let text: String
     var symbol: String? = nil
     var color: Color = .secondary
+    /// Drawn over a filled selection, where the badge's own hue cannot be
+    /// trusted to stand off the background. White at low opacity reads on any
+    /// accent the user has chosen.
+    var onFill: Bool = false
+
+    private var tint: Color { onFill ? .white : color }
+
     var body: some View {
         HStack(spacing: 3) {
             if let symbol, !symbol.isEmpty {
@@ -30,10 +39,10 @@ struct Badge: View {
             }
             Text(text).font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(color)
+        .foregroundStyle(tint)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(color.opacity(0.14), in: Capsule())
+        .background(tint.opacity(onFill ? 0.22 : 0.14), in: Capsule())
     }
 }
 
@@ -170,12 +179,18 @@ struct BranchRow: View {
                         .truncationMode(.middle)
 
                     if branch.isDefault {
-                        // Not .accentColor. A selected row is filled with the
-                        // accent, so a badge tinted with it disappears — and
-                        // that holds whatever the user has set the accent to.
-                        Badge(text: "default", color: Badge.trunk)
+                        Badge(text: "default", color: Badge.trunk, onFill: isSelected)
                     } else if let l = branch.pr.label {
                         Badge(text: l, symbol: branch.pr.symbol, color: branch.pr.color)
+                    } else if branch.isSubsumed {
+                        // Everything on this branch is already in the trunk,
+                        // and no pull request said so. Squashes, rebases and
+                        // merges done by hand all land here — the commit graph
+                        // is the only thing that can see them.
+                        Badge(text: "merged", symbol: PRState.merged.symbol,
+                              color: PRState.merged.color)
+                            .help("Nothing here the default branch does not already "
+                                  + "have — safe to delete")
                     }
                     Badge(text: branch.owner)
                     // What is actually being worked on. This is the branch your
@@ -206,12 +221,40 @@ struct BranchRow: View {
 
             Spacer(minLength: 8)
 
-            Text(branch.age)
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .padding(.top, 1)
+            // How old, then how far from the trunk — the two questions you ask
+            // of a branch you do not recognise, stacked to match the two lines
+            // on the left rather than crowding the badges.
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(branch.age)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                if branch.hasDivergence {
+                    Text(Self.divergence(branch))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .help(Self.divergenceHelp(branch))
+                }
+            }
+            .padding(.top, 1)
         }
         .padding(.vertical, 3)
+    }
+
+    /// Arrows rather than `+3 / -8`: plus and minus in a list of commits reads
+    /// as added and removed lines, which is a different number entirely.
+    static func divergence(_ b: Branch) -> String {
+        var parts: [String] = []
+        if let a = b.ahead, a > 0 { parts.append("↑\(a)") }
+        if let n = b.behind, n > 0 { parts.append("↓\(n)") }
+        return parts.joined(separator: " ")
+    }
+
+    static func divergenceHelp(_ b: Branch) -> String {
+        var parts: [String] = []
+        if let a = b.ahead, a > 0 { parts.append("\(a) ahead of the default branch") }
+        if let n = b.behind, n > 0 { parts.append("\(n) behind") }
+        return "Commits: " + parts.joined(separator: ", ")
     }
 }
 

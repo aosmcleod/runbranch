@@ -34,6 +34,25 @@ struct Branch: Identifiable, Hashable {
     /// this is also why an in-place run of it is not on offer.
     let checkedOutAt: String
 
+    /// Commits this branch has that the trunk does not, and vice versa —
+    /// measured against `origin/<default>` where that exists.
+    ///
+    /// Optional rather than defaulted to zero: a git too old for
+    /// `%(ahead-behind:)` reports nothing, and "we did not ask" must not read
+    /// as "level with the trunk", which is the one value that means the
+    /// branch can be deleted.
+    let ahead: Int?
+    let behind: Int?
+
+    /// Nothing on this branch that the trunk does not already have, so
+    /// deleting it loses no work. True however it got there — a merge commit,
+    /// a squash, a rebase, or never having diverged at all — which is the half
+    /// the pull request cache cannot see.
+    var isSubsumed: Bool { !isDefault && ahead == 0 }
+
+    /// Worth drawing: level with the trunk in both directions says nothing.
+    var hasDivergence: Bool { (ahead ?? 0) > 0 || (behind ?? 0) > 0 }
+
     /// Runnable in place — in the real checkout, with whatever is in the
     /// working tree right now, rather than from a snapshot.
     var canRunInPlace: Bool { isCurrent && !isRemote }
@@ -42,6 +61,8 @@ struct Branch: Identifiable, Hashable {
     var display: String { isRemote ? String(ref.dropFirst("origin/".count)) : ref }
 
     /// `ref age ts owner mine pr ready isDefault isCurrent`, tab separated.
+    /// Everything from `prNumber` on is optional, so an older engine still
+    /// parses.
     init?(tsv line: String) {
         let f = line.components(separatedBy: "\t")
         guard f.count >= 9 else { return nil }
@@ -58,6 +79,8 @@ struct Branch: Identifiable, Hashable {
         subject = f.count > 10 ? f[10] : ""
         isRemote = f.count > 11 && f[11] == "1"
         checkedOutAt = f.count > 12 ? f[12] : ""
+        ahead = f.count > 13 ? Int(f[13]) : nil
+        behind = f.count > 14 ? Int(f[14]) : nil
     }
 }
 

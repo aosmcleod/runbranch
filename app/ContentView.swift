@@ -183,7 +183,10 @@ struct ContentView: View {
             // are exactly the reviewable set, so those show by default and
             // the rest are opt-in.
             if b.isRemote && !filter.showAllRemote && b.pr != .open { return false }
-            if !filter.showMerged && b.pr == .merged { return false }
+            // Merged covers both readings: what GitHub says, and what the
+            // commit graph says. A branch the trunk already contains is spent
+            // whether or not a pull request ever recorded it.
+            if !filter.showMerged && (b.pr == .merged || b.isSubsumed) { return false }
             if !filter.showOlder && now - b.timestamp > Self.week { return false }
             return true
         }
