@@ -30,6 +30,18 @@ APP="$REPO/Runbranch.app/Contents/MacOS/RunBranch"
 OUT="$REPO/docs/img"
 
 [ -x "$APP" ] || { echo "build the app first: ./make-app.sh" >&2; exit 1; }
+
+# The documentation depicts the app people install. A development build has an
+# inverted mark and a badge in About, so the about scene would document a thing
+# that does not exist and the rest of the set would quietly disagree with it.
+CHANNEL="$(/usr/libexec/PlistBuddy -c 'Print :RBBuildChannel' \
+  "$REPO/Runbranch.app/Contents/Info.plist" 2>/dev/null || echo release)"
+if [ "$CHANNEL" != "release" ]; then
+  echo "  !! $REPO/Runbranch.app is a $CHANNEL build, and the docs set shows" >&2
+  echo "     the shipping app. Rebuild before capturing:" >&2
+  echo "       ./make-app.sh --release" >&2
+  exit 1
+fi
 [ -d "$REPO/demo" ] || "$REPO/tools/make-demo.sh" >/dev/null
 
 # The running strip is only honest if something is actually running. A left-over

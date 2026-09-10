@@ -60,6 +60,18 @@ struct Version: Comparable, CustomStringConvertible {
     }
 }
 
+/// Which build this is.
+///
+/// `make-app.sh` writes RBBuildChannel only for a development build, so the
+/// absence of the key is a release. Read rather than compiled in, because the
+/// same sources produce both and a #if would need two build configurations to
+/// tell them apart.
+enum Build {
+    static var isDevelopment: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "RBBuildChannel") as? String == "development"
+    }
+}
+
 // MARK: - What GitHub says
 
 /// One release, reduced to the parts an update needs.
@@ -109,6 +121,8 @@ final class Updater: ObservableObject {
         case verifying
         case installing
         case upToDate
+        /// Asked on a build that must not update itself.
+        case development
         case failed(String)
     }
 
@@ -133,6 +147,11 @@ final class Updater: ObservableObject {
     /// release with no disk image — none of that is the user's problem, and
     /// none of it should raise a sheet in front of an app they just opened.
     func checkOnLaunch() async {
+        // A development build must never offer to replace itself with a
+        // release: the whole point of the one in the dev folder is that it is
+        // the build you are working on, and an update would silently throw it
+        // away for whatever was last tagged.
+        guard !Build.isDevelopment else { return }
         guard !checked else { return }
         guard UserDefaults.standard.object(forKey: Self.checkKey) as? Bool ?? true else { return }
         checked = true
@@ -145,6 +164,13 @@ final class Updater: ObservableObject {
     func checkNow() async {
         checked = true
         manual = true
+        // Said rather than silently skipped. Picking the menu item and having
+        // nothing happen at all reads as a broken menu item.
+        guard !Build.isDevelopment else {
+            available = nil
+            phase = .development
+            return
+        }
         phase = .checking
         do {
             let release = try await fetch()
@@ -668,12 +694,16 @@ struct UpdateSheet: View {
     private var title: String {
         if let release { return "Runbranch \(release.version) is available" }
         if case .failed = updater.phase { return "Could not check for updates" }
+        if case .development = updater.phase { return "This is a development build" }
         return "Runbranch is up to date"
     }
 
     private var subtitle: String {
         if release != nil { return "You have \(Version.installed)" }
         if case .failed(let why) = updater.phase { return why }
+        if case .development = updater.phase {
+            return "Built from source as \(Version.installed)"
+        }
         return "Version \(Version.installed), the latest release"
     }
 
@@ -700,12 +730,17 @@ struct UpdateSheet: View {
 
     private var statusSymbol: String {
         if case .failed = updater.phase { return "wifi.exclamationmark" }
+        if case .development = updater.phase { return "hammer" }
         return "checkmark.circle"
     }
 
     private var statusLine: String {
         if case .failed = updater.phase {
             return "Releases are listed on GitHub if you would rather look yourself."
+        }
+        if case .development = updater.phase {
+            return "It does not update itself, because an update would replace "
+                 + "the build you are working on with whatever was last released."
         }
         return "Nothing to install."
     }

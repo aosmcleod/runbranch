@@ -7,14 +7,26 @@
 # Needs only the Xcode command line tools (swiftc) plus sips and iconutil,
 # which ship with macOS. No packages, no SPM manifest, no Xcode project.
 #
-#   ./make-app.sh                  build next to this script
-#   ./make-app.sh /Applications    build into /Applications instead
+# Builds are development builds unless you say otherwise. A development build
+# carries the mark with its colours inverted and says so in About, because the
+# copy in this folder and the copy in /Applications are otherwise identical in
+# the Dock and the Cmd-Tab strip. Shipping is the deliberate act, so it is the
+# one that needs a word:
+#
+#   ./make-app.sh                  a development build, next to this script
+#   ./make-app.sh --release        the shipping build — what make-dmg.sh wants
+#   ./make-app.sh /Applications    a development build, installed
+#
+# make-dmg.sh and tools/screenshot.sh both refuse a development build, so
+# forgetting --release cannot put one in a disk image or in the documentation.
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$REPO/runbranch.sh"
 SOURCE="$REPO/app"
+CHANNEL="development"
+if [ "${1:-}" = "--release" ]; then CHANNEL="release"; shift; fi
 DEST="${1:-$REPO}"
 APP="$DEST/Runbranch.app"
 
@@ -26,18 +38,26 @@ command -v swiftc >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "==> building $APP"
+echo "==> building $APP ($CHANNEL)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # --- icon -----------------------------------------------------------------
 # See make-icons.sh: one PNG source, cleaned and optically centred, tiles
 # rendered through WebKit, appearance variants via actool. No GUI, no design tool.
-"$REPO/make-icons.sh" "$APP"
+if [ "$CHANNEL" = "development" ]; then
+  "$REPO/make-icons.sh" --dev "$APP"
+else
+  "$REPO/make-icons.sh" "$APP"
+fi
 
 # The bare glyph on transparency, for in-app use. Inside the window the rounded
 # app tile is redundant and its light backing sits badly on a dark splash.
-cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
+if [ "$CHANNEL" = "development" ]; then
+  cp "$REPO/build/bin/mark-256-dev.png" "$APP/Contents/Resources/Mark.png"
+else
+  cp "$REPO/docs/img/mark-256.png" "$APP/Contents/Resources/Mark.png"
+fi
 
 # The engine, inside the bundle.
 #
@@ -126,6 +146,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <dict>
     <key>NSAllowsLocalNetworking</key>  <true/>
   </dict>
+$(if [ "$CHANNEL" = "development" ]; then cat <<'DEV'
+  <!-- Development build. Read by About, by the updater (which does not run
+       here — an update would replace the build you are working on with a
+       release), by make-dmg.sh and by tools/screenshot.sh, all of which
+       refuse rather than quietly do the wrong thing. Absent on a release. -->
+  <key>RBBuildChannel</key>            <string>development</string>
+DEV
+fi)
 </dict>
 </plist>
 PLIST

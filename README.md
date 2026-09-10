@@ -56,8 +56,14 @@ line tools (`xcode-select --install`):
 
 ```bash
 git clone https://github.com/aosmcleod/runbranch
-cd runbranch && ./make-app.sh && open .
+cd runbranch && ./make-app.sh --release && open .
 ```
+
+`--release` because a plain `./make-app.sh` gives you a *development* build:
+the same app with its mark inverted and a badge in About, so a copy being
+worked on is not mistakable for the one you installed. It also does not update
+itself. That is what you want when you are changing the code and not what you
+want when you are installing it.
 
 > [!IMPORTANT]
 > Either way, the first launch is refused — macOS says it cannot check the app

@@ -15,6 +15,15 @@ cd runbranch
 
 No package manager, no project file, no dependencies to install.
 
+That gives you a **development build**: the mark with its colours inverted, a
+badge in About, and no update check — because an update would replace the build
+you are working on with whatever was last released. It is the default because
+the alternative is remembering a flag, and forgetting one is silent.
+
+`./make-app.sh --release` gives the shipping build. `make-dmg.sh` and
+`tools/screenshot.sh` both refuse anything else, so a development build cannot
+reach a disk image or the documentation by accident.
+
 ## The shape of the thing
 
 ```

@@ -302,6 +302,13 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)
 
+            // Only on a development build, and only then. A release should say
+            // nothing about a distinction its user has no reason to know about.
+            if Build.isDevelopment {
+                Badge(text: "development build", symbol: "hammer.fill", color: .orange)
+                    .padding(.top, 7)
+            }
+
             Spacer(minLength: 14)
 
             VStack(spacing: 3) {

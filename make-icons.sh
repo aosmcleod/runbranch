@@ -23,12 +23,21 @@
 # matters beyond tidiness — it sits outside the real artwork, so it drags the
 # bounding box outward and takes the centring with it.
 #
+# A development build gets the same mark with its colours inverted, so the copy
+# in the dev folder is not mistakable for the one in /Applications at a glance
+# in the Dock. It comes out of the same SVG through the same renderer — a
+# second drawing would be a second thing to keep in step, which is the problem
+# the single master exists to prevent.
+#
 #   ./make-icons.sh                 documentation images only
 #   ./make-icons.sh <App.app>       and compile the icon into that bundle
+#   ./make-icons.sh --dev <App.app> with the inverted mark
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV=""
+if [ "${1:-}" = "--dev" ]; then DEV=1; shift; fi
 DEST="${1:-}"
 BUILD="$REPO/build"
 BIN="$BUILD/bin"
@@ -43,6 +52,12 @@ ICON="$REPO/assets/AppIcon.icon"
 # mix-blend-mode — they would silently reproduce the very bug this replaces.
 MASTER="$REPO/assets/mark.svg"
 SRC="$BIN/mark-master.png"
+# The icon's source raster. A release build takes the master as drawn; a
+# development build takes the inverted render. The documentation images and
+# assets/mark.png below always come from the master either way — they are
+# committed files describing the shipping app, and a dev build has no business
+# rewriting them.
+ICON_SRC="$SRC"
 
 ALPHA_CUTOFF=0.22     # below this, a pixel is fringe rather than soft edge
 ICON_FRACTION=0.72    # the glyph inside the system's tile. Apple's own icons put
@@ -69,6 +84,11 @@ echo "==> master"
 # enlargement.
 swift "$REPO/tools/svg-render.swift" "$MASTER" "$SRC" 2048 || {
   echo "could not render $MASTER" >&2; exit 1; }
+if [ -n "$DEV" ]; then
+  ICON_SRC="$BIN/mark-master-dev.png"
+  swift "$REPO/tools/svg-render.swift" "$MASTER" "$ICON_SRC" 2048 invert || {
+    echo "could not render the inverted $MASTER" >&2; exit 1; }
+fi
 command -v swiftc >/dev/null 2>&1 || { echo "swiftc missing: xcode-select --install" >&2; exit 1; }
 
 mkdir -p "$BIN" "$ICON/Assets" "$REPO/docs/img"
@@ -79,7 +99,14 @@ fi
 
 echo "==> mark"
 "$BIN/trim" "$SRC" "$REPO/assets/mark.png"       1024 "$MARK_FRACTION" "$ALPHA_CUTOFF" 2>&1 | sed 's/^/    /'
-"$BIN/trim" "$SRC" "$ICON/Assets/mark.png"       1024 "$ICON_FRACTION" "$ALPHA_CUTOFF" >/dev/null 2>&1
+"$BIN/trim" "$ICON_SRC" "$ICON/Assets/mark.png"  1024 "$ICON_FRACTION" "$ALPHA_CUTOFF" >/dev/null 2>&1
+# The bare glyph the app draws inside its own windows. A development build gets
+# the inverted one there too, so the About panel and the sheet headers agree
+# with the Dock rather than contradicting it.
+if [ -n "$DEV" ]; then
+  "$BIN/trim" "$ICON_SRC" "$BIN/mark-dev.png"    1024 "$MARK_FRACTION" "$ALPHA_CUTOFF" >/dev/null 2>&1
+  sips -z 256 256 "$BIN/mark-dev.png" --out "$BIN/mark-256-dev.png" >/dev/null
+fi
 
 # --- the manifest -----------------------------------------------------------
 # system-light / system-dark tell the system to draw its own tile per

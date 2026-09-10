@@ -35,6 +35,16 @@ command -v hdiutil >/dev/null 2>&1 || die "hdiutil is missing, which should not 
 [ -d "$APP" ] || die "no built app at $APP" "./make-app.sh"
 
 PLIST="$APP/Contents/Info.plist"
+
+# A development build carries an inverted mark and says so in About. Packaging
+# one would ship an app that looks wrong and tells its user it is not a real
+# release — and the mistake is invisible here, because the bundle is otherwise
+# identical. Refuse, and say the command.
+CHANNEL="$(/usr/libexec/PlistBuddy -c 'Print :RBBuildChannel' "$PLIST" 2>/dev/null || echo release)"
+[ "$CHANNEL" = "release" ] || die \
+  "$APP is a $CHANNEL build and will not be packaged" \
+  "./make-app.sh --release"
+
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" 2>/dev/null)" \
   || die "could not read the version out of $PLIST"
 [ -n "$VERSION" ] || die "the built app declares no CFBundleShortVersionString"

@@ -1,6 +1,6 @@
 // Render an SVG to PNG through WebKit.
 //
-//   swift tools/svg-render.swift <in.svg> <out.png> <width>
+//   swift tools/svg-render.swift <in.svg> <out.png> <width> [invert]
 //
 // WebKit and not NSImage, deliberately. NSImage loads SVG and renders
 // gradients, but silently ignores mix-blend-mode — and the mark's top petal
@@ -47,11 +47,17 @@ final class Renderer: NSObject, WKNavigationDelegate {
 }
 
 let args = CommandLine.arguments
-guard args.count == 4, let width = Int(args[3]) else {
+guard (4...5).contains(args.count), let width = Int(args[3]) else {
     FileHandle.standardError.write(
-        "usage: svg-render <in.svg> <out.png> <width>\n".data(using: .utf8)!)
+        "usage: svg-render <in.svg> <out.png> <width> [invert]\n".data(using: .utf8)!)
     exit(2)
 }
+// The development build's mark, from the same master rather than a second
+// drawing. CSS invert() is a per-channel 1-x on RGB and leaves alpha alone, so
+// the transparency the icon depends on survives it — and because the filter is
+// on the root element it runs after the petals have composited, which is what
+// makes the overlap inverted rather than re-blended.
+let inverted = args.count == 5 && args[4] == "invert"
 guard let svg = try? String(contentsOfFile: args[1], encoding: .utf8) else {
     FileHandle.standardError.write("cannot read \(args[1])\n".data(using: .utf8)!)
     exit(1)
@@ -71,7 +77,7 @@ if let m = svg.range(of: #"viewBox="[-0-9.]+ [-0-9.]+ ([0-9.]+) ([0-9.]+)""#,
 let html = """
 <!doctype html><meta charset="utf-8">
 <style>html,body{margin:0;padding:0;background:transparent}
-svg{display:block;width:\(width)px;height:\(height)px}</style>
+svg{\(inverted ? "filter:invert(1);" : "")display:block;width:\(width)px;height:\(height)px}</style>
 \(svg)
 """
 
@@ -94,4 +100,4 @@ guard renderer.finished else {
     FileHandle.standardError.write("render timed out\n".data(using: .utf8)!)
     exit(1)
 }
-print("    \(args[2]) (\(width)x\(height))")
+print("    \(args[2]) (\(width)x\(height))\(inverted ? " inverted" : "")")

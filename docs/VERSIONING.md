@@ -30,7 +30,9 @@ a minor release.
 ## Releasing
 
 1. Bump both version keys in `make-app.sh`
-2. `./make-app.sh` — builds and signs
+2. `./make-app.sh --release` — builds and signs. Without `--release` you get a
+   development build, and `make-dmg.sh` will refuse it at step 7 rather than
+   package it
 3. `./tools/lint.sh && ./tests/engine.sh && ./tests/ui.sh` — all green.
    If `ui.sh` reports SKIPPED, the render was not checked: grant this build
    Screen Recording and run it again before releasing
