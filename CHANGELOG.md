@@ -3,6 +3,59 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.4.0
+
+**Branches say whether they are still alive**
+
+A branch you do not recognise told you its name, its author and its age, and
+none of those answer the question you actually have: is this live work, or is
+it finished and safe to delete? A list you cannot triage is a list you scroll
+past.
+
+- Every row carries how many commits it is **ahead of and behind the default
+  branch**, beside the age. Ahead of *origin's* copy, not the local one — a
+  checkout whose `main` has not been fetched in a fortnight would report
+  everything as behind by nothing, which is worse than saying nothing at all
+- A branch with nothing the trunk does not already have is badged **merged**,
+  however it got there. Runbranch could only ever say that when a pull request
+  said it, and plenty of work lands without one: a squash rewrites the commits,
+  a rebase moves them, and some branches are merged by hand and never opened as
+  a pull request at all. The commit graph sees all four
+- **Show merged** now hides both readings. It was honest about the pull request
+  record and silently kept the rest
+- The **default** badge is blue rather than teal. Teal was a workaround for a
+  badge disappearing into a selected row's fill; the badge now draws white on
+  the fill instead, so the colour can be the one a default branch wears
+  everywhere else
+
+The counts come from one `git for-each-ref` walk rather than a `rev-list` per
+branch — 0.4s for a repo with three hundred remote branches. The atom needs git
+2.41, and an unknown atom is fatal to `for-each-ref` rather than ignorable, so
+it is probed once: a git one release too old loses the column and not the
+branch list.
+
+**Development builds are visibly development builds**
+
+The copy in your working folder and the copy in `/Applications` were the same
+icon, the same name and the same Cmd-Tab entry, and telling them apart meant
+reading a window title.
+
+- A build is a development build unless you ask for a release. Its mark comes
+  out colour-inverted, About carries a badge, and it does not check for updates
+- That last one is not decoration. The updater added in 1.3.0 would have
+  offered to replace a build being worked on with whatever was last tagged, and
+  **Update** is one click
+- `make-dmg.sh` refuses to package one and `tools/screenshot.sh` refuses to
+  capture one, because the documentation depicts the app people install
+
+**Fixed**
+
+- Both of those scripts told you to build a release and then left it sitting in
+  the working folder, which put back the confusion the build channel exists to
+  prevent. They now restore the development build when they finish — on success
+  only, since a failed capture is retried immediately and a failed packaging is
+  the one you want to inspect
+
 ## 1.3.0
 
 **Runbranch updates itself**
