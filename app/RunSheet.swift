@@ -202,8 +202,9 @@ struct LogViewer: View {
                     .pickerStyle(.segmented).labelsHidden().frame(width: 160)
                 }
                 Spacer(minLength: 8)
-                filterField
-                controlGroup
+                TextField("Filter", text: $filter)
+                    .textFieldStyle(.roundedBorder).frame(width: 120)
+                HStack(spacing: 8) { controls }
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
 
@@ -312,66 +313,54 @@ struct LogViewer: View {
         }
     }
 
-    /// The rounded search field and the grouped button capsule from the main
-    /// window, rebuilt by hand.
+    /// One control, so the row matches.
     ///
-    /// In the main window neither is styled by anyone: macOS draws them,
-    /// because they are a `.searchable(placement: .toolbar)` and a
-    /// `ToolbarItemGroup`. A sheet has no window toolbar, so neither is
-    /// available here — and a plain HStack of `.bordered` buttons next to a
-    /// `.roundedBorder` field is exactly the flat, square result you would
-    /// expect.
+    /// These were a mix of Button and Toggle(.button). The toggles filled with
+    /// the accent colour when on, and both defaulted to on, so the header
+    /// opened with two buttons lit up as though something wanted attention.
+    /// They also padded differently from Button, and SF Symbols have different
+    /// intrinsic widths, so a row that should have matched did not.
     ///
-    /// Putting the sheet in a NavigationStack does get a real toolbar, and it
-    /// did draw a proper rounded search field — but the ToolbarItemGroup
-    /// buttons never appeared and the title landed loose in the content area,
-    /// which was worse than this. So: the same shapes, built here.
-    private var filterField: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            TextField("Filter", text: $filter)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .frame(width: 92)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(.quaternary, in: Capsule())
-    }
-
-    /// One capsule, two buttons, a hairline between them.
-    private var controlGroup: some View {
-        HStack(spacing: 0) {
-            groupButton("exclamationmark.magnifyingglass",
-                        help: errorLines.isEmpty ? "No errors in this log"
-                                                 : "Jump to the first error",
-                        disabled: errorLines.isEmpty) {
-                jumpTarget = errorLines.first?.id
-            }
-            Divider().frame(height: 14)
-            groupButton("folder", help: "Reveal in Finder") {
-                NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
-                                              inFileViewerRootedAtPath: logDir)
-            }
-        }
-        .background(.quaternary, in: Capsule())
-    }
-
-    private func groupButton(_ symbol: String, help: String,
-                             disabled: Bool = false,
-                             action: @escaping () -> Void) -> some View {
+    /// The fixed box is what keeps a wide symbol and a narrow one the same
+    /// size.
+    private func iconButton(_ symbol: String, help: String,
+                            disabled: Bool = false,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12))
-                // A fixed box, so a wide symbol and a narrow one take the same
-                // room and the capsule stays even.
-                .frame(width: 26, height: 22)
-                .contentShape(Rectangle())
+                .frame(width: 15, height: 15)
         }
-        .buttonStyle(.borderless)
+        // Not glass, and not GlassEffectContainer either.
+        //
+        // Both were tried. Glass composites what is behind it, and a sheet is
+        // an opaque window — so there was nothing behind it but the sheet's own
+        // fill, and it came out as a flat dark chip. The same reason sheets in
+        // this app look flat generally, which is its own roadmap item.
+        .buttonStyle(.bordered)
         .disabled(disabled)
         .help(help)
+    }
+
+    /// Two, down from five.
+    ///
+    /// Wrap went because there is no longer a non-wrapping mode. Follow went
+    /// because it was on by default and the tail is where you already are, so
+    /// it looked like a download button that did nothing. Copy went because
+    /// the log is selectable text: ⌘A and ⌘C already do it, and a button for
+    /// something the keyboard does is a button in the way.
+    @ViewBuilder
+    private var controls: some View {
+        iconButton("exclamationmark.magnifyingglass",
+                   help: errorLines.isEmpty ? "No errors in this log"
+                                            : "Jump to the first error",
+                   disabled: errorLines.isEmpty) {
+            jumpTarget = errorLines.first?.id
+        }
+        iconButton("folder", help: "Reveal in Finder") {
+            NSWorkspace.shared.selectFile("\(logDir)/\(selected).log",
+                                          inFileViewerRootedAtPath: logDir)
+        }
     }
 
     private func reset() {
