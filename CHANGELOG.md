@@ -3,6 +3,45 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.5.0
+
+> **Before you install this one, copy your projects out of the app.** In the
+> Finder, right-click Runbranch in Applications, Show Package Contents, then
+> `Contents/Resources/projects` — put that folder somewhere safe. Installing
+> 1.5.0 deletes it, and this release exists because it should never have been
+> there. Afterwards, put the `.conf` files in `~/.runbranch/projects` and they
+> are safe for good. If you have never added a project through the app, there
+> is nothing to save.
+>
+> This applies to this update only. The step that destroys them lives in the
+> version you are running now, not in the one being installed, so 1.5.0 cannot
+> prevent it from happening this once — only from ever happening again.
+
+**Your projects survive an update**
+
+Project configuration was written inside the app bundle. Installing a new
+version replaces the bundle whole, so the app came back with nothing declared
+and offered to onboard you — which is the most confident possible way to say
+that your configuration is gone.
+
+This was never specific to the updater. Dragging a new copy from a disk image
+over the old one does the same and has since 1.0.0. 1.3.0 only made it
+automatic, and 1.3.0 to 1.4.0 was the first update anyone had.
+
+- The app now keeps `.conf` files in `~/.runbranch/projects`, beside the
+  per-project state that already survived. Nothing is kept in the bundle
+- Running `runbranch.sh` from a checkout is unchanged: `projects/` beside the
+  script is committed, with a README and an example in it, and someone who
+  cloned the repo put their files there on purpose. `RB_PROJECTS_DIR` still
+  wins over both, and `runbranch.sh projects-dir` prints the one in effect
+- The installer carries anything still sitting in the old bundle across before
+  deleting it, and the engine does the same on launch for an app that was
+  replaced by hand. Neither ever overwrites the copy in `~/.runbranch`, because
+  that is the one that survived
+- The app asks the engine where projects live rather than working it out from
+  the path of the script it runs. Deriving it is how it came to be pointing
+  inside its own bundle, and that sum cannot live in two places and stay right
+
 ## 1.4.0
 
 **Branches say whether they are still alive**
