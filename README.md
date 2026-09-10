@@ -323,7 +323,8 @@ and tell you when it's up.**
 ```
 runbranch.sh          the engine: git, install, infra, servers. No UI of its own.
 app/                  the front end. One file per area; App.swift has @main
-projects/*.conf       one file per project (yours are gitignored)
+projects/*.conf       one file per project when you run the script from here
+                      (yours are gitignored). The app reads ~/.runbranch/projects
 tests/engine.sh       engine tests; every case is a bug that really happened
 tests/ui.sh           app smoke test; the last two checks read the screen
 make-app.sh           builds Runbranch.app

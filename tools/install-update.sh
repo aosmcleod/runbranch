@@ -77,6 +77,30 @@ fi
 # and covers the case where the image itself arrived quarantined.
 xattr -dr com.apple.quarantine "$dst" 2>/dev/null
 
+# Carry over anything the old bundle was still keeping in Resources/projects.
+#
+# Nothing should be kept there: 1.5.0 moved project configs to
+# ~/.runbranch/projects precisely because this script deletes the old bundle,
+# and every .conf written through the app before then went with it. But an
+# install that predates the move still has them, and this is the only code that
+# ever runs with both bundles on disk at once — after this line the old one is
+# gone for good.
+#
+# Never over a file already at the destination. RB_HOME is the copy that
+# survives an install, so it is the copy that wins.
+kept="$backup/Contents/Resources/projects"
+if [ -d "$kept" ]; then
+  dest="$HOME/.runbranch/projects"
+  mkdir -p "$dest" 2>/dev/null
+  carried=0
+  for f in "$kept"/*.conf; do
+    [ -e "$f" ] || continue
+    [ -e "$dest/$(basename "$f")" ] && continue
+    cp "$f" "$dest/" 2>/dev/null && carried=$((carried + 1))
+  done
+  say "carried $carried project file(s) out of the old bundle into $dest"
+fi
+
 rm -rf "$backup"
 cleanup
 say "swapped; reopening"

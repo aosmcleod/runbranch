@@ -59,6 +59,29 @@ is "reads the display name"    "$("$ENGINE" get fixture | awk -F'\t' '$1=="NAME"
 is "reads the symbol"          "$("$ENGINE" get fixture | awk -F'\t' '$1=="SYMBOL"{print $2}')" "cube"
 is "doctor passes"             "$("$ENGINE" doctor fixture >/dev/null 2>&1; echo $?)" "0"
 
+# Projects must never be read from inside an app bundle. One update replaces
+# the bundle whole, so every .conf written through the app was destroyed by the
+# next one — silently, and looking to the user like a fresh install.
+echo "==> a bundled engine keeps its projects outside the bundle"
+BUNDLE="$TMP/Runbranch.app/Contents/Resources"
+mkdir -p "$BUNDLE/projects" "$TMP/bundle-home"
+cp "$ENGINE" "$BUNDLE/runbranch.sh"
+cp "$RB_PROJECTS_DIR/fixture.conf" "$BUNDLE/projects/carried.conf"
+BUNDLED="$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects-dir)"
+is "not inside the bundle"     "$BUNDLED" "$TMP/bundle-home/projects"
+# A bundle that still has .conf files beside the script is an install replaced
+# by hand rather than updated. Ignoring those looks identical to the bug.
+is "and carries what it finds" \
+   "$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects | cut -f1)" \
+   "carried"
+# RB_HOME wins: it is the copy that survives an install.
+echo "changed" >> "$TMP/bundle-home/projects/carried.conf"
+env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects >/dev/null 2>&1
+has "and never overwrites it"  "$(cat "$TMP/bundle-home/projects/carried.conf")" "changed"
+# A checkout is unaffected: projects/ is committed there, with a README in it.
+is "a checkout still reads beside the script" \
+   "$(env -u RB_PROJECTS_DIR "$ENGINE" projects-dir)" "$REPO/projects"
+
 echo "==> branch data"
 is "finds both branches"       "$("$ENGINE" branches fixture | wc -l | tr -d ' ')" "2"
 is "marks the default branch"  "$("$ENGINE" branches fixture | awk -F'\t' '$1=="main"{print $8}')" "1"

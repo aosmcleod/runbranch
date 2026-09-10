@@ -1,9 +1,24 @@
 # Configuration reference
 
-One `<name>.conf` per project in `projects/`, plus an optional `.runbranch`
-committed to the repo itself.
+One `<name>.conf` per project, plus an optional `.runbranch` committed to the
+repo itself.
 
 They are plain bash, sourced by the engine.
+
+## Where they live
+
+| you are running | `.conf` files are read from |
+|---|---|
+| `runbranch.sh` from a checkout | `projects/`, beside the script |
+| Runbranch.app | `~/.runbranch/projects/` |
+| anything, with `RB_PROJECTS_DIR` set | that directory, which wins over both |
+
+The app does not keep them inside its own bundle. Installing a new version
+replaces the bundle whole, so anything kept there is destroyed by the next
+update — which is what used to happen. `~/.runbranch/` is the directory that
+survives an install, and it is where the per-project state has always lived.
+
+`runbranch.sh projects-dir` prints the one in effect.
 
 Only `NAME`, `REPO` and `TARGETS` are required. Everything else exists because
 one project needed it — most projects are "install, run one command, open a

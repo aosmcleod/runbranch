@@ -167,9 +167,24 @@ enum Engine {
             .components(separatedBy: "\t") ?? []
     }
 
-    static var projectsDir: String {
-        (scriptPath as NSString).deletingLastPathComponent + "/projects"
-    }
+    /// Where `.conf` files live, according to the engine.
+    ///
+    /// This was `dirname(scriptPath) + "/projects"`, which inside the app is a
+    /// directory INSIDE the bundle — and an update replaces the bundle, so
+    /// every project added through the app was destroyed by the next one. The
+    /// engine owns the layout; asking it is the only way this cannot drift
+    /// again.
+    ///
+    /// Resolved once. It is read from a view body, and a subprocess per render
+    /// is not something to put on that path.
+    static let projectsDir: String = {
+        let out = capture(["projects-dir"]).out
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !out.isEmpty else {
+            return NSHomeDirectory() + "/.runbranch/projects"
+        }
+        return out
+    }()
 
     static func state(_ project: String) -> RunState {
         RunState(output: capture(["state", project]).out)

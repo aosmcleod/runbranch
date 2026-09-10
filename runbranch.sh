@@ -41,7 +41,53 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]
 SELF_DIR="$(dirname "$SELF")"
 
 RB_HOME="${RB_HOME:-$HOME/.runbranch}"
-PROJECTS_DIR="${RB_PROJECTS_DIR:-$SELF_DIR/projects}"
+
+# Projects live beside the script, EXCEPT when the script is inside an app
+# bundle, where they live in RB_HOME with the rest of the state.
+#
+# A bundle is not a place to keep anything. Updating replaces it wholesale, so
+# every .conf written through the app went with the old copy and the app came
+# back presenting itself as a fresh install. That was never specific to the
+# updater — dragging a new copy from a disk image over the old one does the
+# same, and did from 1.0.0. RB_HOME is the only directory here that survives
+# an install, which is why the state has always been kept there.
+#
+# Beside the script is still right for a checkout: `projects/` is committed
+# with a README and an example in it, and someone who cloned this repo put
+# their .conf files there on purpose.
+default_projects_dir() {
+  case "$SELF_DIR" in
+    */Contents/Resources|*/Contents/Resources/*|*/Contents/MacOS|*/Contents/MacOS/*)
+      printf '%s/projects' "$RB_HOME" ;;
+    *) printf '%s/projects' "$SELF_DIR" ;;
+  esac
+}
+PROJECTS_DIR="${RB_PROJECTS_DIR:-$(default_projects_dir)}"
+
+# Carry .conf files a bundle is still holding over to RB_HOME, once.
+#
+# For an app updated in place there is nothing left to carry — the old bundle
+# is deleted by the installer before this code ever runs — but an app replaced
+# by hand, or one whose files were put back after the fact, still has them, and
+# silently ignoring those would look exactly like the bug this fixes.
+#
+# Never the reverse, and never over a file already there: RB_HOME is the copy
+# that survives, so it wins.
+migrate_bundle_projects() {
+  [ -z "${RB_PROJECTS_DIR:-}" ] || return 0
+  [ "$PROJECTS_DIR" = "$RB_HOME/projects" ] || return 0
+  # Created even when there is nothing to carry. The app offers to reveal this
+  # folder and tells a new user to put .conf files in it, and both of those are
+  # embarrassing if it does not exist yet.
+  mkdir -p "$PROJECTS_DIR" 2>/dev/null || return 0
+  local old="$SELF_DIR/projects" f
+  [ -d "$old" ] || return 0
+  for f in "$old"/*.conf; do
+    [ -e "$f" ] || continue
+    [ -e "$PROJECTS_DIR/$(basename "$f")" ] || cp "$f" "$PROJECTS_DIR/" 2>/dev/null || true
+  done
+  return 0
+}
 
 # Every address you author commits under. A branch is "yours" when its tip
 # carries one of them.
@@ -2378,8 +2424,13 @@ need_project() {
 
 main() {
   harden_path
+  migrate_bundle_projects
   case "${1:-menu}" in
     projects) list_projects ;;
+    # Where .conf files live. The app used to work this out from the path of
+    # the script it runs, which is how it came to be pointing inside its own
+    # bundle — so it asks now rather than deriving.
+    projects-dir) printf '%s\n' "$PROJECTS_DIR" ;;
     branches) need_project "${2:-}"; collect_branch_data /dev/stdout ;;
     get)
       # Every editable field of a project, as key<TAB>value lines. The app reads
