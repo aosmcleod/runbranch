@@ -103,10 +103,12 @@ NOTES
 cp "$REPO/tools/install-update.sh" "$APP/Contents/Resources/install-update.sh"
 chmod +x "$APP/Contents/Resources/install-update.sh"
 
-# Menu bar template glyph, from the seamed vector: the two petals and the lens
-# where they cross are separate paths, so the silhouette reads as two shapes
-# rather than one blob. The solid version is also here
-# (assets/mark-silhouette.svg) — swap the argument to compare.
+# Menu bar template glyph, from the seamed vector: the lens where the petals
+# cross is knocked out of them and laid back in at 85%, so the silhouette reads
+# as two shapes rather than one blob. Everything is said in alpha, because that
+# is all a template keeps, and the mark's shading is left out for the same
+# reason — see the header of menubar-glyph.swift before editing the vector. The
+# solid version is also here (assets/mark-silhouette.svg) — swap to compare.
 swift "$REPO/tools/menubar-glyph.swift" "$REPO/assets/mark-template.svg" \
   "$APP/Contents/Resources"
 

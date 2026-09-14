@@ -1,14 +1,31 @@
 // Renders the monochrome template image for the menu bar.
 //
 // A menu bar item has to be a template: macOS tints it for light and dark menu
-// bars and inverts it while the menu is open, so colour and gradient cannot
-// survive the trip. Only the silhouette does — and the mark's two petals
-// overlap, so their plain silhouette is one blob with nothing to say where a
-// petal ends.
+// bars and inverts it while the menu is open, so the artwork's colour is thrown
+// away. Alpha is all that survives — and the mark's two petals overlap, so their
+// plain silhouette is one blob with nothing to say where a petal ends.
 //
-// The source is therefore a vector with the seams drawn in as real geometry:
-// the two petals and the lens where they cross are separate paths with gaps
-// between them. Rendering that gives an exact result at any size.
+// The source is therefore a vector that says everything in alpha, and nothing in
+// colour: the two petals are one path with the lens where they cross knocked out
+// of it, and the lens is its own path laid back in at 85%. Rendering that gives
+// an exact result at any size.
+//
+// The mark as drawn has shading down it — a masked gradient overlay — and the
+// vector here deliberately does NOT. Two separate walls stand between that
+// overlay and the menu bar, and both fail silently, the shape still rendering so
+// that nothing looks broken until you compare pixels:
+//
+//   * AppKit's SVG rasteriser (NSImage, what this uses) ignores <mask>. A
+//     <g mask="..."> is dropped whole, with no warning. Every design tool shows
+//     the shading; this renderer discards it.
+//   * Even rendered, the overlay is black-on-white — colour — and colour does
+//     not reach a template. It would be discarded a second time, here.
+//
+// Shading CAN be carried as a stop-opacity gradient on the fills, which is alpha
+// and does survive. It was tried and turned down: on a light bar the glyph is
+// black, so reduced alpha lightens the mark rather than darkening it, and the
+// depth reads inverted from the artwork on half the menu bars it lands on.
+// Alpha is the only channel there is, so flat is the honest answer.
 //
 // This replaced deriving the seams from the colour PNG, which worked but needed
 // hue bands tuned by hand to the mark, and re-tuning whenever it changed. If
@@ -32,9 +49,9 @@ guard let art = NSImage(contentsOfFile: args[1]), art.size.width > 0 else {
     FileHandle.standardError.write("""
         cannot read \(args[1])
 
-        This wants the seamed vector — two petals and the lens where they cross
-        as separate paths. A raster source will load but its silhouette is a
-        single blob, which is the whole thing this avoids.
+        This wants the seamed vector — the petals and the lens where they
+        cross as separate paths. A raster source will load but its silhouette
+        is a single blob, which is the whole thing this avoids.
 
         """.data(using: .utf8)!)
     exit(1)
