@@ -478,6 +478,13 @@ is  "the shifted port answers"       "$(curl -sfo /dev/null -w '%{http_code}' ht
 RECORDED="$(grep -c '^PORT_OFFSET=1$' "$RB_HOME/shift/state" 2>/dev/null)" || RECORDED=0
 is  "the offset is recorded"         "$RECORDED" "1"
 
+# The machine-readable line the app parses, which is a SEPARATE emission from
+# the human status above and once disagreed with it. The app builds its Open
+# button and its health poll from this port, so the declared one here opened
+# whatever else held it and health-checked that instead.
+is  "state reports the shifted port" \
+    "$("$ENGINE" state shift | awk -F'\t' '$1=="target"{print $3}')" "4602"
+
 # And stop has to look at the real port, not the declared one.
 "$ENGINE" stop shift >/dev/null 2>&1
 sleep 1

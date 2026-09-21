@@ -2495,8 +2495,14 @@ main() {
       set -- $S_PIDS
       for t in $S_TARGETS; do
         pid="${1:-}"; [ $# -gt 0 ] && shift
+        # target_port, NOT the declared field: load_state has restored the
+        # offset the run was started with, and this line is what the app builds
+        # its Open button and its health poll from. Emitting the declared port
+        # under an offset sent both to whatever else was on it -- the button
+        # opened a different project's server, and the health check passed on
+        # that server's 200 while this run could have been dead.
         printf 'target\t%s\t%s\t%s\t%s\t%s\n' "$t" \
-          "$(target_field "$t" port)" "$(target_field "$t" health)" \
+          "$(target_port "$t")" "$(target_field "$t" health)" \
           "${pid:-0}" "$(alive "${pid:-}" && echo 1 || echo 0)"
       done
       ;;
