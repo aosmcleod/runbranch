@@ -3,6 +3,19 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.5.1
+
+**Fixed**
+
+- A run started with a `PORT_OFFSET` told the app the port from its config
+  rather than the port it was listening on. The app builds both the Open
+  button and the health poll from that number, so Open went to whatever else
+  held the declared port — another project's server, presented as this one —
+  and the health check polled the same stranger. A run that had died reported
+  healthy on someone else's 200. Human `status` was right throughout, which is
+  how it went unnoticed: the shifted-run test asserted on `status` and never on
+  `state`, the separate line the app parses. It now asserts on both
+
 ## 1.5.0
 
 > **Before you install this one, copy your projects out of the app.** In the
