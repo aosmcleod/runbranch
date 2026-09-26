@@ -109,6 +109,13 @@ alive() {
 # A path the engine printed, in the form this file builds its own in.
 npath() { native "$1"; }
 
+# Every fixture server binds 127.0.0.1. Unbound, python's http.server binds,
+# then looks up the machine's full name (socket.getfqdn), and only then
+# listens: on CI's macOS runners that lookup stalls for about a minute, with
+# the port taken and nothing listening on it. Every port test failed, and
+# every run sat out the health wait, until the suite took twenty minutes.
+# The name of a loopback address resolves at once.
+
 # --- fixture ---------------------------------------------------------------
 FIX="$TMP/fixture"
 mkdir -p "$FIX/public"
@@ -128,7 +135,7 @@ cat > "$RB_PROJECTS_DIR/fixture.conf" <<CONF
 NAME="Fixture"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4321:/:$PY -m http.server 4321 --directory public"
+TARGETS="web:4321:/:$PY -m http.server --bind 127.0.0.1 4321 --directory public"
 SYMBOL="cube"
 CONF
 
@@ -220,7 +227,7 @@ is "appends an absent key"     "$(grep -c '^NEWKEY=' "$RB_PROJECTS_DIR/fixture.c
 # Regression: the first version passed the value through `awk -v`, which cannot
 # carry a newline, and emptied the file.
 echo "==> set survives a multi-line value"
-MULTI="$(printf 'web:4321:/:%s -m http.server 4321\001api:4322:/:%s -m http.server 4322' "$PY" "$PY")"
+MULTI="$(printf 'web:4321:/:%s -m http.server --bind 127.0.0.1 4321\001api:4322:/:%s -m http.server --bind 127.0.0.1 4322' "$PY" "$PY")"
 "$ENGINE" set fixture TARGETS "$MULTI" >/dev/null 2>&1
 is "both targets present"      "$("$ENGINE" presets fixture | wc -l | tr -d ' ')" "3"
 is "file is not empty"         "$([ -s "$RB_PROJECTS_DIR/fixture.conf" ] && echo yes)" "yes"
@@ -261,7 +268,7 @@ is "status exits non-zero"     "$("$ENGINE" status fixture >/dev/null 2>&1; echo
 
 # The presets case above left TARGETS pointing at `true`, which exits at once.
 # Put a real server back before testing a real run.
-"$ENGINE" set fixture TARGETS "web:4321:/:$PY -m http.server 4321 --directory public" >/dev/null 2>&1
+"$ENGINE" set fixture TARGETS "web:4321:/:$PY -m http.server --bind 127.0.0.1 4321 --directory public" >/dev/null 2>&1
 
 echo "==> worktree lifecycle"
 "$ENGINE" run fixture feature/one web >/dev/null 2>&1
@@ -295,13 +302,13 @@ cat > "$RB_PROJECTS_DIR/selfrun.conf" <<CONF
 NAME="Self Run"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4995:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4995:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 cat > "$RB_PROJECTS_DIR/rival.conf" <<CONF
 NAME="Rival"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4995:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4995:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 "$ENGINE" run selfrun main web >/dev/null 2>&1
 is "the run is up" "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4995/ 2>/dev/null)" "200"
@@ -324,13 +331,13 @@ echo "==> a port held from a checkout is attributed to that project"
 # The common real case: a dev server started by a terminal or an agent, inside
 # the project's own checkout. Reporting that as "another app" is unhelpful when
 # we can see whose it is.
-( cd "$FIX" && $PY -m http.server 4991 --directory public >/dev/null 2>&1 & echo $! > "$TMP/outside.pid" )
+( cd "$FIX" && $PY -m http.server --bind 127.0.0.1 4991 --directory public >/dev/null 2>&1 & echo $! > "$TMP/outside.pid" )
 sleep 2
 cat > "$RB_PROJECTS_DIR/attrib.conf" <<CONF
 NAME="Attrib"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4991:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4991:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 ATT="$("$ENGINE" check-ports attrib web 2>&1)" || true
 has "names the project"        "$ATT" "attrib"
@@ -345,10 +352,10 @@ cat > "$RB_PROJECTS_DIR/adopt.conf" <<CONF
 NAME="Adopt"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4993:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4993:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 is "idle before anything runs" "$("$ENGINE" state adopt 2>&1)" "idle"
-( cd "$FIX" && $PY -m http.server 4993 --directory public >/dev/null 2>&1 & )
+( cd "$FIX" && $PY -m http.server --bind 127.0.0.1 4993 --directory public >/dev/null 2>&1 & )
 sleep 2
 ADOPTED="$("$ENGINE" state adopt 2>&1)"
 has "reports a run"            "$ADOPTED" "run	"
@@ -394,7 +401,7 @@ NAME="In Place"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4981:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4981:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 # INSTALL is deliberately `false`: if an in-place run ever runs it, the run
 # fails and this test says so.
@@ -454,7 +461,7 @@ echo "==> a shifted run tells the server where to listen"
 cat > "$TMP/envserver.py" <<'PYSRC'
 import os, http.server, functools
 h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="public")
-http.server.HTTPServer(("", int(os.environ["PORT"])), h).serve_forever()
+http.server.HTTPServer(("127.0.0.1", int(os.environ["PORT"])), h).serve_forever()
 PYSRC
 cat > "$RB_PROJECTS_DIR/envport.conf" <<CONF
 NAME="Env Port"
@@ -465,7 +472,7 @@ CONF
 CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
 is "no conflict when the port is free" "$CHK" ""
 
-$PY -m http.server 4951 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY -m http.server --bind 127.0.0.1 4951 --directory "$FIX/public" >/dev/null 2>&1 &
 ENVBLOCK=$!
 sleep 2
 CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
@@ -484,9 +491,9 @@ cat > "$RB_PROJECTS_DIR/hardport.conf" <<CONF
 NAME="Hard Port"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4953:/:$PY -m http.server 4953 --directory public"
+TARGETS="web:4953:/:$PY -m http.server --bind 127.0.0.1 4953 --directory public"
 CONF
-$PY -m http.server 4953 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY -m http.server --bind 127.0.0.1 4953 --directory "$FIX/public" >/dev/null 2>&1 &
 HARDBLOCK=$!
 sleep 2
 IGN="$("$ENGINE" run hardport main web 1 2>&1)" || true
@@ -544,17 +551,17 @@ cat > "$RB_PROJECTS_DIR/holder.conf" <<CONF
 NAME="Holder"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4399:/:$PY -m http.server 4399"
+TARGETS="web:4399:/:$PY -m http.server --bind 127.0.0.1 4399"
 CONF
 cat > "$RB_PROJECTS_DIR/wants.conf" <<CONF
 NAME="Wants"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4399:/:$PY -m http.server 4399"
+TARGETS="web:4399:/:$PY -m http.server --bind 127.0.0.1 4399"
 CONF
 # Hold the port from inside the other project's worktree, which is what makes
 # it identifiable as ours.
-( cd "$RB_HOME/holder/worktrees/main" && $PY -m http.server 4399 >/dev/null 2>&1 & echo $! > "$TMP/holder.pid" )
+( cd "$RB_HOME/holder/worktrees/main" && $PY -m http.server --bind 127.0.0.1 4399 >/dev/null 2>&1 & echo $! > "$TMP/holder.pid" )
 sleep 2
 CONFLICT="$("$ENGINE" run wants main web 2>&1)" || true
 has "names the project holding the port" "$CONFLICT" "running holder here"
@@ -573,10 +580,10 @@ cat > "$RB_PROJECTS_DIR/shift.conf" <<CONF
 NAME="Shift"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4601:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4601:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 # Hold the declared port, so the shift is the only way to start.
-$PY -m http.server 4601 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY -m http.server --bind 127.0.0.1 4601 --directory "$FIX/public" >/dev/null 2>&1 &
 BLOCKER=$!
 sleep 2
 
@@ -629,13 +636,13 @@ cat > "$RB_PROJECTS_DIR/twinA.conf" <<CONF
 NAME="Twin A"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4501:/:$PY -m http.server 4501"
+TARGETS="web:4501:/:$PY -m http.server --bind 127.0.0.1 4501"
 CONF
 cat > "$RB_PROJECTS_DIR/twinB.conf" <<CONF
 NAME="Twin B"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4501:/:$PY -m http.server 4501"
+TARGETS="web:4501:/:$PY -m http.server --bind 127.0.0.1 4501"
 CONF
 DOC="$("$ENGINE" doctor 2>&1)" || true
 has "names the shared port"    "$DOC" "4501"
@@ -658,7 +665,7 @@ cat > "$RB_PROJECTS_DIR/spare.conf" <<CONF
 NAME="Spare"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4322:/:$PY -m http.server 4322 --directory public"
+TARGETS="web:4322:/:$PY -m http.server --bind 127.0.0.1 4322 --directory public"
 CONF
 mkdir -p "$RB_HOME/spare/logs"
 : > "$RB_HOME/spare/logs/web.log"
@@ -686,7 +693,7 @@ cat > "$RB_PROJECTS_DIR/busy.conf" <<CONF
 NAME="Busy"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4323:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4323:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 "$ENGINE" run busy main web >/dev/null 2>&1
 is  "the run really started"   "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4323/ 2>/dev/null)" "200"
@@ -738,7 +745,7 @@ NAME="Drift"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4982:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4982:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 "$ENGINE" run drift main web --in-place >/dev/null 2>&1
 UPD="$("$ENGINE" update drift 2>&1)" || true
@@ -800,7 +807,7 @@ NAME="Twin"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4321:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4321:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 OV="$("$ENGINE" overlaps)"
 has "the shared port is named"   "$OV" "4321"
@@ -827,7 +834,7 @@ is "the next suggestion avoids it" \
 
 # A listener nobody declared still has to be avoided — being able to run
 # alongside your own dev server is the point.
-$PY -m http.server $((4321 + OFF + 1)) >/dev/null 2>&1 &
+$PY -m http.server --bind 127.0.0.1 $((4321 + OFF + 1)) >/dev/null 2>&1 &
 SQUAT=$!
 sleep 1
 "$ENGINE" set twin PORT_OFFSET 0 >/dev/null 2>&1
@@ -854,7 +861,7 @@ SYMBOL="cube"   # a trailing note, as propose writes them
 NAME="Keep"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4711:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4711:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 "$ENGINE" set keep SYMBOL "globe" >/dev/null 2>&1
 getkey() { "$ENGINE" get "$1" | awk -F'\t' -v k="$2" '$1==k{print $2}'; }
@@ -889,7 +896,7 @@ REPO="$FIX"
 DEFAULT_BRANCH="main"
 COPY_FILES=".env"
 DB_URL_VARS="DATABASE_URL"
-TARGETS="web:4713:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4713:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 # Made directly: a run would stop at creating the database, for the same reason.
 DBWT="$RB_HOME/dbrun/worktrees/main"
@@ -929,7 +936,7 @@ NAME="Copy Run"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 COPY_FILES="cfgdir"
-TARGETS="web:4712:/:$PY -m http.server {port} --directory public"
+TARGETS="web:4712:/:$PY -m http.server --bind 127.0.0.1 {port} --directory public"
 CONF
 "$ENGINE" run copyrun main web >/dev/null 2>&1; "$ENGINE" stop copyrun >/dev/null 2>&1
 "$ENGINE" run copyrun main web >/dev/null 2>&1; "$ENGINE" stop copyrun >/dev/null 2>&1
