@@ -37,33 +37,6 @@ jobs:
       - name: lint
         run: ./tools/lint.sh
 
-      # TEMPORARY: the suite spends about a minute in every run and stop on
-      # this runner, and the engine sees no listener that a server plainly
-      # holds. Each suspect timed on its own, with the engine's output shown.
-      - name: diagnose (temporary)
-        timeout-minutes: 8
-        continue-on-error: true
-        run: |
-          set -x
-          E="$PWD/engine/bin/runbranch"
-          T="$(mktemp -d)"; export RB_HOME="$T/h" RB_PROJECTS_DIR="$T/p" RB_NO_OPEN=1
-          mkdir -p "$RB_PROJECTS_DIR" "$T/fx/public"; echo hi > "$T/fx/public/index.html"
-          git -C "$T/fx" init -q -b main; git -C "$T/fx" -c user.email=t@e -c user.name=t add -A
-          git -C "$T/fx" -c user.email=t@e -c user.name=t commit -qm init
-          printf 'NAME="Fx"\nREPO="%s"\nDEFAULT_BRANCH="main"\nTARGETS="web:4555:/:python3 -m http.server {port} --directory public"\n' "$T/fx" > "$RB_PROJECTS_DIR/fx.conf"
-          which python3 lsof; python3 --version
-          time python3 -c 'print(1)'
-          time lsof -nP -iTCP -sTCP:LISTEN -Fpn | head -20
-          ( cd "$T/fx" && python3 -m http.server 4556 --directory public >/dev/null 2>&1 & )
-          for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; lsof -nP -iTCP:4556 -sTCP:LISTEN -t && { echo "listening after ${i}s"; break; }; done
-          time "$E" ports
-          time "$E" check-ports fx web; echo "exit $?"
-          time "$E" run fx main web
-          time "$E" state fx
-          curl -s -o /dev/null -w 'http %{http_code}\n' -m 5 http://localhost:4555/
-          time "$E" stop fx
-          pkill -f 'http.server 4556' || true
-
       # The Go engine first: it is what the app runs, so it is the result that
       # decides a merge, and it should not wait behind the fallback's.
       - name: engine suite against the Go engine
@@ -74,9 +47,8 @@ jobs:
         run: swiftc -parse-as-library -O app/*.swift -o "$RUNNER_TEMP/rb"
 
       # runbranch.sh is the frozen fallback, due to be retired. It is still
-      # run, so a regression in it is visible, but it does not fail the job:
-      # its first run on a CI runner failed on attribution under macOS's
-      # /var -> /private/var temp directories, which it compares as strings.
+      # run, so a regression in it is visible, but it no longer decides the
+      # job: the Go engine is what the app runs.
       - name: engine suite against runbranch.sh (fallback)
         timeout-minutes: 20
         continue-on-error: true
