@@ -544,7 +544,9 @@ is "each ref gets its own worktree" "$WT_COUNT" "2"
 is "the first keeps the plain name" \
    "$([ -d "$RB_HOME/fixture/worktrees/feat-a-b" ] && echo yes || echo no)" "yes"
 # And each records itself as the owner, which is how the collision is detected.
-OWNERS="$(cat "$RB_HOME/fixture/meta/"feat-a-b*.ref 2>/dev/null | sort | tr '\n' ' ')"
+# Byte order, not the locale's: under a UTF-8 locale macOS's sort weighs + and
+# - differently, and CI's Mac put feat/a-b first.
+OWNERS="$(cat "$RB_HOME/fixture/meta/"feat-a-b*.ref 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"
 has "both refs are recorded" "$OWNERS" "feat/a+b feat/a-b"
 
 echo "==> a config that will not parse says so"
