@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  Every config key in a form rather than a text editor: ProjectEditor.swift,
+  560 x 620. The grouped Form becomes SettingsCards, the Windows Settings
+  look (ui-map §3.1), brought onto the grid: 28 px controls in 48 px rows.
+-->
+<dialogs:SheetDialog
+    x:Class="Runbranch.Dialogs.ProjectEditorDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Runbranch.Dialogs"
+    xmlns:local="using:Runbranch"
+    xmlns:views="using:Runbranch.Views"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+    <dialogs:SheetDialog.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Dialogs/SheetStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <x:Double x:Key="SettingsCardMinHeight">48</x:Double>
+            <Thickness x:Key="SettingsCardPadding">16,8,16,8</Thickness>
+            <x:Double x:Key="EditorFieldWidth">240</x:Double>
+            <x:Double x:Key="EditorNumberWidth">80</x:Double>
+            <x:Double x:Key="EditorTargetsMinHeight">64</x:Double>
+            <!-- Pinned: the stock ToggleSwitch asks for 36 whatever its margins say,
+                 and its visible parts are 20, so 28 is the grid with room to spare. -->
+            <Style x:Key="EditorToggleStyle" TargetType="ToggleSwitch">
+                <Setter Property="Height" Value="{StaticResource RbControlHeight}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="EditorFieldStyle" TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">
+                <Setter Property="Width" Value="{StaticResource EditorFieldWidth}" />
+            </Style>
+        </ResourceDictionary>
+    </dialogs:SheetDialog.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Style="{StaticResource SheetHeaderStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="Heading" VerticalAlignment="Center" Style="{StaticResource SheetTitleTextStyle}" />
+            <TextBlock x:Name="Unsaved" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource RbCaptionTextStyle}" />
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource SheetDividerStyle}" />
+
+        <ProgressRing x:Name="Spinner" Grid.Row="2" Width="{StaticResource RbIconSize}" Height="{StaticResource RbIconSize}" IsActive="True" />
+
+        <ScrollViewer x:Name="Form" Grid.Row="2" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+            <StackPanel Padding="{StaticResource SheetBandPadding}" Spacing="{StaticResource RbSpacingSmall}">
+                <TextBlock Text="Project" Style="{StaticResource RbBodyStrongTextStyle}" />
+                <toolkit:SettingsCard Header="Name">
+                    <TextBox Tag="NAME" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Sidebar icon">
+                    <views:SymbolPicker x:Name="Symbol" Picked="OnSymbol" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Default branch">
+                    <TextBox Tag="DEFAULT_BRANCH" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Repository">
+                    <!-- Abbreviated, like the rest of the app. A full path here
+                         also puts the account name into any screenshot. -->
+                    <TextBlock x:Name="Repository" Style="{StaticResource SheetMonoCaptionStyle}" MaxWidth="{StaticResource EditorFieldWidth}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </toolkit:SettingsCard>
+
+                <TextBlock Text="Run" Style="{StaticResource SheetSectionHeaderStyle}" />
+                <toolkit:SettingsCard Header="Targets" Description="One per line: name:port:health:command"
+                                      ContentAlignment="Vertical" HorizontalContentAlignment="Stretch">
+                    <TextBox Tag="TARGETS" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="{StaticResource EditorTargetsMinHeight}"
+                             FontFamily="{StaticResource RbMonoFontFamily}" FontSize="{StaticResource RbCaptionFontSize}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Always started">
+                    <TextBox Tag="ALWAYS" PlaceholderText="e.g. api" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Presets">
+                    <TextBox Tag="PRESETS" PlaceholderText="web=web  both=web,admin" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <!-- Here rather than in its own section: it only means
+                     anything next to the ports it shifts. -->
+                <toolkit:SettingsCard x:Name="OffsetCard" Header="Port offset">
+                    <TextBox Tag="PORT_OFFSET" PlaceholderText="0" Width="{StaticResource EditorNumberWidth}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Targets come from a Procfile">
+                    <ToggleSwitch Tag="PROCFILE" Style="{StaticResource EditorToggleStyle}" Toggled="OnToggled" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="The server opens a browser itself">
+                    <ToggleSwitch Tag="OPENS_ITSELF" Style="{StaticResource EditorToggleStyle}" Toggled="OnToggled" />
+                </toolkit:SettingsCard>
+
+                <TextBlock Text="Setup" Style="{StaticResource SheetSectionHeaderStyle}" />
+                <toolkit:SettingsCard Header="Install">
+                    <TextBox Tag="INSTALL" PlaceholderText="pnpm install --frozen-lockfile" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Runtime">
+                    <ComboBox x:Name="Runtime" Tag="RUNTIME" MinWidth="{StaticResource EditorNumberWidth}" SelectionChanged="OnRuntime" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Copy into the worktree">
+                    <TextBox Tag="COPY_FILES" PlaceholderText=".env.local" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+
+                <TextBlock Text="Infrastructure" Style="{StaticResource SheetSectionHeaderStyle}" />
+                <toolkit:SettingsCard Header="Compose services">
+                    <TextBox Tag="COMPOSE_SERVICES" PlaceholderText="postgres valkey" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Compose project">
+                    <TextBox Tag="COMPOSE_PROJECT" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Migrate">
+                    <TextBox Tag="MIGRATE" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Seed">
+                    <TextBox Tag="SEED" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard Header="Database URL variables">
+                    <TextBox Tag="DB_URL_VARS" PlaceholderText="DATABASE_URL" Style="{StaticResource EditorFieldStyle}" TextChanged="OnText" />
+                </toolkit:SettingsCard>
+
+                <InfoBar x:Name="InRepo" Margin="{StaticResource SheetSectionMargin}" Severity="Informational" IsClosable="False" IsOpen="False"
+                         Message="This project also has a .runbranch in its repository. Values here override it." />
+            </StackPanel>
+        </ScrollViewer>
+
+        <InfoBar x:Name="Problem" Grid.Row="3" Margin="{StaticResource SheetInfoBarMargin}" Severity="Error" IsOpen="False" />
+
+        <Border Grid.Row="4" Style="{StaticResource SheetFooterStyle}">
+            <Grid>
+                <Button x:Name="Reveal" Content="Show in File Explorer" Style="{StaticResource SheetButtonStyle}" Click="OnReveal" />
+                <StackPanel Style="{StaticResource SheetFooterButtonsStyle}">
+                    <Button x:Name="Cancel" Content="Cancel" Style="{StaticResource SheetButtonStyle}" Click="OnCancelClick" />
+                    <Button x:Name="Save" Content="Save" Style="{StaticResource SheetAccentButtonStyle}" IsEnabled="False" Click="OnSave" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</dialogs:SheetDialog>

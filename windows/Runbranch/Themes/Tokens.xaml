@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  The design tokens: spec F6's strict grid, and the colours that mean
+  something. Everything visual that is not a stock WinUI control's own look
+  comes from here, so the main window and the dialogs cannot drift apart.
+
+  The grid (F6, approved):
+    28 px   control height            RbControlHeight
+    13 px   body text                 RbBodyFontSize (also the WinUI default here)
+    11 px   captions                  RbCaptionFontSize
+     8 px   spacing unit              RbSpacing, with 4 / 12 / 16 around it
+     4 / 8  corner radii              RbRadiusSmall / RbRadius (cards, dialogs)
+    16 px   sidebar and toolbar icons RbIconSize
+    12 px   badge icons               RbBadgeIconSize
+
+  Colours are the Mac's semantic ones — its system colours and GitHub's PR
+  colours — because they are product meaning, not platform chrome (spec D7).
+  Each has a light and a dark value, and a 14% fill for badge backgrounds,
+  which is what the Mac's Badge draws: `tint.opacity(0.14)`. They are named
+  Rb{Tone}Brush and Rb{Tone}FillBrush after the Tone enum in Model.cs, so
+  code can look one up by name; they live in the theme dictionaries, because
+  a brush outside them keeps the colour it was first given.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- First: XAML will not take a property element between content items. -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+            <!-- The grid overrides, repeated for ThemeResource lookups (see below) -->
+            <x:Double x:Key="ControlContentThemeFontSize">13</x:Double>
+            <x:Double x:Key="ContentControlFontSize">13</x:Double>
+            <Thickness x:Key="ButtonPadding">11,4,11,5</Thickness>
+            <x:Double x:Key="TextControlThemeMinHeight">28</x:Double>
+            <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+            <x:Double x:Key="ComboBoxMinHeight">28</x:Double>
+            <Thickness x:Key="ComboBoxPadding">12,4,0,5</Thickness>
+            <x:Double x:Key="AutoSuggestBoxMinHeight">28</x:Double>
+            <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+
+            <!-- The Mac's system colours for this appearance; the PR colours are
+                 GitHub's own, as Model.swift has them, the same in both. -->
+            <SolidColorBrush x:Key="RbTrunkBrush" Color="#FF007AFF" />
+            <SolidColorBrush x:Key="RbGreenBrush" Color="#FF34C759" />
+            <SolidColorBrush x:Key="RbOrangeBrush" Color="#FFFF9500" />
+            <SolidColorBrush x:Key="RbRedBrush" Color="#FFFF3B30" />
+            <SolidColorBrush x:Key="RbPurpleBrush" Color="#FFAF52DE" />
+            <SolidColorBrush x:Key="RbPrOpenBrush" Color="#FF21A64F" />
+            <SolidColorBrush x:Key="RbPrMergedBrush" Color="#FFA370F7" />
+            <SolidColorBrush x:Key="RbPrClosedBrush" Color="#FFF7524A" />
+            <SolidColorBrush x:Key="RbTrunkFillBrush" Color="#FF007AFF" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbGreenFillBrush" Color="#FF34C759" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbOrangeFillBrush" Color="#FFFF9500" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbRedFillBrush" Color="#FFFF3B30" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPurpleFillBrush" Color="#FFAF52DE" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrOpenFillBrush" Color="#FF21A64F" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrMergedFillBrush" Color="#FFA370F7" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrClosedFillBrush" Color="#FFF7524A" Opacity="0.14" />
+
+            <SolidColorBrush x:Key="RbSecondaryBrush" Color="{ThemeResource TextFillColorSecondary}" />
+            <SolidColorBrush x:Key="RbTertiaryBrush" Color="{ThemeResource TextFillColorTertiary}" />
+            <SolidColorBrush x:Key="RbSecondaryFillBrush" Color="{ThemeResource TextFillColorSecondary}" Opacity="0.14" />
+
+            <!-- Destructive (Stop, Remove, Take over): Windows' critical fill,
+                 with the same on-accent text an accent button uses -->
+            <SolidColorBrush x:Key="RbDestructiveBackground" Color="#FFC42B1C" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPointerOver" Color="#FFC42B1C" Opacity="0.9" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPressed" Color="#FFC42B1C" Opacity="0.8" />
+            <SolidColorBrush x:Key="RbDestructiveForeground" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="RbDestructiveForegroundPressed" Color="#B3FFFFFF" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+            <!-- The grid overrides, repeated for ThemeResource lookups (see below) -->
+            <x:Double x:Key="ControlContentThemeFontSize">13</x:Double>
+            <x:Double x:Key="ContentControlFontSize">13</x:Double>
+            <Thickness x:Key="ButtonPadding">11,4,11,5</Thickness>
+            <x:Double x:Key="TextControlThemeMinHeight">28</x:Double>
+            <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+            <x:Double x:Key="ComboBoxMinHeight">28</x:Double>
+            <Thickness x:Key="ComboBoxPadding">12,4,0,5</Thickness>
+            <x:Double x:Key="AutoSuggestBoxMinHeight">28</x:Double>
+            <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+
+            <!-- The Mac's system colours for this appearance; the PR colours are
+                 GitHub's own, as Model.swift has them, the same in both. -->
+            <SolidColorBrush x:Key="RbTrunkBrush" Color="#FF0A84FF" />
+            <SolidColorBrush x:Key="RbGreenBrush" Color="#FF30D158" />
+            <SolidColorBrush x:Key="RbOrangeBrush" Color="#FFFF9F0A" />
+            <SolidColorBrush x:Key="RbRedBrush" Color="#FFFF453A" />
+            <SolidColorBrush x:Key="RbPurpleBrush" Color="#FFBF5AF2" />
+            <SolidColorBrush x:Key="RbPrOpenBrush" Color="#FF21A64F" />
+            <SolidColorBrush x:Key="RbPrMergedBrush" Color="#FFA370F7" />
+            <SolidColorBrush x:Key="RbPrClosedBrush" Color="#FFF7524A" />
+            <SolidColorBrush x:Key="RbTrunkFillBrush" Color="#FF0A84FF" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbGreenFillBrush" Color="#FF30D158" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbOrangeFillBrush" Color="#FFFF9F0A" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbRedFillBrush" Color="#FFFF453A" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPurpleFillBrush" Color="#FFBF5AF2" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrOpenFillBrush" Color="#FF21A64F" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrMergedFillBrush" Color="#FFA370F7" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrClosedFillBrush" Color="#FFF7524A" Opacity="0.14" />
+
+            <SolidColorBrush x:Key="RbSecondaryBrush" Color="{ThemeResource TextFillColorSecondary}" />
+            <SolidColorBrush x:Key="RbTertiaryBrush" Color="{ThemeResource TextFillColorTertiary}" />
+            <SolidColorBrush x:Key="RbSecondaryFillBrush" Color="{ThemeResource TextFillColorSecondary}" Opacity="0.14" />
+
+            <SolidColorBrush x:Key="RbDestructiveBackground" Color="#FFFF99A4" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPointerOver" Color="#FFFF99A4" Opacity="0.9" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPressed" Color="#FFFF99A4" Opacity="0.8" />
+            <SolidColorBrush x:Key="RbDestructiveForeground" Color="#FF000000" />
+            <SolidColorBrush x:Key="RbDestructiveForegroundPressed" Color="#80000000" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="HighContrast">
+            <!-- The grid overrides, repeated for ThemeResource lookups (see below) -->
+            <x:Double x:Key="ControlContentThemeFontSize">13</x:Double>
+            <x:Double x:Key="ContentControlFontSize">13</x:Double>
+            <Thickness x:Key="ButtonPadding">11,4,11,5</Thickness>
+            <x:Double x:Key="TextControlThemeMinHeight">28</x:Double>
+            <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+            <x:Double x:Key="ComboBoxMinHeight">28</x:Double>
+            <Thickness x:Key="ComboBoxPadding">12,4,0,5</Thickness>
+            <x:Double x:Key="AutoSuggestBoxMinHeight">28</x:Double>
+            <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+
+            <SolidColorBrush x:Key="RbTrunkBrush" Color="#FF007AFF" />
+            <SolidColorBrush x:Key="RbGreenBrush" Color="#FF34C759" />
+            <SolidColorBrush x:Key="RbOrangeBrush" Color="#FFFF9500" />
+            <SolidColorBrush x:Key="RbRedBrush" Color="#FFFF3B30" />
+            <SolidColorBrush x:Key="RbPurpleBrush" Color="#FFAF52DE" />
+            <SolidColorBrush x:Key="RbPrOpenBrush" Color="#FF21A64F" />
+            <SolidColorBrush x:Key="RbPrMergedBrush" Color="#FFA370F7" />
+            <SolidColorBrush x:Key="RbPrClosedBrush" Color="#FFF7524A" />
+            <SolidColorBrush x:Key="RbTrunkFillBrush" Color="#FF007AFF" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbGreenFillBrush" Color="#FF34C759" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbOrangeFillBrush" Color="#FFFF9500" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbRedFillBrush" Color="#FFFF3B30" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPurpleFillBrush" Color="#FFAF52DE" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrOpenFillBrush" Color="#FF21A64F" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrMergedFillBrush" Color="#FFA370F7" Opacity="0.14" />
+            <SolidColorBrush x:Key="RbPrClosedFillBrush" Color="#FFF7524A" Opacity="0.14" />
+
+            <SolidColorBrush x:Key="RbSecondaryBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="RbTertiaryBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+            <SolidColorBrush x:Key="RbSecondaryFillBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="RbDestructiveBackground" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="RbDestructiveBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="RbDestructiveForeground" Color="{ThemeResource SystemColorHighlightTextColor}" />
+            <SolidColorBrush x:Key="RbDestructiveForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- The grid -->
+    <x:Double x:Key="RbControlHeight">28</x:Double>
+    <x:Double x:Key="RbBodyFontSize">13</x:Double>
+    <x:Double x:Key="RbCaptionFontSize">11</x:Double>
+    <x:Double x:Key="RbSubtitleFontSize">16</x:Double>
+    <x:Double x:Key="RbIconSize">16</x:Double>
+    <x:Double x:Key="RbBadgeIconSize">12</x:Double>
+    <!-- The two display roles outside F6's list: an empty state's glyph
+         (ContentUnavailableView) and the welcome screen's mark (84, the Mac's) -->
+    <!-- Chips (Badge): one height for every chip, icon or not — the 11 px
+         caption's 16 px line plus 1 px each side — and 6 px either end -->
+    <x:Double x:Key="RbChipHeight">18</x:Double>
+    <Thickness x:Key="RbChipPadding">6,0</Thickness>
+    <!-- List rows: sized by their lines, with this above and below -->
+    <Thickness x:Key="RbRowPadding">0,8</Thickness>
+    <x:Double x:Key="RbDisplayIconSize">32</x:Double>
+    <x:Double x:Key="RbMarkSize">84</x:Double>
+    <x:Double x:Key="RbSpacingSmall">4</x:Double>
+    <x:Double x:Key="RbSpacing">8</x:Double>
+    <x:Double x:Key="RbSpacingMedium">12</x:Double>
+    <x:Double x:Key="RbSpacingLarge">16</x:Double>
+    <Thickness x:Key="RbSpacingThickness">8</Thickness>
+    <Thickness x:Key="RbCardPadding">12,8,12,8</Thickness>
+    <Thickness x:Key="RbPagePadding">16</Thickness>
+    <CornerRadius x:Key="RbRadiusSmall">4</CornerRadius>
+    <CornerRadius x:Key="RbRadius">8</CornerRadius>
+    <CornerRadius x:Key="RbCapsuleRadius">9</CornerRadius>
+    <FontFamily x:Key="RbMonoFontFamily">Cascadia Mono, Consolas</FontFamily>
+
+    <!--
+      The grid applied to stock controls, through WinUI's own lightweight
+      styling keys. 13 px text with 4 + 5 px padding and a 1 px border lands a
+      Button on 28; the text boxes and combo boxes are pinned to the same.
+      They are repeated inside each theme dictionary below, because
+      {ThemeResource} lookups find a theme dictionary's entry before a plain
+      one, and the stock values live in theme dictionaries: set only here,
+      the TextBox kept its 32 px.
+    -->
+    <x:Double x:Key="ControlContentThemeFontSize">13</x:Double>
+    <x:Double x:Key="ContentControlFontSize">13</x:Double>
+    <Thickness x:Key="ButtonPadding">11,4,11,5</Thickness>
+    <x:Double x:Key="TextControlThemeMinHeight">28</x:Double>
+    <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+    <x:Double x:Key="ComboBoxMinHeight">28</x:Double>
+    <Thickness x:Key="ComboBoxPadding">12,4,0,5</Thickness>
+    <x:Double x:Key="AutoSuggestBoxMinHeight">28</x:Double>
+    <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+
+    <!--
+      The implicit Button style, restated. AccentButtonStyle picked up the
+      overrides above and measured 28; the stock implicit style did not, and
+      measured 30.4, because its values are resolved when the stock
+      dictionary loads. Saying it here is the one place that settles it.
+    -->
+    <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+        <Setter Property="Padding" Value="11,4,11,5" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <!-- Dialog sizes, raised so the Mac's 620-680 px sheets fit (F1) -->
+    <x:Double x:Key="ContentDialogMaxWidth">720</x:Double>
+    <x:Double x:Key="ContentDialogMaxHeight">760</x:Double>
+
+    <!-- Health uses the tones too (HealthRules.Tone): healthy green, starting
+         orange, failing red, unknown secondary. -->
+
+    <!-- Text styles on the grid -->
+    <Style x:Key="RbBodyTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+        <Setter Property="FontSize" Value="{StaticResource RbBodyFontSize}" />
+    </Style>
+    <Style x:Key="RbBodyStrongTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+        <Setter Property="FontSize" Value="{StaticResource RbBodyFontSize}" />
+    </Style>
+    <Style x:Key="RbCaptionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+        <Setter Property="FontSize" Value="{StaticResource RbCaptionFontSize}" />
+        <Setter Property="Foreground" Value="{ThemeResource RbSecondaryBrush}" />
+    </Style>
+    <Style x:Key="RbMonoTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+        <Setter Property="FontFamily" Value="{StaticResource RbMonoFontFamily}" />
+        <Setter Property="FontSize" Value="{StaticResource RbCaptionFontSize}" />
+        <Setter Property="IsTextSelectionEnabled" Value="True" />
+    </Style>
+
+    <!-- The run strip and other cards (spec 6.3: Card, 8 px radius) -->
+    <Style x:Key="RbCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RbRadius}" />
+        <Setter Property="Padding" Value="{StaticResource RbCardPadding}" />
+    </Style>
+
+    <!--
+      Destructive buttons: Stop, Stop and Switch, Take Over, Remove Project.
+      Windows has no stock destructive button, so this is AccentButtonStyle's
+      shape with the critical fill (ui-map §3.1). A full template rather than
+      a Background setter, because the stock template's pointer-over and
+      pressed states would put the accent colour back the moment the pointer
+      touched it.
+    -->
+    <Style x:Key="DestructiveButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="{ThemeResource RbDestructiveBackground}" />
+        <Setter Property="Foreground" Value="{ThemeResource RbDestructiveForeground}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorOnAccentDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="{StaticResource ButtonPadding}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="FontFamily" Value="{ThemeResource ContentControlThemeFontFamily}" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="FontSize" Value="{ThemeResource ControlContentThemeFontSize}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+        <Setter Property="MinHeight" Value="{StaticResource RbControlHeight}" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="FocusVisualMargin" Value="-3" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <ContentPresenter
+                        x:Name="ContentPresenter"
+                        Padding="{TemplateBinding Padding}"
+                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                        AutomationProperties.AccessibilityView="Raw"
+                        Background="{ThemeResource RbDestructiveBackground}"
+                        BackgroundSizing="{TemplateBinding BackgroundSizing}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        ContentTransitions="{TemplateBinding ContentTransitions}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Foreground="{ThemeResource RbDestructiveForeground}">
+                        <!--
+                          Fill and text are resolved here, in the template, not
+                          taken from the Style's setters. The theme is set on the
+                          window's root element rather than the Application, and
+                          a Style setter's ThemeResource can resolve against the
+                          Application's theme instead: in dark mode Stop came out
+                          as the dark-theme pink fill with the light-theme white
+                          text, which is barely readable. A ThemeResource in the
+                          template follows the element's own theme, live.
+                        -->
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualState x:Name="Normal" />
+                                <VisualState x:Name="PointerOver">
+                                    <VisualState.Setters>
+                                        <Setter Target="ContentPresenter.Background" Value="{ThemeResource RbDestructiveBackgroundPointerOver}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <VisualState.Setters>
+                                        <Setter Target="ContentPresenter.Background" Value="{ThemeResource RbDestructiveBackgroundPressed}" />
+                                        <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource RbDestructiveForegroundPressed}" />
+                                        <Setter Target="ContentPresenter.BorderBrush" Value="{ThemeResource ControlFillColorTransparentBrush}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <VisualState.Setters>
+                                        <Setter Target="ContentPresenter.Background" Value="{ThemeResource AccentButtonBackgroundDisabled}" />
+                                        <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                                        <Setter Target="ContentPresenter.BorderBrush" Value="{ThemeResource AccentButtonBorderBrushDisabled}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                    </ContentPresenter>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

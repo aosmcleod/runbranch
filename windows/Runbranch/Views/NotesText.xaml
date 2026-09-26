@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  Changelog prose, drawn rather than dumped: Updates.swift's NotesText.
+  The styles are here, with theme colours, so the lines built in code follow
+  light and dark like everything else.
+-->
+<UserControl
+    x:Class="Runbranch.Views.NotesText"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+    <UserControl.Resources>
+        <Thickness x:Key="NotesLineMargin">0,0,0,4</Thickness>
+        <Thickness x:Key="NotesHeadingMargin">0,4,0,4</Thickness>
+        <x:Double x:Key="NotesGap">8</x:Double>
+        <!-- The bullet's column: a dot, then the text on one left edge however it wraps -->
+        <x:Double x:Key="NotesBulletWidth">12</x:Double>
+        <Style x:Key="NotesBodyStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyTextStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+            <Setter Property="Margin" Value="{StaticResource NotesLineMargin}" />
+        </Style>
+        <Style x:Key="NotesHeadingStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyStrongTextStyle}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+            <Setter Property="Margin" Value="{StaticResource NotesHeadingMargin}" />
+        </Style>
+        <Style x:Key="NotesDotStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyTextStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+            <Setter Property="Width" Value="{StaticResource NotesBulletWidth}" />
+        </Style>
+    </UserControl.Resources>
+    <StackPanel x:Name="Lines" />
+</UserControl>
