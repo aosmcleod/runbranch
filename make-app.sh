@@ -135,8 +135,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key>              <string>Runbranch</string>
   <key>CFBundleDisplayName</key>       <string>Runbranch</string>
   <key>CFBundleIdentifier</key>        <string>dev.runbranch.app</string>
-  <key>CFBundleVersion</key>           <string>1.5.1</string>
-  <key>CFBundleShortVersionString</key><string>1.5.1</string>
+  <key>CFBundleVersion</key>           <string>1.6.0</string>
+  <key>CFBundleShortVersionString</key><string>1.6.0</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>CFBundleExecutable</key>        <string>RunBranch</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
