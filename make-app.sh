@@ -5,7 +5,9 @@
 # the app runs it as a subprocess and streams it into a window.
 #
 # Needs only the Xcode command line tools (swiftc) plus sips and iconutil,
-# which ship with macOS. No packages, no SPM manifest, no Xcode project.
+# which ship with macOS. No packages, no SPM manifest, no Xcode project. Go,
+# when it is on PATH, adds the engine binary; without it the app runs the
+# script, as it always has.
 #
 # Builds are development builds unless you say otherwise. A development build
 # carries the mark with its colours inverted and says so in About, because the
@@ -160,6 +162,40 @@ fi)
 </plist>
 PLIST
 
+# --- Go engine ------------------------------------------------------------
+# The shared engine in engine/, which the Windows app runs too. Bundled beside
+# runbranch.sh rather than instead of it: Engine.swift prefers the binary and
+# falls back to the script, and the script stays until the engine suite has
+# passed against the binary on a Mac.
+#
+# In Contents/Helpers, not beside the script in Resources. Resources is for
+# data, and codesign --deep --strict (which make-dmg.sh runs) treats a Mach-O
+# there as unsealed code. Contents/MacOS is no better: the volume is
+# case-insensitive, so "runbranch" there IS the app's own "RunBranch".
+#
+# Built after Info.plist so the version comes from the one place it is
+# declared (docs/VERSIONING.md) rather than a second copy here. Universal, so
+# one bundle runs on Apple silicon and Intel; CGO off, so it needs no SDK and
+# links nothing but the system.
+if command -v go >/dev/null 2>&1; then
+  VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+  mkdir -p "$APP/Contents/Helpers"
+  ENGINE_OUT="$APP/Contents/Helpers/runbranch"
+  ENGINE_TMP="$(mktemp -d)"
+  for arch in arm64 amd64; do
+    (cd "$REPO/engine" && CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+      go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+      -o "$ENGINE_TMP/runbranch-$arch" ./cmd/runbranch)
+  done
+  lipo -create "$ENGINE_TMP/runbranch-arm64" "$ENGINE_TMP/runbranch-amd64" -output "$ENGINE_OUT"
+  rm -rf "$ENGINE_TMP"
+  chmod +x "$ENGINE_OUT"
+  echo "    engine built ($VERSION, arm64 + x86_64)"
+else
+  ENGINE_OUT=""
+  echo "    !! go is not on PATH; bundling only runbranch.sh, which the app falls back to" >&2
+fi
+
 # Signing identity. An ad-hoc signature (-s -) derives the identity from the
 # binary's own hash, so every rebuild looks like a different app to macOS and
 # any privacy grant given to the previous build is dropped. That is fine for
@@ -168,14 +204,25 @@ PLIST
 #
 # So prefer a fixed local certificate when one exists. ./tools/make-signing-identity.sh
 # creates it; without it we fall back to ad-hoc and say what that costs.
+#
+# The engine binary is signed first, on its own, with the same identity.
+# Signing the bundle seals nested code but does not sign it, and Apple
+# silicon kills an arm64 executable
+# whose signature does not verify. lipo keeps the ad-hoc signature the Go
+# linker gives each slice, but that is not something to rely on, and signing
+# it after the bundle would invalidate the bundle's seal.
 SIGN_ID="Runbranch Local Signing"
+sign() {
+  [ -z "$ENGINE_OUT" ] || codesign --force --sign "$1" "$ENGINE_OUT" >/dev/null 2>&1 || return 1
+  codesign --force --sign "$1" "$APP" >/dev/null 2>&1
+}
 if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGN_ID"; then
-  codesign --force --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 \
+  sign "$SIGN_ID" \
     && echo "    signed with $SIGN_ID" \
     || { echo "    !! signing with $SIGN_ID failed, falling back to ad-hoc" >&2
-         codesign --force --sign - "$APP" >/dev/null 2>&1 || true; }
+         sign - || true; }
 else
-  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+  sign - || true
   echo "    signed ad-hoc (screenshots will need re-granting; see tools/make-signing-identity.sh)"
 fi
 

@@ -9,13 +9,14 @@
 // See the GNU General Public License for more details:
 // <https://www.gnu.org/licenses/>.
 
-// The only place that talks to runbranch.sh. Every subcommand the app uses
-// is a function here, and nothing else shells out.
+// The only place that talks to the engine — the Go `runbranch` binary, or
+// runbranch.sh where that is not bundled. Every subcommand the app uses is a
+// function here, and nothing else shells out.
 
 import SwiftUI
 import AppKit
 
-/// Runs runbranch.sh.
+/// Runs the engine.
 ///
 /// An app launched from the Dock inherits launchd's environment, which has
 /// neither docker (/usr/local/bin) nor pnpm (/opt/homebrew/bin) nor node (fnm
@@ -36,13 +37,27 @@ enum Engine {
     /// only ever worked on the machine that did the building: a copy given to
     /// anyone else would launch and find nothing to run.
     ///
-    /// RB_ENGINE overrides it, for pointing a built app at a working copy
-    /// without rebuilding.
+    /// In order: RB_ENGINE, for pointing a built app at a working copy without
+    /// rebuilding; then the bundled `runbranch` binary, the Go engine the
+    /// Windows app shares, so both platforms run one implementation of the
+    /// contract; then the bundled runbranch.sh. The script stays as the
+    /// fallback until the engine suite has passed against the binary on a Mac,
+    /// and it is all a build made without Go on PATH ships.
+    ///
+    /// Both are executables run directly, never through a shell, so nothing
+    /// below cares which one this picked.
     static var scriptPath: String {
         let fm = FileManager.default
         if let override = ProcessInfo.processInfo.environment["RB_ENGINE"],
            fm.isExecutableFile(atPath: override) {
             return override
+        }
+        // Contents/Helpers, where make-app.sh puts nested executables; see
+        // the note there on why not Resources or MacOS.
+        let binary = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/runbranch").path
+        if fm.isExecutableFile(atPath: binary) {
+            return binary
         }
         if let bundled = Bundle.main.url(forResource: "runbranch", withExtension: "sh"),
            fm.isExecutableFile(atPath: bundled.path) {
@@ -86,7 +101,7 @@ enum Engine {
                 "login shell did not answer within 5s; falling back to a default PATH. "
                     .data(using: .utf8)!)
             FileHandle.standardError.write(
-                "Run `runbranch.sh doctor` to see what is missing.\n".data(using: .utf8)!)
+                "Run `runbranch doctor` to see what is missing.\n".data(using: .utf8)!)
             return resolved
         }
         p.waitUntilExit()
