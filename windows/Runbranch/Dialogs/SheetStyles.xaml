@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  The frame every sheet shares (spec F1, F6), merged into each dialog's own
+  resources so it cannot leak into the main window.
+
+  A sheet is a stock ContentDialog with its own padding, title and command
+  row turned off, and the same three bands drawn in their place: a header
+  (icon, title, one line of what this is), the body, and a footer on the
+  dialog's base colour under a separator — which is what the stock command
+  row looks like. It is drawn rather than used because the Mac's footers put
+  things on the left (Copy log, Select all, Reveal config, a status line) and
+  the stock row can only hold three equal-width buttons on the right.
+
+  Every size here is a Tokens.xaml size: 16 px sides, 12 px above and below,
+  8 px between things, 28 px controls.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- The stock dialog's own spacing, off: each sheet draws its bands -->
+    <Thickness x:Key="ContentDialogPadding">0</Thickness>
+    <Thickness x:Key="ContentDialogTitleMargin">0</Thickness>
+    <Thickness x:Key="ContentDialogSeparatorThickness">0</Thickness>
+    <x:Double x:Key="ContentDialogMinHeight">0</x:Double>
+    <x:Double x:Key="ContentDialogMinWidth">0</x:Double>
+
+    <!-- ToggleSwitch on the grid: its 20 px track with 4 above and below is
+         28, where the stock 10 and 10 made it 36 and its row 54 -->
+    <x:Double x:Key="ToggleSwitchPreContentMargin">4</x:Double>
+    <x:Double x:Key="ToggleSwitchPostContentMargin">4</x:Double>
+    <!-- InfoBar text on the grid: 13, where the stock is 14 -->
+    <x:Double x:Key="InfoBarTitleFontSize">13</x:Double>
+    <x:Double x:Key="InfoBarMessageFontSize">13</x:Double>
+
+    <!-- The one alignment grid: 16 px sides everywhere, 12 px bands -->
+    <Thickness x:Key="SheetBandPadding">16,12,16,12</Thickness>
+    <Thickness x:Key="SheetRowPadding">16,8,16,8</Thickness>
+    <Thickness x:Key="SheetRowDividerMargin">16,0,0,0</Thickness>
+    <Thickness x:Key="SheetSectionMargin">0,12,0,0</Thickness>
+    <!-- An error inside a sheet: an InfoBar above the footer, on the side grid.
+         A second dialog cannot open over the first, which is where the Mac
+         puts its alert. -->
+    <Thickness x:Key="SheetInfoBarMargin">16,0,16,12</Thickness>
+    <!-- A ListView's rows bring their own 12 px sides; half a spacing unit above and below each -->
+    <Thickness x:Key="SheetListPadding">0,4,0,4</Thickness>
+    <x:Double x:Key="SheetProgressWidth">256</x:Double>
+    <x:Double x:Key="SheetButtonMinWidth">80</x:Double>
+    <!-- Empty and status states: twice the toolbar size, one size for the role -->
+    <x:Double x:Key="SheetStateIconSize">32</x:Double>
+    <x:Double x:Key="SheetMarkSize">32</x:Double>
+    <!-- The first column of port and overlap rows, wide enough for 65535 -->
+    <x:Double x:Key="SheetPortColumnWidth">56</x:Double>
+
+    <Style x:Key="SheetHeaderStyle" TargetType="Grid">
+        <Setter Property="Padding" Value="{StaticResource SheetBandPadding}" />
+        <Setter Property="ColumnSpacing" Value="{StaticResource RbSpacingMedium}" />
+        <Setter Property="MinHeight" Value="64" />
+    </Style>
+
+    <Style x:Key="SheetHeaderIconStyle" TargetType="FontIcon">
+        <Setter Property="FontSize" Value="{StaticResource RbIconSize}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SheetTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyStrongTextStyle}">
+        <Setter Property="FontSize" Value="{StaticResource RbSubtitleFontSize}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="SheetSubtitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource RbCaptionTextStyle}">
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="SheetDividerStyle" TargetType="Border">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+    </Style>
+
+    <Style x:Key="SheetRowDividerStyle" TargetType="Border" BasedOn="{StaticResource SheetDividerStyle}">
+        <Setter Property="Margin" Value="{StaticResource SheetRowDividerMargin}" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+
+    <!-- The stock command row's look: the dialog's base colour under a separator -->
+    <Style x:Key="SheetFooterStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource ContentDialogBackground}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ContentDialogSeparatorBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="Padding" Value="{StaticResource SheetBandPadding}" />
+    </Style>
+
+    <Style x:Key="SheetFooterButtonsStyle" TargetType="StackPanel">
+        <Setter Property="Orientation" Value="Horizontal" />
+        <Setter Property="Spacing" Value="{StaticResource RbSpacing}" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SheetButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+        <!-- A floor, for buttons that hold an icon rather than a line of text -->
+        <Setter Property="MinHeight" Value="{StaticResource RbControlHeight}" />
+        <Setter Property="Padding" Value="{ThemeResource ButtonPadding}" />
+        <Setter Property="FontSize" Value="{StaticResource RbBodyFontSize}" />
+        <Setter Property="MinWidth" Value="{StaticResource SheetButtonMinWidth}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SheetAccentButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+        <Setter Property="MinHeight" Value="{StaticResource RbControlHeight}" />
+        <Setter Property="Padding" Value="{ThemeResource ButtonPadding}" />
+        <Setter Property="FontSize" Value="{StaticResource RbBodyFontSize}" />
+        <Setter Property="MinWidth" Value="{StaticResource SheetButtonMinWidth}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SheetDestructiveButtonStyle" TargetType="Button" BasedOn="{StaticResource DestructiveButtonStyle}">
+        <Setter Property="MinWidth" Value="{StaticResource SheetButtonMinWidth}" />
+    </Style>
+
+    <!-- No BasedOn: DefaultDropDownButtonStyle does not resolve from here at
+         run time ("cannot find a resource"), and the failure is a fail-fast
+         the first time the style is used. A style without BasedOn still
+         layers over the control's built-in default, which is all this needs. -->
+    <Style x:Key="SheetDropDownButtonStyle" TargetType="DropDownButton">
+        <Setter Property="MinHeight" Value="{StaticResource RbControlHeight}" />
+        <Setter Property="Padding" Value="{ThemeResource ButtonPadding}" />
+        <Setter Property="FontSize" Value="{StaticResource RbBodyFontSize}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- A link in a footer, on the side grid: the stock one brings 11 px of
+         padding that would put its text off the 16 px edge everything else is on -->
+    <Style x:Key="SheetLinkStyle" TargetType="HyperlinkButton">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="{StaticResource RbCaptionFontSize}" />
+        <Setter Property="MinHeight" Value="{StaticResource RbControlHeight}" />
+    </Style>
+
+    <Style x:Key="SheetSectionHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyStrongTextStyle}">
+        <Setter Property="Margin" Value="{StaticResource SheetSectionMargin}" />
+    </Style>
+
+    <Style x:Key="SheetSecondaryTextStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyTextStyle}">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+    </Style>
+
+    <Style x:Key="SheetTertiaryCaptionStyle" TargetType="TextBlock" BasedOn="{StaticResource RbCaptionTextStyle}">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+    </Style>
+
+    <Style x:Key="SheetMonoCaptionStyle" TargetType="TextBlock" BasedOn="{StaticResource RbMonoTextStyle}">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <Style x:Key="SheetPortTextStyle" TargetType="TextBlock" BasedOn="{StaticResource RbBodyTextStyle}">
+        <Setter Property="FontFamily" Value="{StaticResource RbMonoFontFamily}" />
+        <Setter Property="Width" Value="{StaticResource SheetPortColumnWidth}" />
+    </Style>
+
+    <!-- A centred empty or status state, as ContentUnavailableView draws one -->
+    <Style x:Key="SheetStatePanelStyle" TargetType="StackPanel">
+        <Setter Property="Spacing" Value="{StaticResource RbSpacing}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Padding" Value="{StaticResource RbPagePadding}" />
+    </Style>
+
+    <Style x:Key="SheetStateIconStyle" TargetType="FontIcon">
+        <Setter Property="FontSize" Value="{StaticResource SheetStateIconSize}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SheetStateTextStyle" TargetType="TextBlock" BasedOn="{StaticResource RbCaptionTextStyle}">
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+</ResourceDictionary>

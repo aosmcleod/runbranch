@@ -78,7 +78,9 @@ enum Build {
 struct Release {
     let version: Version
     let notes: String
-    let dmg: URL
+    /// Nil when the release has no disk image: it shipped for Windows alone,
+    /// and the Mac build follows in a later release (docs/VERSIONING.md).
+    let dmg: URL?
     let bytes: Int
     /// Lowercase hex, from the `digest` GitHub publishes alongside the asset.
     /// Nil when the API does not carry one — older releases predate the field.
@@ -121,6 +123,10 @@ final class Updater: ObservableObject {
         case verifying
         case installing
         case upToDate
+        /// A newer release exists, but with nothing for the Mac: it shipped for
+        /// Windows alone. Not a failure, and not "up to date" either, because
+        /// someone who has seen the release page knows better.
+        case notForMac(Version)
         /// Asked on a build that must not update itself.
         case development
         case failed(String)
@@ -156,7 +162,7 @@ final class Updater: ObservableObject {
         guard UserDefaults.standard.object(forKey: Self.checkKey) as? Bool ?? true else { return }
         checked = true
         guard let release = try? await fetch() else { return }
-        guard release.version > Version.installed else { return }
+        guard release.version > Version.installed, release.dmg != nil else { return }
         available = release
     }
 
@@ -174,7 +180,10 @@ final class Updater: ObservableObject {
         phase = .checking
         do {
             let release = try await fetch()
-            if release.version > Version.installed {
+            if release.version > Version.installed, release.dmg == nil {
+                available = nil
+                phase = .notForMac(release.version)
+            } else if release.version > Version.installed {
                 available = release
                 phase = .idle
             } else {
@@ -209,19 +218,20 @@ final class Updater: ObservableObject {
         guard let version = Version(api.tag_name) else {
             throw Failure("Could not read a version from the tag \(api.tag_name).")
         }
-        // By name, not by position: releases carry other assets over time, and
-        // picking assets[0] would eventually download the wrong one.
-        guard let asset = api.assets.first(where: {
+        // By name, not by position: releases carry the Windows zip and other
+        // assets too, and picking assets[0] would eventually download the
+        // wrong one. No disk image is not an error — a release can ship for
+        // Windows alone — so it still parses, with dmg nil, and the version is
+        // compared before the absence matters.
+        let asset = api.assets.first(where: {
             $0.name == "Runbranch-\(version).dmg"
-        }) else {
-            throw Failure("Release \(version) has no disk image attached.")
-        }
+        })
         return Release(
             version: version,
             notes: api.body ?? "",
-            dmg: asset.browser_download_url,
-            bytes: asset.size,
-            sha256: asset.digest.flatMap { d in
+            dmg: asset?.browser_download_url,
+            bytes: asset?.size ?? 0,
+            sha256: asset?.digest.flatMap { d in
                 d.hasPrefix("sha256:") ? String(d.dropFirst(7)).lowercased() : nil
             })
     }
@@ -288,6 +298,10 @@ final class Updater: ObservableObject {
     }
 
     private func download(_ release: Release) async throws -> URL {
+        // Neither check offers such a release, so this is belt and braces.
+        guard let url = release.dmg else {
+            throw Failure("Release \(release.version) has no disk image attached.")
+        }
         let progress = DownloadProgress { [weak self] fraction in
             Task { @MainActor in
                 guard let self else { return }
@@ -307,7 +321,7 @@ final class Updater: ObservableObject {
         // didFinishDownloadingTo, so there is no argument about which of the
         // two takes delivery of the file, and didWriteData still arrives.
         return try await withCheckedThrowingContinuation { continuation in
-            let task = session.downloadTask(with: release.dmg) { file, response, error in
+            let task = session.downloadTask(with: url) { file, response, error in
                 if let error { continuation.resume(throwing: error); return }
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -694,6 +708,9 @@ struct UpdateSheet: View {
     private var title: String {
         if let release { return "Runbranch \(release.version) is available" }
         if case .failed = updater.phase { return "Could not check for updates" }
+        // Not "out for Windows": a release is also like this for the minutes
+        // before its disk image is uploaded, when it is out for nothing yet.
+        if case .notForMac(let v) = updater.phase { return "Runbranch \(v) isn't ready for the Mac yet" }
         if case .development = updater.phase { return "This is a development build" }
         return "Runbranch is up to date"
     }
@@ -701,6 +718,9 @@ struct UpdateSheet: View {
     private var subtitle: String {
         if release != nil { return "You have \(Version.installed)" }
         if case .failed(let why) = updater.phase { return why }
+        if case .notForMac = updater.phase {
+            return "You have \(Version.installed)"
+        }
         if case .development = updater.phase {
             return "Built from source as \(Version.installed)"
         }
@@ -730,6 +750,7 @@ struct UpdateSheet: View {
 
     private var statusSymbol: String {
         if case .failed = updater.phase { return "wifi.exclamationmark" }
+        if case .notForMac = updater.phase { return "clock" }
         if case .development = updater.phase { return "hammer" }
         return "checkmark.circle"
     }
@@ -737,6 +758,10 @@ struct UpdateSheet: View {
     private var statusLine: String {
         if case .failed = updater.phase {
             return "Releases are listed on GitHub if you would rather look yourself."
+        }
+        if case .notForMac = updater.phase {
+            return "The Mac version is not ready yet. It will be offered here "
+                 + "once it is, and there is nothing to install until then."
         }
         if case .development = updater.phase {
             return "It does not update itself, because an update would replace "

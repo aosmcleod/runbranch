@@ -1,0 +1,194 @@
+<!doctype html>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  The social card template. tools/make-social-card.ps1 renders it to a
+  1200x1200 PNG with headless Edge; open it in a browser to iterate on it.
+
+  Drawn in the spirit of docs/img/social-card.png, the Mac release's card, and
+  measured off it rather than eyeballed: the first version was eyeballed, and
+  next to the original its glows were too small and too dull and its contour
+  lines too dense and too faint. See the numbers at each layer below.
+
+  Everything comes in on the query string:
+    shot=<url>&ratio=<w/h>   one per window, back to front (one or two)
+    pill=<text>              one per platform pill, in order
+    licence=<text>           default GPL-3.0
+    repo=<text>              default github.com/aosmcleod/runbranch
+    mark=<url>               default ../../assets/mark.svg
+    radius=<px>              window corner radius; 8 for Windows, 14 for the Mac
+  Window images should be cropped to the window itself: the card draws the
+  rounded corners and the shadow.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Runbranch social card</title>
+<link rel="stylesheet" href="card.css">
+</head>
+<body>
+<div class="card">
+  <canvas class="glow" id="glow" width="1200" height="1200"></canvas>
+  <canvas class="contours" id="contours" width="1200" height="1200"></canvas>
+
+  <div class="brand">
+    <img id="mark" alt="">
+    <span>Runbranch</span>
+  </div>
+
+  <div class="stage" id="stage"></div>
+
+  <div class="pills" id="pills"></div>
+</div>
+
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+
+  // --- the glow ---------------------------------------------------------
+  // The original's colour field, averaged over each 100 px cell of a 12x12
+  // grid. Cells the original's window, wordmark and pills sat over are filled
+  // in from the background around them, so they describe the background and
+  // not what was in front of it. Drawn at 12x12 and scaled up with smoothing,
+  // then blurred (card.css): the hues, where they sit and how far they reach
+  // are the original's, which is what a hand-placed set of gradients got
+  // wrong.
+  var field = [
+    '925630 8C4D37 844341 77374B 692E5A 642B72 542573 392460 272A5E 1D376D 1B457E 174674',
+    '804332 904440 9B414E 923954 7A2F58 63265B 4C215A 342354 232D58 1C3C67 194C76 19587E',
+    '6B302F 88363F AB3955 A93559 853660 6A335A 55315A 3B3052 1D2D4C 173F5F 185477 1B6B91',
+    '4B1F24 56282B 632634 733244 5E283C 461D2D 361E2C 271F2B 202733 1C303E 1C3B4C 1A5977',
+    '26151D 22141C 20131B 1E121A 1D1219 1C1219 1B1319 1A151B 19181F 191D26 1A2733 1C3847',
+    '170D12 170E13 170E13 160E13 160E13 150E13 150F14 141116 141419 14181F 151F2A 1A2934',
+    '120C10 130C10 130C10 130C10 130C10 120C10 120D11 110E12 111014 111218 12161D 161C23',
+    '190E12 180E13 170E13 170E13 160E13 150E13 140E13 130F14 131016 131218 15141A 19171E',
+    '2A131A 221117 1F1017 1D1018 1B1018 180F16 171016 151116 141318 14151C 1D1A22 101926',
+    '461D26 3F1927 3A1A2E 331A2C 2E1B2B 2A1C2B 2A202D 26222E 222834 1C2636 0D2234 0E283D',
+    '562330 521E34 4B1A35 401530 331129 291025 1F1021 181424 121A2A 102336 0F2E45 103A55',
+    '552035 5D1F3F 5F1D43 52193C 401432 32122B 29162A 1D1729 171D30 12263B 103149 113D59'
+  ].map(function (row) { return row.split(' '); });
+
+  var small = document.createElement('canvas');
+  small.width = 12; small.height = 12;
+  var sctx = small.getContext('2d');
+  field.forEach(function (row, y) {
+    row.forEach(function (hex, x) { sctx.fillStyle = '#' + hex; sctx.fillRect(x, y, 1, 1); });
+  });
+  var glow = document.getElementById('glow').getContext('2d');
+  glow.imageSmoothingEnabled = true;
+  glow.imageSmoothingQuality = 'high';
+  // One cell past each edge, so each sample lands on its cell's centre and
+  // the blur has colour to pull from beyond the card rather than black.
+  glow.drawImage(small, -100, -100, 1400, 1400);
+  // The outermost ring of cells, repeated outwards, for the same reason.
+  glow.drawImage(small, 0, 0, 1, 12, -200, -100, 200, 1400);
+  glow.drawImage(small, 11, 0, 1, 12, 1200, -100, 200, 1400);
+
+  // --- contour lines ---------------------------------------------------
+  // Measured on the original: about 40 px apart; bright at the card's top and
+  // bottom edges (a white line at about a third opacity) and fading to
+  // nothing by y ~ 300 at the top and y ~ 970 at the bottom; 1 px; gently
+  // wavy, drifting 20 to 40 px across the width, and not parallel, so the
+  // spacing opens and closes like a topographic map. Deterministic, so the
+  // card renders the same every time.
+  var lines = document.getElementById('contours').getContext('2d');
+  lines.lineWidth = 1.2;
+  lines.lineJoin = 'round';
+  function offset(x, base) {
+    // A long swell, a shorter ripple, and a slow change of phase with the
+    // line's height: neighbours bunch and part rather than run in step.
+    // Long swells only: a faster ripple on top made them wriggle, where the
+    // original's lines are calm.
+    var drift = base * 0.0032;
+    return 21 * Math.sin(x * 0.0046 + 0.9 + drift * 2.1) +
+            9 * Math.sin(x * 0.0089 + 2.3 - drift * 3.3);
+  }
+  function strength(y) {
+    var top = Math.max(0, 1 - y / 310);
+    var bottom = Math.max(0, (y - 960) / 240);
+    return 0.34 * Math.pow(Math.max(top, bottom), 1.15);
+  }
+  for (var base = -60; base <= 1260; base += 40) {
+    // Each segment is stroked at the strength for where it actually is, so a
+    // line that wanders into the middle fades there.
+    var prevX = -40, prevY = base + offset(-40, base);
+    for (var x = -30; x <= 1240; x += 10) {
+      var y = base + offset(x, base);
+      var a = strength((y + prevY) / 2);
+      if (a > 0.004) {
+        lines.strokeStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+        lines.beginPath();
+        lines.moveTo(prevX, prevY);
+        lines.lineTo(x, y);
+        lines.stroke();
+      }
+      prevX = x; prevY = y;
+    }
+  }
+
+  // --- brand -----------------------------------------------------------
+  document.getElementById('mark').src = q.get('mark') || '../../assets/mark.svg';
+
+  // --- windows ---------------------------------------------------------
+  var shots = q.getAll('shot');
+  var ratios = q.getAll('ratio').map(Number);
+  var radius = Number(q.get('radius') || 8);
+  var stage = document.getElementById('stage');
+  var stageW = 1200, stageH = 466;
+  var boxes = [];
+  if (shots.length <= 1) {
+    // The original's window: 1060 wide, centred, 358 to 822.
+    var r = ratios[0] || 2.28;
+    var w1 = Math.min(1060, stageH * r);
+    boxes.push({ w: w1, h: w1 / r, x: (stageW - w1) / 2, y: (stageH - w1 / r) / 2 });
+  } else {
+    // Two: the first set back and to the left, the second in front, lower
+    // and to the right, overlapping by a little over a third.
+    // Sized by width, not height: the Mac capture is a narrower window than
+    // the Windows one, and fitted to one height its text came out at half the
+    // size of the other's. At these widths both read at about the same size.
+    stageH = 500;
+    stage.style.height = stageH + 'px';
+    var ra = ratios[0] || 1.5, rb = ratios[1] || 2.2;
+    var wa = 700, wb = 800;
+    var ha = Math.min(wa / ra, stageH - 40), hb = wb / rb;
+    wa = ha * ra;
+    boxes.push({ w: wa, h: ha, x: 24, y: 0 });
+    boxes.push({ w: wb, h: hb, x: stageW - 24 - wb, y: stageH - hb });
+  }
+  shots.forEach(function (src, i) {
+    var b = boxes[i]; if (!b) return;
+    var div = document.createElement('div');
+    div.className = 'window';
+    div.style.left = b.x.toFixed(1) + 'px';
+    div.style.top = b.y.toFixed(1) + 'px';
+    div.style.width = b.w.toFixed(1) + 'px';
+    div.style.height = b.h.toFixed(1) + 'px';
+    div.style.setProperty('--radius', radius + 'px');
+    var img = document.createElement('img');
+    img.src = src; img.alt = '';
+    div.appendChild(img);
+    stage.appendChild(div);
+  });
+
+  // --- pills -----------------------------------------------------------
+  var pills = document.getElementById('pills');
+  function pill(html) {
+    var el = document.createElement('div');
+    el.className = 'pill';
+    el.innerHTML = html;
+    pills.appendChild(el);
+  }
+  function text(s) { var t = document.createElement('span'); t.textContent = s; return t.outerHTML; }
+  pill(text(q.get('licence') || 'GPL-3.0'));
+  q.getAll('pill').forEach(function (p) { pill(text(p)); });
+  pill(
+    '<svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>' +
+    text(q.get('repo') || 'github.com/aosmcleod/runbranch') +
+    '<svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12 L12 4 M5.5 4 H12 V10.5"/></svg>'
+  );
+})();
+</script>
+</body>
+</html>

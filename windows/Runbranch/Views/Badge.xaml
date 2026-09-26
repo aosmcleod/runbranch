@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  A capsule of icon and text: "default", "open", "ready", "3 commits behind".
+  Views.swift's Badge, on the F6 grid: 12 px icon, 11 px caption, the tone's
+  colour for both, and the same colour at 14% behind them.
+
+  A fixed height (RbChipHeight), not one measured from the content: the icon
+  box is taller than tight caption text, so a measured chip with an icon came
+  out taller than one without, and a row of them looked like a row of odd
+  sizes. Centred rather than stretched, so a chip never grows to the height
+  of the line it sits in. The text uses tight line bounds, so it is centred
+  by its letters rather than by a line box with a descender's worth of air
+  below — which is also what lets LinePanel put its baseline on the branch
+  name's (Baseline).
+-->
+<UserControl
+    x:Class="Runbranch.Views.Badge"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    VerticalAlignment="Center"
+    IsTabStop="False">
+    <Border
+        x:Name="Capsule"
+        Height="{StaticResource RbChipHeight}"
+        Padding="{StaticResource RbChipPadding}"
+        VerticalAlignment="Center"
+        CornerRadius="{StaticResource RbCapsuleRadius}">
+        <!-- A Grid, not a StackPanel: each child is centred on the chip's own
+             height, so the label lands in the same place with or without an
+             icon. Nested inside a StackPanel it was centred twice and rounded
+             twice, and an icon chip's text sat a pixel lower. -->
+        <Grid x:Name="Parts" ColumnSpacing="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon
+                x:Name="Glyph"
+                VerticalAlignment="Center"
+                FontSize="{StaticResource RbBadgeIconSize}"
+                Visibility="Collapsed" />
+            <TextBlock
+                x:Name="Label"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                FontSize="{StaticResource RbCaptionFontSize}"
+                FontWeight="SemiBold"
+                TextLineBounds="Tight"
+                TextTrimming="CharacterEllipsis"
+                TextWrapping="NoWrap" />
+        </Grid>
+    </Border>
+</UserControl>

@@ -1,0 +1,36 @@
+<!--
+  Tests for the parts of the Windows app that are pure logic: the engine
+  output parsers, the line assembler the Run dialog reads through, byte
+  formatting, the branch filter, health rules, settings, the updater, the
+  sheets' rules and tools/install-update.ps1. They compile the app's own
+  WinUI-free files rather than referencing the WinUI project, so they need no
+  Windows App SDK and run anywhere .NET does (the install script's tests need
+  Windows PowerShell, and skip without it).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Runbranch.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Runbranch\Model.cs" Link="App\Model.cs" />
+    <Compile Include="..\Runbranch\Settings.cs" Link="App\Settings.cs" />
+    <Compile Include="..\Runbranch\Updates.cs" Link="App\Updates.cs" />
+    <Compile Include="..\Runbranch\ReleaseNotes.cs" Link="App\ReleaseNotes.cs" />
+    <Compile Include="..\Runbranch\Dialogs\SheetRules.cs" Link="App\Dialogs\SheetRules.cs" />
+    <Compile Include="..\Runbranch\Dialogs\LogTail.cs" Link="App\Dialogs\LogTail.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>

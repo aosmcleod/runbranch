@@ -5,16 +5,53 @@
 #
 #   ./tests/engine.sh          run them
 #   ./tests/engine.sh -v       show each assertion
+#   RB_TEST_ENGINE=./runbranch.sh ./tests/engine.sh    pick the engine
 #
 # They run against a throwaway fixture repo and a throwaway state directory,
 # never against real projects.
+#
+# Two engines satisfy one contract: runbranch.sh, and the Go binary in engine/
+# that replaces it. The default is the Go binary when it has been built, and
+# the script otherwise. The suite runs on macOS and, against the Go binary, in
+# Git Bash on Windows.
 
 set -uo pipefail
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENGINE="$REPO/runbranch.sh"
-VERBOSE="${1:-}"
 
-TMP="$(mktemp -d)"
+WIN=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) WIN=1 ;; esac
+# On Windows every path handed to the engine, and every path compared with
+# what it prints, is a C:/ path with long names. The engine is a native
+# program: an MSYS path like /tmp/x means nothing to it, and this machine's
+# temp directory is spelt ALEC~1.MCL until something expands it.
+native() { if [ "$WIN" = 1 ] && [ -n "$1" ]; then cygpath -m -l "$1"; else printf '%s' "$1"; fi; }
+
+REPO="$(native "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
+EXE=""; [ "$WIN" = 1 ] && EXE=".exe"
+if [ -n "${RB_TEST_ENGINE:-}" ]; then
+  ENGINE="$RB_TEST_ENGINE"
+  case "$ENGINE" in /*|[A-Za-z]:*) ;; *) ENGINE="$PWD/$ENGINE" ;; esac
+  ENGINE="$(native "$ENGINE")"
+elif [ -x "$REPO/engine/bin/runbranch$EXE" ]; then
+  ENGINE="$REPO/engine/bin/runbranch$EXE"
+else
+  ENGINE="$REPO/runbranch.sh"
+fi
+[ -x "$ENGINE" ] || { echo "no engine at $ENGINE" >&2; exit 1; }
+# Assertions that pin a bug the Go engine fixes run against it alone, because
+# runbranch.sh still has the bug (spec §4.7).
+case "$ENGINE" in *.sh) ENGINE_KIND=bash ;; *) ENGINE_KIND=go ;; esac
+VERBOSE="${1:-}"
+echo "engine under test: $ENGINE ($ENGINE_KIND)"
+
+# The fixture servers are python. On Windows `python3` is usually the Store's
+# stub, which exists, prints an advert and fails, so ask each one to really run.
+PY=""
+for c in python3 python; do
+  "$c" -c 'import sys' >/dev/null 2>&1 && { PY="$c"; break; }
+done
+[ -n "$PY" ] || { echo "no working python3 or python on PATH; the fixture servers need one" >&2; exit 1; }
+
+TMP="$(native "$(mktemp -d)")"
 export RB_HOME="$TMP/state"
 export RB_PROJECTS_DIR="$TMP/projects"
 export RB_MY_EMAILS="tester@example.com"
@@ -24,11 +61,73 @@ export RB_NO_OPEN=1
 mkdir -p "$RB_PROJECTS_DIR" "$RB_HOME"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS+1)); [ "$VERBOSE" = -v ] && printf '  ok    %s\n' "$1"; return 0; }
 bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && printf '        %s\n' "$2"; return 0; }
+# Always printed, with the reason. A skip that says nothing reads as a pass.
+skip() { SKIP=$((SKIP+1)); printf '  SKIP  %s\n        %s\n' "$1" "$2"; return 0; }
 is()   { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$3] got [$2]"; }
 has()  { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "[$2] does not contain [$3]" ;; esac; }
+
+# --- processes and ports, per OS ------------------------------------------
+# lsof, process-group signals and `ps -p` are POSIX. Git Bash has none of them
+# for native processes, so each gets a Windows equivalent here rather than a
+# skip: these are the assertions that say a stop really stopped something.
+
+# The pid listening on a TCP port, or nothing.
+port_pid() {
+  if [ "$WIN" = 1 ]; then
+    netstat -ano -p TCP 2>/dev/null | tr -d '\r' |
+      awk -v p=":$1" '$1=="TCP" && $4=="LISTENING" && substr($2, length($2)-length(p)+1)==p {print $5; exit}'
+    netstat -ano -p TCPv6 2>/dev/null | tr -d '\r' |
+      awk -v p=":$1" '$1=="TCP" && $4=="LISTENING" && substr($2, length($2)-length(p)+1)==p {print $5; exit}'
+  else
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null
+  fi | head -1
+}
+# End a process and everything it started. A POSIX pid here is a group leader.
+kill_tree() {
+  if [ "$WIN" = 1 ]; then taskkill //F //T //PID "$1" >/dev/null 2>&1
+  else kill -KILL -"$1" 2>/dev/null; fi
+  return 0
+}
+# Clear a port the suite held on purpose, whatever holds it by now. This was
+# `pkill -f "http.server <port>"`, which Git Bash does not have and which could
+# not see a native python.exe if it did.
+free_port() {
+  local pid
+  pid="$(port_pid "$1")"
+  [ -n "$pid" ] || return 0
+  if [ "$WIN" = 1 ]; then taskkill //F //T //PID "$pid" >/dev/null 2>&1
+  else kill "$pid" 2>/dev/null; fi
+  return 0
+}
+alive() {
+  if [ "$WIN" = 1 ]; then tasklist //FI "PID eq $1" //NH //FO CSV 2>/dev/null | grep -q "\"$1\""
+  else ps -p "$1" >/dev/null 2>&1; fi
+}
+# A path the engine printed, in the form this file builds its own in.
+npath() { native "$1"; }
+
+# Every fixture server is $SERVE, not `python -m http.server`. That binds its
+# port, then looks up the machine's full name (socket.getfqdn), and only then
+# listens: on CI's macOS runners the lookup stalls for up to a minute, even
+# for 127.0.0.1, with the port taken and nothing listening on it. Every port
+# test failed and every run sat out the health wait, until the suite took
+# twenty minutes. This is the same server, same socket options, without the
+# lookup: `$PY $SERVE <port> [directory]`, on 127.0.0.1.
+SERVE="$TMP/serve.py"
+cat > "$SERVE" <<'PYSERVE'
+import functools, http.server, socketserver, sys
+class Server(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+port = int(sys.argv[1])
+root = sys.argv[2] if len(sys.argv) > 2 else "."
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=root)
+Server(("127.0.0.1", port), handler).serve_forever()
+PYSERVE
 
 # --- fixture ---------------------------------------------------------------
 FIX="$TMP/fixture"
@@ -49,7 +148,7 @@ cat > "$RB_PROJECTS_DIR/fixture.conf" <<CONF
 NAME="Fixture"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4321:/:python3 -m http.server 4321 --directory public"
+TARGETS="web:4321:/:$PY $SERVE 4321 public"
 SYMBOL="cube"
 CONF
 
@@ -63,24 +162,57 @@ is "doctor passes"             "$("$ENGINE" doctor fixture >/dev/null 2>&1; echo
 # the bundle whole, so every .conf written through the app was destroyed by the
 # next one — silently, and looking to the user like a fresh install.
 echo "==> a bundled engine keeps its projects outside the bundle"
+# The two engines reach the same answer by different rules. runbranch.sh reads
+# beside itself unless its path looks like a bundle (Contents/Resources or
+# Contents/MacOS). The Go binary uses RB_HOME/projects unless it sits in a
+# Runbranch checkout — an ancestor directory holding projects/example.conf —
+# because a binary has no one place it is installed to (spec §4.5). A bundle
+# satisfies both, so the assertions below hold for either engine.
 BUNDLE="$TMP/Runbranch.app/Contents/Resources"
 mkdir -p "$BUNDLE/projects" "$TMP/bundle-home"
-cp "$ENGINE" "$BUNDLE/runbranch.sh"
+BUNDLED_ENGINE="$BUNDLE/$(basename "$ENGINE")"
+cp "$ENGINE" "$BUNDLED_ENGINE"
 cp "$RB_PROJECTS_DIR/fixture.conf" "$BUNDLE/projects/carried.conf"
-BUNDLED="$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects-dir)"
-is "not inside the bundle"     "$BUNDLED" "$TMP/bundle-home/projects"
+BUNDLED="$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLED_ENGINE" projects-dir)"
+is "not inside the bundle"     "$(npath "$BUNDLED")" "$TMP/bundle-home/projects"
 # A bundle that still has .conf files beside the script is an install replaced
 # by hand rather than updated. Ignoring those looks identical to the bug.
 is "and carries what it finds" \
-   "$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects | cut -f1)" \
+   "$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLED_ENGINE" projects | cut -f1)" \
    "carried"
 # RB_HOME wins: it is the copy that survives an install.
 echo "changed" >> "$TMP/bundle-home/projects/carried.conf"
-env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLE/runbranch.sh" projects >/dev/null 2>&1
+env -u RB_PROJECTS_DIR RB_HOME="$TMP/bundle-home" "$BUNDLED_ENGINE" projects >/dev/null 2>&1
 has "and never overwrites it"  "$(cat "$TMP/bundle-home/projects/carried.conf")" "changed"
 # A checkout is unaffected: projects/ is committed there, with a README in it.
-is "a checkout still reads beside the script" \
-   "$(env -u RB_PROJECTS_DIR "$ENGINE" projects-dir)" "$REPO/projects"
+case "$ENGINE" in
+  "$REPO"/*)
+    is "a checkout still reads beside the script" \
+       "$(npath "$(env -u RB_PROJECTS_DIR "$ENGINE" projects-dir)")" "$REPO/projects" ;;
+  *) skip "a checkout still reads beside the script" \
+          "the engine under test is not inside this checkout ($ENGINE)" ;;
+esac
+if [ "$ENGINE_KIND" = go ]; then
+  # Where the Go rule differs from the script's, pin the rule itself. A binary
+  # copied anywhere that is not a checkout — ~/bin, a download folder, next to
+  # the Windows app — must not start reading and writing projects beside itself.
+  mkdir -p "$TMP/loose/bin" "$TMP/loose-home"
+  cp "$ENGINE" "$TMP/loose/bin/"
+  is "a loose binary uses RB_HOME" \
+     "$(npath "$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/loose-home" "$TMP/loose/bin/$(basename "$ENGINE")" projects-dir)")" \
+     "$TMP/loose-home/projects"
+  # And a binary built into a checkout's engine/bin still finds the checkout.
+  mkdir -p "$TMP/checkout/projects" "$TMP/checkout/engine/bin"
+  : > "$TMP/checkout/projects/example.conf"
+  cp "$ENGINE" "$TMP/checkout/engine/bin/"
+  # Against the real path: the engine finds the checkout from where its binary
+  # really is, and on macOS a temp directory's real path is under /private.
+  is "a binary in a checkout reads the checkout's projects" \
+     "$(npath "$(env -u RB_PROJECTS_DIR RB_HOME="$TMP/loose-home" "$TMP/checkout/engine/bin/$(basename "$ENGINE")" projects-dir)")" \
+     "$(native "$(cd "$TMP/checkout/projects" && pwd -P)")"
+else
+  skip "the Go projects-dir rule" "runbranch.sh reads beside itself anywhere outside a bundle"
+fi
 
 echo "==> branch data"
 is "finds both branches"       "$("$ENGINE" branches fixture | wc -l | tr -d ' ')" "2"
@@ -110,7 +242,7 @@ is "appends an absent key"     "$(grep -c '^NEWKEY=' "$RB_PROJECTS_DIR/fixture.c
 # Regression: the first version passed the value through `awk -v`, which cannot
 # carry a newline, and emptied the file.
 echo "==> set survives a multi-line value"
-MULTI="$(printf 'web:4321:/:python3 -m http.server 4321\001api:4322:/:python3 -m http.server 4322')"
+MULTI="$(printf 'web:4321:/:%s %s 4321\001api:4322:/:%s %s 4322' "$PY" "$SERVE" "$PY" "$SERVE")"
 "$ENGINE" set fixture TARGETS "$MULTI" >/dev/null 2>&1
 is "both targets present"      "$("$ENGINE" presets fixture | wc -l | tr -d ' ')" "3"
 is "file is not empty"         "$([ -s "$RB_PROJECTS_DIR/fixture.conf" ] && echo yes)" "yes"
@@ -151,7 +283,7 @@ is "status exits non-zero"     "$("$ENGINE" status fixture >/dev/null 2>&1; echo
 
 # The presets case above left TARGETS pointing at `true`, which exits at once.
 # Put a real server back before testing a real run.
-"$ENGINE" set fixture TARGETS "web:4321:/:python3 -m http.server 4321 --directory public" >/dev/null 2>&1
+"$ENGINE" set fixture TARGETS "web:4321:/:$PY $SERVE 4321 public" >/dev/null 2>&1
 
 echo "==> worktree lifecycle"
 "$ENGINE" run fixture feature/one web >/dev/null 2>&1
@@ -163,12 +295,12 @@ is "the checkout did not move" "$(git -C "$FIX" rev-parse --abbrev-ref HEAD)" "m
 "$ENGINE" stop fixture >/dev/null 2>&1
 sleep 1
 is "stops cleanly"             "$("$ENGINE" state fixture)" "idle"
-is "the port is released"      "$(lsof -nP -iTCP:4321 -sTCP:LISTEN -t 2>/dev/null | head -1)" ""
+is "the port is released"      "$(port_pid 4321)" ""
 
 echo "==> reclaim clears stale state"
 "$ENGINE" run fixture main web >/dev/null 2>&1
 PGID=$("$ENGINE" state fixture | awk -F'\t' '$1=="target"{print $5}')
-kill -KILL -"$PGID" 2>/dev/null
+kill_tree "$PGID"
 sleep 1
 # `state` already reports idle once the pids are gone -- it checks liveness,
 # not the file. What is stale is the state FILE, which is what reclaim removes.
@@ -185,13 +317,13 @@ cat > "$RB_PROJECTS_DIR/selfrun.conf" <<CONF
 NAME="Self Run"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4995:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4995:/:$PY $SERVE {port} public"
 CONF
 cat > "$RB_PROJECTS_DIR/rival.conf" <<CONF
 NAME="Rival"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4995:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4995:/:$PY $SERVE {port} public"
 CONF
 "$ENGINE" run selfrun main web >/dev/null 2>&1
 is "the run is up" "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4995/ 2>/dev/null)" "200"
@@ -214,13 +346,13 @@ echo "==> a port held from a checkout is attributed to that project"
 # The common real case: a dev server started by a terminal or an agent, inside
 # the project's own checkout. Reporting that as "another app" is unhelpful when
 # we can see whose it is.
-( cd "$FIX" && python3 -m http.server 4991 --directory public >/dev/null 2>&1 & echo $! > "$TMP/outside.pid" )
+( cd "$FIX" && $PY $SERVE 4991 public >/dev/null 2>&1 & echo $! > "$TMP/outside.pid" )
 sleep 2
 cat > "$RB_PROJECTS_DIR/attrib.conf" <<CONF
 NAME="Attrib"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4991:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4991:/:$PY $SERVE {port} public"
 CONF
 ATT="$("$ENGINE" check-ports attrib web 2>&1)" || true
 has "names the project"        "$ATT" "attrib"
@@ -235,10 +367,10 @@ cat > "$RB_PROJECTS_DIR/adopt.conf" <<CONF
 NAME="Adopt"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4993:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4993:/:$PY $SERVE {port} public"
 CONF
 is "idle before anything runs" "$("$ENGINE" state adopt 2>&1)" "idle"
-( cd "$FIX" && python3 -m http.server 4993 --directory public >/dev/null 2>&1 & )
+( cd "$FIX" && $PY $SERVE 4993 public >/dev/null 2>&1 & )
 sleep 2
 ADOPTED="$("$ENGINE" state adopt 2>&1)"
 has "reports a run"            "$ADOPTED" "run	"
@@ -253,23 +385,26 @@ TARGETS="web:4993:/:true"
 CONF
 mkdir -p "$TMP/other-repo" && git -C "$TMP/other-repo" init -q -b main
 is "and not for another project" "$("$ENGINE" state notmine 2>&1)" "idle"
-pkill -f "http.server 4993" 2>/dev/null || true
+free_port 4993
 rm -f "$RB_PROJECTS_DIR/adopt.conf" "$RB_PROJECTS_DIR/notmine.conf"
 
 echo "==> kill-port only ends what belongs to a project"
-REFUSE="$("$ENGINE" kill-port 1 2>&1)" || true
+# pid 1 is launchd. Windows has no pid 1, and would report it already gone;
+# its nearest equivalent, always present and never a project's, is System (4).
+SYSPID=1; [ "$WIN" = 1 ] && SYSPID=4
+REFUSE="$("$ENGINE" kill-port "$SYSPID" 2>&1)" || true
 has "refuses an unattributable process" "$REFUSE" "does not belong to a project"
-is  "and launchd survives"              "$(ps -p 1 >/dev/null 2>&1 && echo alive)" "alive"
+is  "and launchd survives"              "$(alive "$SYSPID" && echo alive)" "alive"
 BADPID="$("$ENGINE" kill-port notanumber 2>&1)" || true
 has "rejects a non-numeric pid"         "$BADPID" "Not a process id"
 # The attributable one it will end.
-OUTSIDE_PID="$(lsof -nP -iTCP:4991 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+OUTSIDE_PID="$(port_pid 4991)"
 "$ENGINE" kill-port "$OUTSIDE_PID" >/dev/null 2>&1
 sleep 1
 curl -sfo /dev/null http://localhost:4991/ 2>/dev/null
 is  "ends one it can attribute"         "$?" "7"
 rm -f "$RB_PROJECTS_DIR/attrib.conf"
-pkill -f "http.server 4991" 2>/dev/null || true
+free_port 4991
 
 echo "==> an in-place run uses the checkout, and only starts servers"
 # The point of in-place is that uncommitted work is live, so the assertion is
@@ -281,7 +416,7 @@ NAME="In Place"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4981:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4981:/:$PY $SERVE {port} public"
 CONF
 # INSTALL is deliberately `false`: if an in-place run ever runs it, the run
 # fails and this test says so.
@@ -291,7 +426,7 @@ is "serves uncommitted work" \
    "$(curl -sf http://localhost:4981/scratch.txt 2>/dev/null | tr -d '\n')" "uncommitted"
 is "state records the mode"   "$(grep -c '^IN_PLACE=1$' "$RB_HOME/inplace/state" 2>/dev/null)" "1"
 is "state points at the checkout" \
-   "$(grep '^WORKTREE=' "$RB_HOME/inplace/state" | cut -d= -f2-)" "$FIX"
+   "$(npath "$(grep '^WORKTREE=' "$RB_HOME/inplace/state" | cut -d= -f2- | tr -d '\r')")" "$FIX"
 is "and made no worktree"     "$([ -d "$RB_HOME/inplace/worktrees" ] && ls "$RB_HOME/inplace/worktrees" | wc -l | tr -d ' ' || echo 0)" "0"
 "$ENGINE" stop inplace >/dev/null 2>&1
 sleep 1
@@ -334,16 +469,29 @@ echo "==> a shifted run tells the server where to listen"
 # Two routes, because a config cannot be assumed to have anticipated a shift:
 # {port} in the command when it names one, and PORT in the environment when it
 # does not. The second covers most dev servers without any config change.
+# The server is a file rather than `python3 -c '...'`: on Windows the command
+# runs under cmd.exe, which does not treat single quotes as quotes. The \"
+# around its path stay on purpose, because escaped quotes inside a quoted value
+# are syntax real configs use and the config parser has to keep reading.
+cat > "$TMP/envserver.py" <<'PYSRC'
+import os, http.server, functools, socketserver
+h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="public")
+class Server(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+Server(("127.0.0.1", int(os.environ["PORT"])), h).serve_forever()
+PYSRC
 cat > "$RB_PROJECTS_DIR/envport.conf" <<CONF
 NAME="Env Port"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4951:/:python3 -c 'import os,http.server,functools; h=functools.partial(http.server.SimpleHTTPRequestHandler, directory=\"public\"); http.server.HTTPServer((\"\",int(os.environ[\"PORT\"])),h).serve_forever()'"
+TARGETS="web:4951:/:$PY \"$TMP/envserver.py\""
 CONF
 CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
 is "no conflict when the port is free" "$CHK" ""
 
-python3 -m http.server 4951 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY $SERVE 4951 "$FIX/public" >/dev/null 2>&1 &
 ENVBLOCK=$!
 sleep 2
 CHK="$("$ENGINE" check-ports envport web 2>&1)" || true
@@ -355,16 +503,16 @@ is "and the shifted port answers" \
    "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4952/ 2>/dev/null)" "200"
 "$ENGINE" stop envport >/dev/null 2>&1
 kill "$ENVBLOCK" 2>/dev/null || true
-pkill -f "http.server 4951" 2>/dev/null || true
+free_port 4951
 
 echo "==> a shifted run says so when the server ignores PORT"
 cat > "$RB_PROJECTS_DIR/hardport.conf" <<CONF
 NAME="Hard Port"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4953:/:python3 -m http.server 4953 --directory public"
+TARGETS="web:4953:/:$PY $SERVE 4953 public"
 CONF
-python3 -m http.server 4953 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY $SERVE 4953 "$FIX/public" >/dev/null 2>&1 &
 HARDBLOCK=$!
 sleep 2
 IGN="$("$ENGINE" run hardport main web 1 2>&1)" || true
@@ -372,7 +520,7 @@ has "blames the right thing"  "$IGN" "does not say where to"
 has "names the port it tried" "$IGN" "4954"
 has "suggests {port}"         "$IGN" "{port}"
 kill "$HARDBLOCK" 2>/dev/null || true
-pkill -f "http.server 4953" 2>/dev/null || true
+free_port 4953
 rm -f "$RB_PROJECTS_DIR/envport.conf" "$RB_PROJECTS_DIR/hardport.conf"
 rm -rf "$RB_HOME/envport" "$RB_HOME/hardport"
 
@@ -396,7 +544,9 @@ is "each ref gets its own worktree" "$WT_COUNT" "2"
 is "the first keeps the plain name" \
    "$([ -d "$RB_HOME/fixture/worktrees/feat-a-b" ] && echo yes || echo no)" "yes"
 # And each records itself as the owner, which is how the collision is detected.
-OWNERS="$(cat "$RB_HOME/fixture/meta/"feat-a-b*.ref 2>/dev/null | sort | tr '\n' ' ')"
+# Byte order, not the locale's: under a UTF-8 locale macOS's sort weighs + and
+# - differently, and CI's Mac put feat/a-b first.
+OWNERS="$(cat "$RB_HOME/fixture/meta/"feat-a-b*.ref 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"
 has "both refs are recorded" "$OWNERS" "feat/a+b feat/a-b"
 
 echo "==> a config that will not parse says so"
@@ -422,17 +572,17 @@ cat > "$RB_PROJECTS_DIR/holder.conf" <<CONF
 NAME="Holder"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4399:/:python3 -m http.server 4399"
+TARGETS="web:4399:/:$PY $SERVE 4399"
 CONF
 cat > "$RB_PROJECTS_DIR/wants.conf" <<CONF
 NAME="Wants"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4399:/:python3 -m http.server 4399"
+TARGETS="web:4399:/:$PY $SERVE 4399"
 CONF
 # Hold the port from inside the other project's worktree, which is what makes
 # it identifiable as ours.
-( cd "$RB_HOME/holder/worktrees/main" && python3 -m http.server 4399 >/dev/null 2>&1 & echo $! > "$TMP/holder.pid" )
+( cd "$RB_HOME/holder/worktrees/main" && $PY $SERVE 4399 >/dev/null 2>&1 & echo $! > "$TMP/holder.pid" )
 sleep 2
 CONFLICT="$("$ENGINE" run wants main web 2>&1)" || true
 has "names the project holding the port" "$CONFLICT" "running holder here"
@@ -442,7 +592,7 @@ case "$CONFLICT" in
   *) ok "does not send you after the wrong project" ;;
 esac
 kill "$(cat "$TMP/holder.pid")" 2>/dev/null || true
-pkill -f "http.server 4399" 2>/dev/null || true
+free_port 4399
 rm -f "$RB_PROJECTS_DIR/holder.conf" "$RB_PROJECTS_DIR/wants.conf"
 rm -rf "$RB_HOME/holder"
 
@@ -451,17 +601,21 @@ cat > "$RB_PROJECTS_DIR/shift.conf" <<CONF
 NAME="Shift"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4601:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4601:/:$PY $SERVE {port} public"
 CONF
 # Hold the declared port, so the shift is the only way to start.
-python3 -m http.server 4601 --directory "$FIX/public" >/dev/null 2>&1 &
+$PY $SERVE 4601 "$FIX/public" >/dev/null 2>&1 &
 BLOCKER=$!
 sleep 2
 
 CHECK="$("$ENGINE" check-ports shift web 2>&1)" || true
 has "check-ports names the target"     "$CHECK" "web"
 has "check-ports reports the port"     "$CHECK" "4601"
-has "check-ports says overridable"     "$CHECK" "	1"
+# Field 6 says how a shift would reach the server: `explicit` when the command
+# has {port}, `env` when only PORT can carry it. This asserted "	1" from when
+# the field was a flag, and went on passing only because a pid starting with 1
+# happened to follow a tab (contract §7.12).
+has "check-ports says how the port moves" "$CHECK" "	explicit"
 has "check-ports suggests an offset"   "$CHECK" "OFFSET"
 
 # Without an offset it must refuse rather than start something broken.
@@ -495,7 +649,7 @@ curl -sfo /dev/null http://localhost:4602/ 2>/dev/null
 is  "the shifted port is free"    "$?" "7"
 
 kill "$BLOCKER" 2>/dev/null || true
-pkill -f "http.server 4601" 2>/dev/null || true
+free_port 4601
 rm -f "$RB_PROJECTS_DIR/shift.conf"; rm -rf "$RB_HOME/shift"
 
 echo "==> doctor reports ports claimed by more than one project"
@@ -503,13 +657,13 @@ cat > "$RB_PROJECTS_DIR/twinA.conf" <<CONF
 NAME="Twin A"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4501:/:python3 -m http.server 4501"
+TARGETS="web:4501:/:$PY $SERVE 4501"
 CONF
 cat > "$RB_PROJECTS_DIR/twinB.conf" <<CONF
 NAME="Twin B"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4501:/:python3 -m http.server 4501"
+TARGETS="web:4501:/:$PY $SERVE 4501"
 CONF
 DOC="$("$ENGINE" doctor 2>&1)" || true
 has "names the shared port"    "$DOC" "4501"
@@ -532,7 +686,7 @@ cat > "$RB_PROJECTS_DIR/spare.conf" <<CONF
 NAME="Spare"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4322:/:python3 -m http.server 4322 --directory public"
+TARGETS="web:4322:/:$PY $SERVE 4322 public"
 CONF
 mkdir -p "$RB_HOME/spare/logs"
 : > "$RB_HOME/spare/logs/web.log"
@@ -560,7 +714,7 @@ cat > "$RB_PROJECTS_DIR/busy.conf" <<CONF
 NAME="Busy"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
-TARGETS="web:4323:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4323:/:$PY $SERVE {port} public"
 CONF
 "$ENGINE" run busy main web >/dev/null 2>&1
 is  "the run really started"   "$(curl -sfo /dev/null -w '%{http_code}' http://localhost:4323/ 2>/dev/null)" "200"
@@ -612,7 +766,7 @@ NAME="Drift"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4982:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4982:/:$PY $SERVE {port} public"
 CONF
 "$ENGINE" run drift main web --in-place >/dev/null 2>&1
 UPD="$("$ENGINE" update drift 2>&1)" || true
@@ -674,7 +828,7 @@ NAME="Twin"
 REPO="$FIX"
 DEFAULT_BRANCH="main"
 INSTALL="false"
-TARGETS="web:4321:/:python3 -m http.server {port} --directory public"
+TARGETS="web:4321:/:$PY $SERVE {port} public"
 CONF
 OV="$("$ENGINE" overlaps)"
 has "the shared port is named"   "$OV" "4321"
@@ -701,7 +855,7 @@ is "the next suggestion avoids it" \
 
 # A listener nobody declared still has to be avoided — being able to run
 # alongside your own dev server is the point.
-python3 -m http.server $((4321 + OFF + 1)) >/dev/null 2>&1 &
+$PY $SERVE $((4321 + OFF + 1)) >/dev/null 2>&1 &
 SQUAT=$!
 sleep 1
 "$ENGINE" set twin PORT_OFFSET 0 >/dev/null 2>&1
@@ -709,8 +863,114 @@ THIRD="$("$ENGINE" suggest-offset twin)"
 is "an undeclared listener is avoided" \
    "$([ "$((4321 + THIRD))" != "$((4321 + OFF + 1))" ] && echo yes || echo no)" "yes"
 kill "$SQUAT" 2>/dev/null; wait "$SQUAT" 2>/dev/null || true
+free_port $((4321 + OFF + 1))
 rm -f "$RB_PROJECTS_DIR/twin.conf"; rm -rf "$RB_HOME/twin"
 
+# --- bugs the Go engine fixes ----------------------------------------------
+# Each of these is a bug runbranch.sh v1.5.1 still has (spec §4.7, "Fixed in
+# the Go engine"), so each runs against the Go engine only. When runbranch.sh
+# is deleted the gate goes with it.
+if [ "$ENGINE_KIND" = go ]; then
+
+echo "==> set keeps the lines after a trailing comment"
+# §4.7 #1, contract §7.1. The rewrite took `SYMBOL="cube"   # note` for the
+# start of an unclosed multi-line value, and ate every line after it up to the
+# next one ending in a quote. propose writes exactly these comments, on RUNTIME
+# and COPY_FILES, so the first edit to a proposed config lost part of it.
+cat > "$RB_PROJECTS_DIR/keep.conf" <<CONF
+SYMBOL="cube"   # a trailing note, as propose writes them
+NAME="Keep"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4711:/:$PY $SERVE {port} public"
+CONF
+"$ENGINE" set keep SYMBOL "globe" >/dev/null 2>&1
+getkey() { "$ENGINE" get "$1" | awk -F'\t' -v k="$2" '$1==k{print $2}'; }
+is "writes the commented key"  "$(getkey keep SYMBOL)" "globe"
+is "the next line survives"    "$(getkey keep NAME)" "Keep"
+is "and the file still loads"  "$("$ENGINE" doctor keep >/dev/null 2>&1; echo $?)" "0"
+
+echo "==> set escapes what a double-quoted value would interpret"
+# §4.7 #2, internals §6.11. The value was written between quotes unescaped: a
+# `"` broke the file (and was reverted), and a `$` was expanded on every later
+# load, so the value read back was not the one written.
+TRICKY='say "hi" to $HOME \ now'
+"$ENGINE" set keep NAME "$TRICKY" >/dev/null 2>&1
+is "a quote, a dollar and a backslash come back as written" "$(getkey keep NAME)" "$TRICKY"
+
+echo "==> get returns PORT_OFFSET"
+# §4.7 #3, contract §7.2. The editor binds a PORT_OFFSET field that get never
+# emitted, so it always loaded empty and saving the form could clear it.
+"$ENGINE" set keep PORT_OFFSET 3 >/dev/null 2>&1
+is "the offset is read back"   "$(getkey keep PORT_OFFSET)" "3"
+rm -f "$RB_PROJECTS_DIR/keep.conf"; rm -rf "$RB_HOME/keep"
+
+echo "==> remove-worktree says why when a per-run database cannot be dropped"
+# §4.7 #4, contract §7.6. With DB_URL_VARS set and no postgres to reach — no
+# docker, or no COMPOSE_PROJECT in the conf — remove-worktree exited 1 having
+# printed nothing and removed nothing. No postgres is needed to show that: its
+# absence is the case. Either answer is a fix; saying nothing is the bug.
+printf 'DATABASE_URL=postgres://tester@localhost:5432/app\n' > "$FIX/.env"
+cat > "$RB_PROJECTS_DIR/dbrun.conf" <<CONF
+NAME="DB Run"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+COPY_FILES=".env"
+DB_URL_VARS="DATABASE_URL"
+TARGETS="web:4713:/:$PY $SERVE {port} public"
+CONF
+# Made directly: a run would stop at creating the database, for the same reason.
+DBWT="$RB_HOME/dbrun/worktrees/main"
+mkdir -p "$RB_HOME/dbrun/worktrees"
+git -C "$FIX" worktree add -q --detach "$DBWT" main 2>/dev/null
+RW="$("$ENGINE" remove-worktree dbrun main 2>&1)"; RW_RC=$?
+if [ "$RW_RC" = 0 ]; then
+  is  "removes the worktree when it succeeds" "$([ -d "$DBWT" ] && echo yes || echo no)" "no"
+else
+  has "says why when it does not" "$RW" "FAILED"
+fi
+git -C "$FIX" worktree remove --force "$DBWT" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/dbrun.conf" "$FIX/.env"; rm -rf "$RB_HOME/dbrun"
+
+echo "==> a remote branch that has a worktree is ready"
+# §4.7 #5, contract §7.9. ready looked for a directory named after the ref with
+# origin/ kept, while worktrees are made with it stripped, so a remote branch
+# never showed as ready however many times it had run.
+git init -q --bare "$TMP/origin.git"
+git -C "$FIX" remote add origin "$TMP/origin.git"
+git -C "$FIX" branch -q remote-only main
+git -C "$FIX" push -q origin main remote-only 2>/dev/null
+git -C "$FIX" branch -q -D remote-only
+"$ENGINE" run fixture origin/remote-only web >/dev/null 2>&1
+"$ENGINE" stop fixture >/dev/null 2>&1
+is "the remote row is ready" \
+   "$("$ENGINE" branches fixture | awk -F'\t' '$1=="origin/remote-only"{print $7}')" "1"
+git -C "$FIX" remote remove origin
+
+echo "==> a copied directory is not nested inside itself"
+# §4.7 #9, internals §6.13. COPY_FILES ran `cp -R repo/dir wt/dir` on every
+# run, and into a directory that already exists cp -R copies INTO it: the
+# second run made wt/dir/dir, and every run after went one deeper.
+mkdir -p "$FIX/cfgdir"; printf 'seed\n' > "$FIX/cfgdir/settings.txt"
+cat > "$RB_PROJECTS_DIR/copyrun.conf" <<CONF
+NAME="Copy Run"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+COPY_FILES="cfgdir"
+TARGETS="web:4712:/:$PY $SERVE {port} public"
+CONF
+"$ENGINE" run copyrun main web >/dev/null 2>&1; "$ENGINE" stop copyrun >/dev/null 2>&1
+"$ENGINE" run copyrun main web >/dev/null 2>&1; "$ENGINE" stop copyrun >/dev/null 2>&1
+CPWT="$RB_HOME/copyrun/worktrees/main"
+is "the directory is copied"      "$([ -f "$CPWT/cfgdir/settings.txt" ] && echo yes || echo no)" "yes"
+is "and not into itself next run" "$([ -d "$CPWT/cfgdir/cfgdir" ] && echo yes || echo no)" "no"
+git -C "$FIX" worktree remove --force "$CPWT" 2>/dev/null || true
+rm -f "$RB_PROJECTS_DIR/copyrun.conf"; rm -rf "$RB_HOME/copyrun" "$FIX/cfgdir"
+
+else
+  skip "bugs the Go engine fixes (spec §4.7)" "runbranch.sh still has them; run with the Go engine"
+fi
+
 echo
-printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+printf '%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" = 0 ] || exit 1

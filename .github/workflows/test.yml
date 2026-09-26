@@ -1,0 +1,121 @@
+name: test
+
+# The engine suite on both platforms, against both engines where both exist,
+# plus the Windows app build once windows/ lands. See docs/TESTING.md.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    # macOS 26 on arm64, pinned rather than macos-latest: the app targets the
+    # macOS 26 SDK, and the default Xcode on this image (26.x) carries it.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: go vet and go test
+        working-directory: engine
+        timeout-minutes: 10
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: build the engine
+        working-directory: engine
+        run: CGO_ENABLED=0 go build -trimpath -o bin/runbranch ./cmd/runbranch
+
+      - name: lint
+        run: ./tools/lint.sh
+
+      # The Go engine first: it is what the app runs, so it is the result that
+      # decides a merge, and it should not wait behind the fallback's.
+      - name: engine suite against the Go engine
+        timeout-minutes: 20
+        run: RB_TEST_ENGINE=engine/bin/runbranch ./tests/engine.sh
+
+      - name: compile-check the app
+        run: swiftc -parse-as-library -O app/*.swift -o "$RUNNER_TEMP/rb"
+
+      # runbranch.sh is the frozen fallback, due to be retired. It is still
+      # run, so a regression in it is visible, but it no longer decides the
+      # job: the Go engine is what the app runs.
+      - name: engine suite against runbranch.sh (fallback)
+        timeout-minutes: 20
+        continue-on-error: true
+        run: RB_TEST_ENGINE=runbranch.sh ./tests/engine.sh
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Before checkout. Worktree paths under the fixture's temp directory
+      # pass MAX_PATH quickly, and git refuses them without longpaths. And the
+      # runner's git turns LF into CRLF on checkout, which bash reads as a
+      # stray \r at the end of every line of tests/engine.sh.
+      - name: configure git
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: go vet and go test
+        working-directory: engine
+        timeout-minutes: 10
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: build the engine
+        working-directory: engine
+        run: CGO_ENABLED=0 go build -trimpath -o bin/runbranch.exe ./cmd/runbranch
+
+      # Git Bash. runbranch.sh is not run here: it is the macOS fallback only.
+      - name: engine suite against the Go engine
+        timeout-minutes: 20
+        run: RB_TEST_ENGINE=engine/bin/runbranch.exe ./tests/engine.sh
+
+  windows-app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # hashFiles cannot gate a whole job (it runs before the checkout), so each
+      # step is gated instead. Until windows/ exists this job is a no-op.
+      - uses: actions/setup-go@v7
+        if: hashFiles('windows/make-app.ps1') != ''
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-dotnet@v6
+        if: hashFiles('windows/make-app.ps1') != ''
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: build the Windows app
+        if: hashFiles('windows/make-app.ps1') != ''
+        shell: pwsh
+        run: ./windows/make-app.ps1
+
+      - name: no Windows app yet
+        if: hashFiles('windows/make-app.ps1') == ''
+        shell: bash
+        run: echo "windows/make-app.ps1 does not exist yet; nothing to build"

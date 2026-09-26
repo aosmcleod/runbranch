@@ -1,0 +1,121 @@
+/* The social card: 1200x1200, rendered by tools/make-social-card.ps1. */
+
+:root {
+  --ink: #120c10;
+  --text: #ffffff;
+  --pill-text: rgba(255, 255, 255, 0.86);
+  --pill-edge: rgba(255, 255, 255, 0.20);
+  --pill-fill: rgba(255, 255, 255, 0.075);
+  --display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --body: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html, body {
+  width: 1200px;
+  height: 1200px;
+  overflow: hidden;
+  background: var(--ink);
+}
+
+.card {
+  position: relative;
+  width: 1200px;
+  height: 1200px;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--body);
+}
+
+/* The measured colour field, scaled up from 12x12 (card.html). The blur
+   takes out the last trace of the grid; the field is already smooth. */
+.glow {
+  position: absolute;
+  inset: 0;
+  width: 1200px;
+  height: 1200px;
+  filter: blur(34px) saturate(1.1) contrast(1.08);
+}
+
+/* Screen rather than plain alpha: on the original the lines pick up the
+   glow under them, peach over the orange and pale blue over the blue. */
+.contours {
+  position: absolute;
+  inset: 0;
+  width: 1200px;
+  height: 1200px;
+  mix-blend-mode: screen;
+}
+
+/* The original's wordmark: the mark about 82 wide from x 421, the word bold
+   and about 250 wide from x 528, its cap height centred on the mark. */
+.brand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 233px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+.brand img { height: 70px; width: auto; display: block; }
+.brand span {
+  font-family: var(--display);
+  font-size: 53px;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  line-height: 1;
+  padding-bottom: 6px;
+}
+
+.stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 357px;
+  height: 466px;
+}
+
+.window {
+  position: absolute;
+  display: block;
+  border-radius: var(--radius, 8px);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 34px 70px rgba(0, 0, 0, 0.55),
+    0 12px 28px rgba(0, 0, 0, 0.40);
+  overflow: hidden;
+}
+.window img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* Measured: 52 high, 14 apart, a 23 px label, centred on y = 921. */
+.pills {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 895px;
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+}
+.pill {
+  height: 52px;
+  padding: 0 19px;
+  border-radius: 26px;
+  border: 1.5px solid var(--pill-edge);
+  background: var(--pill-fill);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 23px;
+  color: var(--pill-text);
+  white-space: nowrap;
+}
+.pill svg { flex: none; }
+.pill .gh { width: 26px; height: 26px; fill: var(--pill-text); }
+.pill .arrow { width: 18px; height: 18px; stroke: rgba(255, 255, 255, 0.72); stroke-width: 1.4; fill: none; margin-left: 6px; }

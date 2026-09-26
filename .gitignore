@@ -16,3 +16,9 @@ Runbranch.app/
 assets/mark.png
 assets/AppIcon.icon/
 dist/
+
+# Build outputs. The engine binary is built by CI, make-app.sh and
+# windows/make-app.ps1, and a checked-in copy would go stale against engine/.
+engine/bin/
+windows/**/bin/
+windows/**/obj/

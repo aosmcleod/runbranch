@@ -3,6 +3,70 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.6.0
+
+> **On the Mac, check your projects once after updating:** run
+> `Runbranch.app/Contents/Helpers/runbranch doctor`. The engine is no longer a
+> shell script, so a `.conf` is now read rather than run. Everything Runbranch
+> writes, and everything [docs/config.md](docs/config.md) documents, reads
+> exactly as before. A config written by hand that used other shell features —
+> a `$(...)`, a variable other than `$HOME`, an `if` — no longer loads, and
+> `doctor` names the file and the line.
+
+**Runbranch for Windows 11**
+
+The same app, native on Windows: WinUI 3, Mica, the Windows 11 title bar, and
+the light or dark theme Windows is in. The same window as the Mac's — projects
+in the sidebar, branches with their pull requests, the run strip, the action
+bar — and every sheet: runs, logs, ports, port conflicts, disk, scan, the
+project editor, updates and what's new.
+
+- A zip: extract it anywhere and run `Runbranch.exe`. No installer, and nothing
+  that asks for an administrator, ever — long paths work without the Windows
+  setting, because Runbranch handles them itself
+- It updates itself the way the Mac does: GitHub's latest release, the
+  download checked against the checksum GitHub publishes, the folder swapped
+  while the app is closed, and the old one put back if anything goes wrong
+- Taskbar, notification area, or both, as the Mac offers the Dock and the menu
+  bar
+- Servers start in the background with no console window, and stopping a run
+  stops everything it started, including a watcher that respawns its child
+- `.conf` files are the same on both platforms, sidebar icons included: the
+  Mac's symbol names are kept and drawn with the nearest Windows glyph
+
+**One engine for both**
+
+- `runbranch.sh` is replaced by `runbranch`, a Go program both apps run. It
+  prints exactly what the script printed, which is what the Mac app reads, so
+  the app did not change. The script stays in the repository as the Mac's
+  fallback until the new engine has been through a release
+- Every command the script had, including the interactive menu, `doctor`,
+  `status` and `cleanup`
+- Worktree folders keep their names, and state is read both ways, so a run
+  started before the update can be stopped after it
+
+**Fixed**
+
+- Setting a key whose line ended in a comment deleted the lines after it —
+  which `add` writes by default
+- A value containing `"`, `$` or a backtick was written so that it would not
+  read back as written
+- The editor always showed the port offset as empty: `get` never returned it
+- Removing a worktree could fail silently when its per-run database could not
+  be dropped
+- A remote branch with a worktree was never shown as ready
+- Stopping a run could leave a watcher's children running when the watcher
+  itself went first
+- `kill-port` could report a process it had asked to stop as still running
+- A project at `~/code/foo` claimed servers running in `~/code/foobar`
+- Copying a directory into a worktree that already had it nested it inside
+  itself
+
+**Releases**
+
+- A release can ship for one platform or both. An app whose download is not
+  attached yet says so rather than reporting a failure
+
 ## 1.5.1
 
 **Fixed**
