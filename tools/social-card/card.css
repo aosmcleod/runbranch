@@ -1,141 +1,104 @@
-/* The social card: 1200x1200, rendered by tools/make-social-card.ps1. */
-
-:root {
-  --ink: #0b0a10;
-  --text: #f4f2f7;
-  --pill-text: #e9e6ee;
-  --pill-edge: rgba(255, 255, 255, 0.22);
-  --pill-fill: rgba(255, 255, 255, 0.07);
-  --display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --body: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-}
-
-* { box-sizing: border-box; margin: 0; }
-
+/*
+  The card's layers, over docs/img/social-card.png (see card.html). Sizes are
+  the original's, measured off it: pills 52 high with 14 between them and a
+  23 px label, centred on the same line at y = 921.
+*/
 html, body {
+  margin: 0;
   width: 1200px;
   height: 1200px;
   overflow: hidden;
-  background: var(--ink);
+  background: #000;
 }
 
-.card {
+#card {
   position: relative;
   width: 1200px;
   height: 1200px;
-  overflow: hidden;
-  background: var(--ink);
-  color: var(--text);
-  font-family: var(--body);
 }
 
-/* Warm glows down the left, cool ones down the right, and a dark band
-   through the middle so the window reads against something quiet. */
-.glow {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(520px 420px at 0% 0%, rgba(214, 120, 44, 0.85), transparent 70%),
-    radial-gradient(460px 360px at 24% 20%, rgba(214, 58, 96, 0.75), transparent 70%),
-    radial-gradient(520px 300px at 52% 0%, rgba(122, 48, 178, 0.75), transparent 70%),
-    radial-gradient(560px 380px at 86% 8%, rgba(36, 78, 176, 0.80), transparent 70%),
-    radial-gradient(420px 420px at 104% 34%, rgba(34, 120, 150, 0.60), transparent 70%),
-    radial-gradient(520px 360px at 8% 98%, rgba(168, 46, 96, 0.70), transparent 70%),
-    radial-gradient(520px 300px at 50% 104%, rgba(98, 40, 150, 0.55), transparent 70%),
-    radial-gradient(520px 380px at 98% 88%, rgba(40, 88, 168, 0.70), transparent 70%),
-    radial-gradient(420px 300px at -4% 60%, rgba(150, 50, 70, 0.35), transparent 70%);
-}
-
-.shade {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg,
-    rgba(11, 10, 16, 0) 0%,
-    rgba(11, 10, 16, 0.25) 28%,
-    rgba(11, 10, 16, 0.80) 50%,
-    rgba(11, 10, 16, 0.55) 70%,
-    rgba(11, 10, 16, 0) 100%);
-}
-
-.contours {
+#base {
   position: absolute;
   inset: 0;
   width: 1200px;
   height: 1200px;
-  /* Strong near the edges, all but gone behind the window. */
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.75) 24%, rgba(0,0,0,0.12) 46%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.8) 84%, #000 100%);
-          mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.75) 24%, rgba(0,0,0,0.12) 46%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.8) 84%, #000 100%);
-}
-.contours path {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.16);
-  stroke-width: 1;
 }
 
-.brand {
+/*
+  The original's pills are baked in. Each is blurred away inside its own
+  outline and nowhere else, so the old labels dissolve under the new pills
+  while the contour lines run on between and around them. One band across
+  the row was tried first and read as a fog; one plate the width of the row
+  showed as a capsule in the gaps.
+*/
+.soften {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: var(--brand-top, 232px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 26px;
-}
-.brand img { height: 78px; width: auto; display: block; }
-.brand span {
-  font-family: var(--display);
-  font-size: 58px;
-  font-weight: 600;
-  letter-spacing: -0.5px;
-  line-height: 1;
-  padding-bottom: 4px;
+  top: 894px;
+  height: 54px;
+  border-radius: 27px;
+  backdrop-filter: blur(10px);
 }
 
-.stage {
+/*
+  The window. Windows 11 rounds its corners at 8 px, which is about 7 at the
+  card's scale; the original's shadow is still there around the footprint, so
+  in "replace" this adds only a little contact shadow of its own.
+*/
+#shot {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: var(--stage-top, 356px);
-  height: var(--stage-height, 470px);
-}
-
-.window {
-  position: absolute;
-  display: block;
-  border-radius: var(--radius, 14px);
+  border-radius: 7px;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.10),
-    0 30px 60px rgba(0, 0, 0, 0.55),
-    0 10px 24px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
+    0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 18px 48px rgba(0, 0, 0, 0.45);
 }
-.window img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
-.pills {
+/* In "pair" it sits over another window, so it needs a shadow of its own. */
+#shot.front {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 30px 80px rgba(0, 0, 0, 0.65),
+    0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+#pills {
   position: absolute;
   left: 0;
   right: 0;
-  top: var(--pills-top, 894px);
+  top: 895px;
   display: flex;
   justify-content: center;
   gap: 14px;
 }
+
+/* The original's glass pill: a faint white wash and a hairline. */
 .pill {
-  height: 54px;
-  padding: 0 20px;
-  border-radius: 27px;
-  border: 1px solid var(--pill-edge);
-  background: var(--pill-fill);
-  -webkit-backdrop-filter: blur(6px);
-          backdrop-filter: blur(6px);
+  height: 52px;
+  box-sizing: border-box;
+  padding: 0 19px;
   display: flex;
   align-items: center;
   gap: 12px;
+  border-radius: 26px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.075);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   font-size: 23px;
-  color: var(--pill-text);
+  font-weight: 400;
+  letter-spacing: 0.1px;
   white-space: nowrap;
 }
-.pill svg { flex: none; }
-.pill .gh { width: 26px; height: 26px; fill: var(--pill-text); }
-.pill .arrow { width: 18px; height: 18px; stroke: rgba(233, 230, 238, 0.75); stroke-width: 1.6; fill: none; margin-left: 6px; }
+
+.pill svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+.pill svg.arrow {
+  width: 18px;
+  height: 18px;
+  opacity: 0.8;
+  margin-left: 4px;
+}

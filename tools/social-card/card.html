@@ -1,130 +1,84 @@
 <!doctype html>
 <!--
-  The social card template. tools/make-social-card.ps1 renders it to a
-  1200x1200 PNG with headless Edge; open it in a browser to iterate on it.
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
 
-  Everything comes in on the query string:
-    shot=<url>&ratio=<w/h>   one per window, back to front (one or two)
-    pill=<text>              one per platform pill, in order
-    licence=<text>           default GPL-3.0
-    repo=<text>              default github.com/aosmcleod/runbranch
-    mark=<url>               default ../../assets/mark.svg
-  Window images should be cropped to the window itself: the card draws the
-  rounded corners and the shadow.
+  A social card, made from the original rather than imitating it.
+
+  docs/img/social-card.png — the Mac release's card — is the canvas: its
+  glows, its contour lines, the mark and the wordmark stay exactly as they
+  are. A first attempt redrew all of that in CSS and came out muddy and
+  wrong in every way that mattered; there is no recreating that background
+  by hand, so this does not try. It lays a window over the Mac window's
+  footprint and redraws the row of pills, and nothing else.
+
+  Query parameters (tools/make-social-card.ps1 builds them):
+    base    the original card (file URL)
+    layout  "replace": the window covers the Mac window exactly
+            "pair":    the Mac window stays, this one overlaps it, lower right
+    shot    the window capture, already cropped to the window (file URL)
+    ratio   its width / height
+    pill    one per pill, in order; the licence first, the GitHub pill last
+            is added here
 -->
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
-<title>Runbranch social card</title>
 <link rel="stylesheet" href="card.css">
 </head>
 <body>
-<div class="card">
-  <div class="glow"></div>
-  <div class="shade"></div>
-  <svg class="contours" viewBox="0 0 1200 1200" aria-hidden="true"></svg>
-
-  <div class="brand">
-    <img id="mark" alt="">
-    <span>Runbranch</span>
-  </div>
-
-  <div class="stage" id="stage"></div>
-
-  <div class="pills" id="pills"></div>
+<div id="card">
+  <img id="base" alt="">
+  <img id="shot" alt="">
+  <div id="pills"></div>
 </div>
-
 <script>
-(function () {
-  var q = new URLSearchParams(location.search);
+const q = new URLSearchParams(location.search);
 
-  // --- contour lines: horizontal-ish, gently flowing, drawn deterministically
-  // so the card is the same every time it is rendered.
-  var svg = document.querySelector('.contours');
-  var ns = 'http://www.w3.org/2000/svg';
-  var waves = [
-    { a: 34, f: 0.0042, p: 0.3, c: 0.0021 },
-    { a: 18, f: 0.0093, p: 1.7, c: -0.0036 },
-    { a: 9,  f: 0.0170, p: 4.1, c: 0.0052 },
-    { a: 5,  f: 0.0290, p: 2.6, c: -0.0071 }
-  ];
-  for (var base = -80; base <= 1280; base += 26) {
-    var d = '';
-    for (var x = -40; x <= 1240; x += 10) {
-      var y = base;
-      for (var k = 0; k < waves.length; k++) {
-        var w = waves[k];
-        // The phase drifts with the line's height, so neighbouring lines
-        // bunch and part like a topographic map rather than run parallel.
-        y += w.a * Math.sin(w.f * x + w.p + w.c * base * 7) * (0.6 + 0.4 * Math.sin(base * 0.004 + k));
-      }
-      d += (x === -40 ? 'M' : 'L') + x + ' ' + y.toFixed(1);
-    }
-    var path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-  }
+// The original's three pills, measured off docs/img/social-card.png: licence,
+// platform, GitHub. Each is softened in its own outline (card.css).
+for (const [left, width] of [[212, 126], [349, 156], [517, 473]]) {
+  const s = document.createElement('div');
+  s.className = 'soften';
+  Object.assign(s.style, { left: left + 'px', width: width + 'px' });
+  document.getElementById('card').insertBefore(s, document.getElementById('shot'));
+}
+document.getElementById('base').src = q.get('base');
 
-  // --- brand
-  document.getElementById('mark').src = q.get('mark') || '../../assets/mark.svg';
+// The Mac window's footprint on the original card, bezel included, measured
+// off docs/img/social-card.png, and a few pixels past it so none of the Mac
+// bezel shows around a window laid over it.
+const mac = { x: 62, y: 350, w: 1076, h: 480 };
+const ratio = parseFloat(q.get('ratio')) || 2.27;
+const shot = document.getElementById('shot');
+shot.src = q.get('shot');
+let w, x, y;
+if (q.get('layout') === 'pair') {
+  // In front of the Mac window, lower right: the Mac window keeps its
+  // traffic lights, sidebar and header in view, and the two read as the same
+  // app rather than as a before and after.
+  w = 800; x = 1200 - 32 - w; y = 500;
+  shot.classList.add('front');
+} else {
+  w = mac.w; x = mac.x;
+  y = mac.y + (mac.h - w / ratio) / 2;
+}
+Object.assign(shot.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: (w / ratio) + 'px' });
 
-  // --- windows
-  var shots = q.getAll('shot');
-  var ratios = q.getAll('ratio').map(Number);
-  var stage = document.getElementById('stage');
-  var stageW = 1200, stageH = 470;
-  var boxes = [];
-  if (shots.length <= 1) {
-    // One window, as wide as the Mac card's, unless that would make it too tall.
-    var r = ratios[0] || 1.6;
-    var w1 = Math.min(1060, stageH * r);
-    boxes.push({ w: w1, h: w1 / r, x: (stageW - w1) / 2, y: (stageH - w1 / r) / 2 });
-  } else {
-    // Two: the first set back and to the left, the second in front, lower
-    // and to the right, overlapping by a little over a third.
-    stageH = 500;
-    stage.style.height = stageH + 'px';
-    var h = 440, ra = ratios[0] || 1.4, rb = ratios[1] || 1.4;
-    var wa = h * ra, wb = h * rb;
-    var overlap = 0.38 * Math.min(wa, wb);
-    var total = wa + wb - overlap;
-    var left = (stageW - total) / 2;
-    boxes.push({ w: wa, h: h, x: left, y: 0 });
-    boxes.push({ w: wb, h: h, x: left + wa - overlap, y: stageH - h });
-  }
-  shots.forEach(function (src, i) {
-    var b = boxes[i]; if (!b) return;
-    var div = document.createElement('div');
-    div.className = 'window';
-    div.style.left = b.x.toFixed(1) + 'px';
-    div.style.top = b.y.toFixed(1) + 'px';
-    div.style.width = b.w.toFixed(1) + 'px';
-    div.style.height = b.h.toFixed(1) + 'px';
-    // Corner radius follows the window's scale in the card.
-    div.style.setProperty('--radius', (shots.length > 1 ? 12 : 14) + 'px');
-    var img = document.createElement('img');
-    img.src = src; img.alt = '';
-    div.appendChild(img);
-    stage.appendChild(div);
-  });
-
-  // --- pills
-  var pills = document.getElementById('pills');
-  function pill(html) {
-    var el = document.createElement('div');
-    el.className = 'pill';
-    el.innerHTML = html;
-    pills.appendChild(el);
-  }
-  function text(s) { var t = document.createElement('span'); t.textContent = s; return t.outerHTML; }
-  pill(text(q.get('licence') || 'GPL-3.0'));
-  q.getAll('pill').forEach(function (p) { pill(text(p)); });
-  pill(
-    '<svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>' +
-    text(q.get('repo') || 'github.com/aosmcleod/runbranch') +
-    '<svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12 L12 4 M5.5 4 H12 V10.5"/></svg>'
-  );
-})();
+const pills = document.getElementById('pills');
+for (const text of q.getAll('pill')) {
+  const p = document.createElement('div');
+  p.className = 'pill';
+  p.textContent = text;
+  pills.appendChild(p);
+}
+const gh = document.createElement('div');
+gh.className = 'pill github';
+gh.innerHTML =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>' +
+  '<span>github.com/aosmcleod/runbranch</span>' +
+  '<svg class="arrow" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" d="M4.5 11.5l7-7M6 4.5h5.5V10"/></svg>';
+pills.appendChild(gh);
 </script>
 </body>
 </html>
