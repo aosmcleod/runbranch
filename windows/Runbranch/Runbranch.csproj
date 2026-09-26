@@ -1,0 +1,151 @@
+<!--
+  Runbranch for Windows: a WinUI 3 window over the shared engine.
+
+  Unpackaged and self-contained, so the build is a folder you run from
+  dist\windows\Runbranch\ with nothing to install first: no MSIX, no Windows
+  App SDK runtime installer, no .NET runtime. See docs/specs/windows-port.md §6.
+
+  Build it with windows/make-app.ps1, which also builds the engine and puts it
+  in bin\ beside Runbranch.exe (not next to it: runbranch.exe and
+  Runbranch.exe are the same file on Windows; see Engine.EnginePath). A bare
+  `dotnet build` works too, and gives a window with no engine unless
+  RB_ENGINE points at one.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <RootNamespace>Runbranch</RootNamespace>
+    <AssemblyName>Runbranch</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Program.cs owns Main, because single-instance redirection has to
+         happen before any XAML exists. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- A trimmed WinUI app breaks in ways that only show at runtime. Tried
+         2026-09-25 (TrimMode=partial): the folder halved, and the app died
+         building the main window, a NullReferenceException inside CsWinRT
+         when ItemsSource marshalled a collection whose interop the trimmer
+         had removed. Making it survive needs CsWinRT's AOT-style generated
+         interop throughout, which is its own piece of work. -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- Without it, `dotnet publish` of an unpackaged app leaves out every
+         compiled XAML file (.xbf) and the app's resource index (Runbranch.pri).
+         A build ran; the published folder — the one make-app.ps1 ships — died
+         loading MainWindow with nothing but "XAML parsing failed". It does
+         not make the app packaged; it only runs the resource tooling. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Only the language the UI is written in. Without this every WinUI
+         satellite resource ships, which is most of the folder's file count. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Product>Runbranch</Product>
+    <Company>Alec McLeod</Company>
+    <Copyright>Copyright (C) 2026 Alec McLeod. GPL-3.0.</Copyright>
+  </PropertyGroup>
+
+  <!--
+    The version lives in one place, make-app.sh, as it does for the Mac
+    (docs/VERSIONING.md). Read it from there rather than repeating it, so a
+    plain `dotnet build` and a release cannot disagree with the Mac about what
+    version this is. make-app.ps1 passes the same value explicitly.
+  -->
+  <PropertyGroup Condition="'$(Version)' == '' Or '$(Version)' == '1.0.0'">
+    <RbMakeAppSh>$(MSBuildThisFileDirectory)..\..\make-app.sh</RbMakeAppSh>
+    <Version Condition="Exists('$(RbMakeAppSh)')">$([System.Text.RegularExpressions.Regex]::Replace($([System.IO.File]::ReadAllText('$(RbMakeAppSh)')), '(?s)^.*?CFBundleShortVersionString&lt;/key&gt;\s*&lt;string&gt;([^&lt;]+)&lt;/string&gt;.*$', '$1'))</Version>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+  </PropertyGroup>
+
+  <!--
+    Builds are development builds unless you say otherwise, as on the Mac: the
+    copy you are working on and the one you use should not be mistakable for
+    each other on the taskbar. make-app.ps1 -Release passes release.
+  -->
+  <PropertyGroup>
+    <RBBuildChannel Condition="'$(RBBuildChannel)' == ''">development</RBBuildChannel>
+    <ApplicationIcon Condition="'$(RBBuildChannel)' == 'release'">Assets\Runbranch.ico</ApplicationIcon>
+    <ApplicationIcon Condition="'$(RBBuildChannel)' != 'release'">Assets\Runbranch-dev.ico</ApplicationIcon>
+    <DefineConstants Condition="'$(RBBuildChannel)' != 'release'">$(DefineConstants);RB_DEVELOPMENT</DefineConstants>
+  </PropertyGroup>
+
+  <!--
+    The sheet harness (RB_SHOW_SHEET) and the layout probe (RB_LAYOUT_PROBE)
+    are for whoever is working on the app. A release leaves them out rather
+    than carrying them switched off: nothing in a user's environment should be
+    able to put demo data over their real window.
+  -->
+  <ItemGroup Condition="'$(RBBuildChannel)' == 'release'">
+    <Compile Remove="Dialogs\Harness*.cs;MainWindow.Probe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="RBBuildChannel" Value="$(RBBuildChannel)" />
+  </ItemGroup>
+
+  <!--
+    Only the Windows App SDK components the app uses (spec F19). The app needs
+    Foundation (AppInstance, the pickers, resources), WinUI (XAML, TitleBar,
+    MicaBackdrop), InteractiveExperiences (AppWindow, composition) and DWrite,
+    which the Microsoft.WindowsAppSDK metapackage brings with Base and Runtime.
+
+    The metapackage stays referenced because the toolkit and H.NotifyIcon
+    packages depend on it: without this pin NuGet would resolve their floor,
+    1.6, an unsplit SDK that cannot sit beside 2.x. What it also brings and the
+    app never calls (Windows AI, ML, Search and Widgets: onnxruntime.dll,
+    DirectML.dll and the rest, over 60 MB) is referenced below with no assets,
+    which takes their files and their build logic out of the output. An
+    excluded package's own dependencies still flow, so those are listed too.
+    Their versions are the metapackage's own; bump them with it, or restore
+    reports the downgrade (NU1605). `dotnet list package` with its
+    include-transitive switch shows anything new a bump brings.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.5.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.ML" Version="2.1.94" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Search" Version="2.5.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.0.5" ExcludeAssets="all" />
+    <!-- ML's own dependencies: onnxruntime.dll and DirectML.dll live here. -->
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.1.74" ExcludeAssets="all" />
+    <PackageReference Include="System.Numerics.Tensors" Version="9.0.0" ExcludeAssets="all" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+  </ItemGroup>
+
+  <!--
+    The runtime pack's debugger support: the files a debugger attaching to the
+    process, or a dump being read afterwards, loads (mscordaccore, mscordbi,
+    DiaSymReader) and the dump writer (createdump). The app never loads them;
+    about 6 MB. Runbranch.pdb stays: it is what gives crash.log its file names
+    and line numbers.
+  -->
+  <Target Name="RbDropDebuggerFiles" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="'%(Filename)%(Extension)' == 'createdump.exe'
+                  Or '%(Filename)%(Extension)' == 'mscordbi.dll'
+                  Or '%(Filename)%(Extension)' == 'Microsoft.DiaSymReader.Native.amd64.dll'
+                  Or $([System.String]::Copy('%(Filename)').StartsWith('mscordaccore'))" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <Content Include="Assets\**\*.png;Assets\**\*.ico;Assets\**\*.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

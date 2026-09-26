@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  Shown once, on the first launch after the version changes:
+  Updates.swift's WhatsNewSheet, 520 x 440.
+-->
+<dialogs:SheetDialog
+    x:Class="Runbranch.Dialogs.WhatsNewDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Runbranch.Dialogs">
+    <dialogs:SheetDialog.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Dialogs/SheetStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="VersionStyle" TargetType="TextBlock" BasedOn="{StaticResource RbCaptionTextStyle}">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Setter Property="Margin" Value="0,0,0,4" />
+            </Style>
+        </ResourceDictionary>
+    </dialogs:SheetDialog.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Style="{StaticResource SheetHeaderStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image x:Name="Mark" Width="{StaticResource SheetMarkSize}" Height="{StaticResource SheetMarkSize}" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="Heading" Style="{StaticResource SheetTitleTextStyle}" />
+                <TextBlock x:Name="Subtitle" Style="{StaticResource SheetSubtitleTextStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource SheetDividerStyle}" />
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="Entries" Padding="{StaticResource SheetBandPadding}" Spacing="{StaticResource RbSpacingMedium}" />
+        </ScrollViewer>
+
+        <Border Grid.Row="3" Style="{StaticResource SheetFooterStyle}">
+            <Grid>
+                <HyperlinkButton x:Name="Changelog" Content="Full changelog" VerticalAlignment="Center" Style="{StaticResource SheetLinkStyle}"
+                                 FontSize="{StaticResource RbCaptionFontSize}" />
+                <StackPanel Style="{StaticResource SheetFooterButtonsStyle}">
+                    <Button x:Name="Continue" Content="Continue" Style="{StaticResource SheetAccentButtonStyle}" Click="OnContinue" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</dialogs:SheetDialog>

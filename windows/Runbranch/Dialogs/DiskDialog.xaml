@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  What the worktrees cost, and getting rid of the ones nothing wants:
+  Disk.swift's DiskSheet, 520 x 400 — 520 to match Ports, and because at 460
+  the footer line about reclaimable worktrees wrapped onto two.
+-->
+<dialogs:SheetDialog
+    x:Class="Runbranch.Dialogs.DiskDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Runbranch.Dialogs"
+    xmlns:local="using:Runbranch"
+    xmlns:views="using:Runbranch.Views">
+    <dialogs:SheetDialog.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Dialogs/SheetStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </dialogs:SheetDialog.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Style="{StaticResource SheetHeaderStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon local:Icons.Symbol="internaldrive" Style="{StaticResource SheetHeaderIconStyle}" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="Disk" Style="{StaticResource SheetTitleTextStyle}" />
+                <TextBlock x:Name="Summary" Text="Measuring…" Style="{StaticResource SheetSubtitleTextStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource SheetDividerStyle}" />
+
+        <!-- It takes seconds, so saying so beats an empty list that looks like an answer. -->
+        <StackPanel x:Name="Measuring" Grid.Row="2" Style="{StaticResource SheetStatePanelStyle}">
+            <ProgressRing Width="{StaticResource RbIconSize}" Height="{StaticResource RbIconSize}" IsActive="True" />
+            <TextBlock Text="Adding up what the worktrees cost." Style="{StaticResource SheetStateTextStyle}" />
+        </StackPanel>
+        <StackPanel x:Name="Empty" Grid.Row="2" Style="{StaticResource SheetStatePanelStyle}" Visibility="Collapsed">
+            <TextBlock Text="No worktrees yet." Style="{StaticResource SheetSecondaryTextStyle}" HorizontalAlignment="Center" />
+            <TextBlock Text="One is made the first time you run a branch." Style="{StaticResource SheetTertiaryCaptionStyle}"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+        <ScrollViewer x:Name="List" Grid.Row="2" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+            <ItemsRepeater x:Name="Rows">
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="dialogs:DiskRowView">
+                        <StackPanel>
+                            <Grid Padding="{StaticResource SheetRowPadding}" ColumnSpacing="{StaticResource RbSpacing}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource RbSpacing}">
+                                        <TextBlock Text="{x:Bind Title}" Style="{StaticResource RbBodyTextStyle}" TextTrimming="CharacterEllipsis" MaxWidth="320" />
+                                        <views:Badge Text="{x:Bind Badge.Text}" Symbol="{x:Bind Badge.Symbol}" Tone="{x:Bind Badge.Tone}"
+                                                     ToolTipService.ToolTip="{x:Bind Badge.Tip}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{x:Bind Project}" Style="{StaticResource SheetTertiaryCaptionStyle}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Size}" Style="{StaticResource SheetSecondaryTextStyle}"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                            <Border Style="{StaticResource SheetRowDividerStyle}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+        </ScrollViewer>
+
+        <InfoBar x:Name="Problem" Grid.Row="3" Margin="{StaticResource SheetInfoBarMargin}" Severity="Error" IsOpen="False" />
+
+        <Border Grid.Row="4" Style="{StaticResource SheetFooterStyle}">
+            <Grid ColumnSpacing="{StaticResource RbSpacing}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <!-- Offered rather than waited for. The whole point of a
+                     throwaway worktree is that you stop thinking about it, so
+                     something has to raise it. -->
+                <TextBlock x:Name="Status" VerticalAlignment="Center" Style="{StaticResource RbCaptionTextStyle}" TextTrimming="CharacterEllipsis" />
+                <!-- Deliberately not "merged": a squash-merge leaves a branch
+                     looking unmerged, so that heuristic would either miss the
+                     common case or delete work. -->
+                <DropDownButton x:Name="Reclaim" Grid.Column="1" Content="Reclaim…" Style="{StaticResource SheetDropDownButtonStyle}"
+                                Visibility="Collapsed">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout x:Name="ReclaimMenu" Placement="TopEdgeAlignedRight" />
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <Button x:Name="Done" Grid.Column="2" Content="Done" Style="{StaticResource SheetAccentButtonStyle}" Click="OnDone" />
+            </Grid>
+        </Border>
+    </Grid>
+</dialogs:SheetDialog>

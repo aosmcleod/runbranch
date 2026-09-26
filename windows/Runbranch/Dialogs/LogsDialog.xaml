@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  A live tail of one target's log: RunSheet.swift's LogViewer, 680 x 460.
+-->
+<dialogs:SheetDialog
+    x:Class="Runbranch.Dialogs.LogsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Runbranch.Dialogs"
+    xmlns:local="using:Runbranch"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+    <dialogs:SheetDialog.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Dialogs/SheetStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- Two templates rather than a colour set from code, so the red
+                 follows the theme like every other colour here. -->
+            <DataTemplate x:Key="PlainLine" x:DataType="dialogs:LogLine">
+                <TextBlock Text="{x:Bind Text}" Style="{StaticResource RbMonoTextStyle}" TextWrapping="Wrap" />
+            </DataTemplate>
+            <DataTemplate x:Key="ErrorLine" x:DataType="dialogs:LogLine">
+                <TextBlock Text="{x:Bind Text}" Style="{StaticResource RbMonoTextStyle}" TextWrapping="Wrap"
+                           Foreground="{ThemeResource RbRedBrush}" />
+            </DataTemplate>
+            <dialogs:LogLineTemplates x:Key="LineTemplates" Plain="{StaticResource PlainLine}" Error="{StaticResource ErrorLine}" />
+        </ResourceDictionary>
+    </dialogs:SheetDialog.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Style="{StaticResource SheetHeaderStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon local:Icons.Symbol="text.alignleft" Style="{StaticResource SheetHeaderIconStyle}" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="Logs" Style="{StaticResource SheetTitleTextStyle}" />
+                <!-- The target's name, unless the picker beside it is already
+                     showing it. A space rather than nothing, so the header
+                     is the same height either way. -->
+                <TextBlock x:Name="Subtitle" Text=" " Style="{StaticResource SheetSubtitleTextStyle}" />
+            </StackPanel>
+            <toolkit:Segmented x:Name="Picker" Grid.Column="2" Width="160" VerticalAlignment="Center"
+                               Visibility="Collapsed" SelectionChanged="OnPicked" />
+            <TextBox x:Name="Filter" Grid.Column="4" Width="120" VerticalAlignment="Center"
+                     PlaceholderText="Filter" TextChanged="OnFilterChanged" />
+            <!-- One button, written here rather than behind a helper. The
+                 Mac's header lost its other controls one at a time: wrap,
+                 follow, copy (the log is selectable text) and jump-to-error
+                 (typing "error" in the filter shows every one). -->
+            <Button Grid.Column="5" Style="{StaticResource SheetButtonStyle}" MinWidth="0"
+                    ToolTipService.ToolTip="Show in File Explorer" AutomationProperties.Name="Show in File Explorer"
+                    Click="OnReveal">
+                <FontIcon local:Icons.Symbol="folder" FontSize="{StaticResource RbIconSize}" />
+            </Button>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource SheetDividerStyle}" />
+
+        <!-- Vertical only: lines wrap. Always pinned to the tail. -->
+        <ScrollViewer x:Name="Scroller" Grid.Row="2" Padding="{StaticResource SheetBandPadding}"
+                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ItemsRepeater x:Name="Lines" ItemTemplate="{StaticResource LineTemplates}" />
+        </ScrollViewer>
+
+        <Border Grid.Row="3" Style="{StaticResource SheetFooterStyle}">
+            <Grid ColumnSpacing="{StaticResource RbSpacing}">
+                <Grid.ColumnDefinitions>
+                    <!-- Both fixed and always present: on the Mac the count grew
+                         and the error tally appeared from nothing, so the
+                         footer reflowed a beat after the sheet opened. -->
+                    <ColumnDefinition Width="72" />
+                    <ColumnDefinition Width="152" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="LineCount" Text="0 lines" VerticalAlignment="Center" Style="{StaticResource RbCaptionTextStyle}" />
+                <TextBlock x:Name="ErrorCount" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource RbCaptionTextStyle}"
+                           Foreground="{ThemeResource RbRedBrush}" />
+                <Button x:Name="Done" Grid.Column="3" Content="Done" Style="{StaticResource SheetAccentButtonStyle}" Click="OnDone" />
+            </Grid>
+        </Border>
+    </Grid>
+</dialogs:SheetDialog>

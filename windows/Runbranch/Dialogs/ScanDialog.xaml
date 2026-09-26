@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  Finding projects nobody has declared yet: ScanSheet.swift, 560 x 480.
+-->
+<dialogs:SheetDialog
+    x:Class="Runbranch.Dialogs.ScanDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Runbranch.Dialogs"
+    xmlns:local="using:Runbranch">
+    <dialogs:SheetDialog.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Dialogs/SheetStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </dialogs:SheetDialog.Resources>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Style="{StaticResource SheetHeaderStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon local:Icons.Symbol="folder.badge.plus" Style="{StaticResource SheetHeaderIconStyle}" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="Find projects" Style="{StaticResource SheetTitleTextStyle}" />
+                <TextBlock Text="Runbranch reads each repository and proposes a config you can correct."
+                           Style="{StaticResource SheetSubtitleTextStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource SheetDividerStyle}" />
+
+        <!-- Idle and scanning. The scan does not start on its own: walking
+             somebody's home folder before they have asked is the kind of
+             helpfulness that reads as a liberty, so the folder is shown,
+             filled in, and waits. -->
+        <StackPanel x:Name="Choose" Grid.Row="2" Padding="{StaticResource RbPagePadding}" Spacing="{StaticResource RbSpacingMedium}">
+            <Grid ColumnSpacing="{StaticResource RbSpacing}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="Folder" FontFamily="{StaticResource RbMonoFontFamily}" PlaceholderText="Folder"
+                         AutomationProperties.Name="Folder" TextChanged="OnFolderChanged" />
+                <Button x:Name="Browse" Grid.Column="1" Content="Choose…" Style="{StaticResource SheetButtonStyle}" Click="OnBrowse" />
+            </Grid>
+            <TextBlock Text="Git repositories up to three levels deep, ignoring node_modules." Style="{StaticResource RbCaptionTextStyle}" />
+            <StackPanel x:Name="Looking" Orientation="Horizontal" Spacing="{StaticResource RbSpacing}" Visibility="Collapsed">
+                <ProgressRing Width="{StaticResource RbIconSize}" Height="{StaticResource RbIconSize}" IsActive="True" />
+                <TextBlock Text="Looking…" VerticalAlignment="Center" Style="{StaticResource RbCaptionTextStyle}" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Results. Nothing preselected: adding twenty projects nobody asked
+             for is worse than making them tick the two they want. -->
+        <ListView x:Name="Found" Grid.Row="2" SelectionMode="Multiple" Visibility="Collapsed"
+                  Padding="{StaticResource SheetListPadding}" SelectionChanged="OnChosen">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="dialogs:FoundRepo">
+                    <StackPanel Padding="{StaticResource SheetListPadding}">
+                        <TextBlock Text="{x:Bind Name}" Style="{StaticResource RbBodyTextStyle}" />
+                        <TextBlock Text="{x:Bind Where}" Style="{StaticResource SheetMonoCaptionStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+        <StackPanel x:Name="Nothing" Grid.Row="2" Style="{StaticResource SheetStatePanelStyle}" Visibility="Collapsed">
+            <FontIcon local:Icons.Symbol="folder" Style="{StaticResource SheetStateIconStyle}" />
+            <TextBlock Text="Nothing new here" Style="{StaticResource RbBodyStrongTextStyle}" HorizontalAlignment="Center" />
+            <TextBlock Text="No git repositories under that folder that are not already declared." Style="{StaticResource SheetStateTextStyle}" />
+        </StackPanel>
+
+        <!-- Adding, then done. -->
+        <StackPanel x:Name="Adding" Grid.Row="2" Style="{StaticResource SheetStatePanelStyle}" Visibility="Collapsed">
+            <ProgressBar x:Name="Progress" Width="{StaticResource SheetProgressWidth}" Maximum="1" />
+            <TextBlock x:Name="AddingText" Style="{StaticResource SheetStateTextStyle}" />
+        </StackPanel>
+
+        <Border Grid.Row="3" Style="{StaticResource SheetFooterStyle}">
+            <Grid>
+                <Button x:Name="SelectAll" Content="Select all" Style="{StaticResource SheetButtonStyle}" Visibility="Collapsed"
+                        Click="OnSelectAll" />
+                <StackPanel Style="{StaticResource SheetFooterButtonsStyle}">
+                    <Button x:Name="Cancel" Content="Cancel" Style="{StaticResource SheetButtonStyle}" Click="OnCancelClick" />
+                    <Button x:Name="Primary" Content="Scan" Style="{StaticResource SheetAccentButtonStyle}" Click="OnPrimary" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</dialogs:SheetDialog>

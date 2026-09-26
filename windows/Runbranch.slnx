@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Runbranch.Tests/Runbranch.Tests.csproj" />
+  <Project Path="Runbranch/Runbranch.csproj" />
+</Solution>

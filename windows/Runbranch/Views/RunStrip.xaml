@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runbranch — run any branch of any project on a real port.
+  Copyright (C) 2026 Alec McLeod. GPL-3.0-or-later; see app/Engine.swift.
+
+  The run's status as one card: Views.swift's RunStrip. The Mac draws it in
+  Liquid Glass; the Windows idiom for the same thing is a card (spec 6.3).
+  One body line: the dot, how it is, what kind of run, how long, and on the
+  right where to find it. The left side is a LinePanel, so the label, the
+  chips and the uptime share one baseline, as a branch row's name and chips do.
+-->
+<UserControl
+    x:Class="Runbranch.Views.RunStrip"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Runbranch.Views"
+    IsTabStop="False">
+    <Border Style="{StaticResource RbCardStyle}">
+        <Grid Height="20" ColumnSpacing="{StaticResource RbSpacingMedium}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <views:LinePanel
+                x:Name="Line"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Spacing="{StaticResource RbSpacing}">
+                <Ellipse
+                    x:Name="Dot"
+                    Width="{StaticResource RbSpacing}"
+                    Height="{StaticResource RbSpacing}" />
+                <TextBlock
+                    x:Name="HealthText"
+                    Style="{StaticResource RbBodyStrongTextStyle}"
+                    TextLineBounds="Tight"
+                    TextWrapping="NoWrap" />
+                <!-- Chips go here, between the label and the uptime (RunStrip.Fill). -->
+                <!-- Segoe UI's figures are tabular, so the tick does not jitter
+                     the way proportional digits would: the Mac's monospacedDigit. -->
+                <TextBlock
+                    x:Name="Uptime"
+                    Foreground="{ThemeResource RbSecondaryBrush}"
+                    Style="{StaticResource RbBodyTextStyle}"
+                    TextLineBounds="Tight"
+                    TextWrapping="NoWrap" />
+            </views:LinePanel>
+
+            <views:LinePanel
+                x:Name="Ports"
+                Grid.Column="1"
+                VerticalAlignment="Stretch"
+                Spacing="{StaticResource RbSpacingMedium}" />
+        </Grid>
+    </Border>
+</UserControl>
