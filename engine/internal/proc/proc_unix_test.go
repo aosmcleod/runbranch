@@ -165,7 +165,20 @@ func TestTerminate(t *testing.T) {
 	if proc.Alive(h) {
 		t.Error("still alive after Terminate")
 	}
-	stubborn, _ := startUnix(t, `trap '' TERM; while :; do sleep 1; done`)
+	// It says when the trap is in place, and TERM waits for that. Sent at
+	// once, the signal could land before bash reached the trap, and it died
+	// of the default action: on CI's first macOS run it did, and the test
+	// read that as Terminate escalating.
+	stubborn, stubbornLog := startUnix(t, `trap '' TERM; echo ready; while :; do sleep 1; done`)
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if b, _ := os.ReadFile(stubbornLog); strings.Contains(string(b), "ready") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stubborn process never said it was ready")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err := proc.Terminate(stubborn.PID, time.Second); err == nil {
 		t.Error("Terminate claimed success on a process ignoring TERM")
 	}
