@@ -404,7 +404,7 @@ is "serves uncommitted work" \
    "$(curl -sf http://localhost:4981/scratch.txt 2>/dev/null | tr -d '\n')" "uncommitted"
 is "state records the mode"   "$(grep -c '^IN_PLACE=1$' "$RB_HOME/inplace/state" 2>/dev/null)" "1"
 is "state points at the checkout" \
-   "$(npath "$(grep '^WORKTREE=' "$RB_HOME/inplace/state" | cut -d= -f2- | tr -d '')")" "$FIX"
+   "$(npath "$(grep '^WORKTREE=' "$RB_HOME/inplace/state" | cut -d= -f2- | tr -d '\r')")" "$FIX"
 is "and made no worktree"     "$([ -d "$RB_HOME/inplace/worktrees" ] && ls "$RB_HOME/inplace/worktrees" | wc -l | tr -d ' ' || echo 0)" "0"
 "$ENGINE" stop inplace >/dev/null 2>&1
 sleep 1
