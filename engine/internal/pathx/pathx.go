@@ -59,7 +59,7 @@ func key(p string) string {
 	if k, ok := keys.Load(p); ok {
 		return k.(string)
 	}
-	k := Long(p)
+	k := resolved(Long(p))
 	if foldCase {
 		k = asciiLower(k)
 	}
