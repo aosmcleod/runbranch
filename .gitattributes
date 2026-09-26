@@ -1,0 +1,9 @@
+# Checked out LF on every platform, whatever core.autocrlf says. bash reads a
+# CR as part of the last word on a line, so a Windows checkout of a script or a
+# .conf fails in ways that look like the code is wrong rather than the file.
+*.sh        text eol=lf
+*.conf      text eol=lf
+.runbranch  text eol=lf
+*.go        text eol=lf
+*.swift     text eol=lf
+*.yml       text eol=lf
