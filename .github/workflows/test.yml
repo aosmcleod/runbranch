@@ -25,6 +25,7 @@ jobs:
 
       - name: go vet and go test
         working-directory: engine
+        timeout-minutes: 10
         run: |
           go vet ./...
           go test ./...
@@ -39,6 +40,7 @@ jobs:
       # The Go engine first: it is what the app runs, so it is the result that
       # decides a merge, and it should not wait behind the fallback's.
       - name: engine suite against the Go engine
+        timeout-minutes: 20
         run: RB_TEST_ENGINE=engine/bin/runbranch ./tests/engine.sh
 
       - name: compile-check the app
@@ -49,6 +51,7 @@ jobs:
       # its first run on a CI runner failed on attribution under macOS's
       # /var -> /private/var temp directories, which it compares as strings.
       - name: engine suite against runbranch.sh (fallback)
+        timeout-minutes: 20
         continue-on-error: true
         run: RB_TEST_ENGINE=runbranch.sh ./tests/engine.sh
 
@@ -76,6 +79,7 @@ jobs:
 
       - name: go vet and go test
         working-directory: engine
+        timeout-minutes: 10
         run: |
           go vet ./...
           go test ./...
@@ -86,6 +90,7 @@ jobs:
 
       # Git Bash. runbranch.sh is not run here: it is the macOS fallback only.
       - name: engine suite against the Go engine
+        timeout-minutes: 20
         run: RB_TEST_ENGINE=engine/bin/runbranch.exe ./tests/engine.sh
 
   windows-app:
