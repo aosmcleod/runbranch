@@ -1,37 +1,36 @@
 <#
 .SYNOPSIS
-  Make a social card from the Mac release's card (docs/img/social-card.png),
-  with a different window and different pills, rendered by headless Edge.
+  Render the social card (tools/social-card/card.html) to a 1200x1200 PNG with
+  headless Microsoft Edge.
 
 .DESCRIPTION
-  The original is the canvas, untouched except where this draws: its glows,
-  contour lines, mark and wordmark are kept exactly (tools/social-card/card.html
-  says why). -Shot is a window capture as tools/screenshot.ps1 writes it: the
-  window on a transparent, shadowed margin, cropped here to the opaque window.
-
-  -Layout replace   the window covers the Mac window's footprint exactly
-  -Layout pair      the Mac window stays, and this one overlaps it, lower right
-
-  -Pill is every pill before the GitHub one, in order.
+  Each -Shot is a window capture as tools/screenshot.ps1 or tools/screenshot.sh
+  writes it: the window on a transparent, shadowed margin. The margin is
+  cropped away here (to the fully opaque window) because the card draws its
+  own corners and shadow at the card's scale.
 
   Edge runs with a throwaway profile, so it neither touches nor waits on the
   browser you have open.
 
 .EXAMPLE
   # The Windows card
-  & ./tools/make-social-card.ps1 -Shot docs/img/windows/screenshot-wide.png `
-      -Pill 'GPL-3.0', 'Windows 11' -Out docs/img/social-card-windows.png
+  ./tools/make-social-card.ps1 -Shot docs/img/windows/screenshot-wide.png -Pill 'Windows 11' `
+      -Out docs/img/social-card-windows.png
 
-  # Both platforms
-  & ./tools/make-social-card.ps1 -Shot docs/img/windows/screenshot-wide.png -Layout pair `
-      -Pill 'GPL-3.0', 'macOS 26+', 'Windows 11' -Out docs/img/social-card-cross-platform.png
+  # Both platforms: the Mac window behind, the Windows one in front
+  & ./tools/make-social-card.ps1 -Shot docs/img/screenshot.png, docs/img/windows/screenshot-wide.png `
+      -Pill 'macOS 26+', 'Windows 11' -Out docs/img/social-card-cross-platform.png
+
+  # The Mac card, to check the template against docs/img/social-card.png
+  & ./tools/make-social-card.ps1 -Shot docs/img/screenshot.png -Pill 'macOS 26+' -Radius 14 -Out mac-check.png
 #>
 param(
-    [Parameter(Mandatory)] [string]$Shot,
-    [ValidateSet('replace', 'pair')] [string]$Layout = 'replace',
-    [string[]]$Pill = @('GPL-3.0', 'Windows 11'),
+    [Parameter(Mandatory)] [string[]]$Shot,
+    [string[]]$Pill = @('Windows 11'),
     [Parameter(Mandatory)] [string]$Out,
-    [string]$Base = 'docs/img/social-card.png'
+    [string]$Licence = 'GPL-3.0',
+    # 8 for a Windows window, 14 for a Mac one, at the card's scale.
+    [int]$Radius = 8
 )
 $ErrorActionPreference = 'Stop'
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -77,28 +76,29 @@ public static class CardCrop
 
 function To-FileUrl([string]$path) { ([Uri](Resolve-Path $path).Path).AbsoluteUri }
 
-function Repo-Path([string]$p) {
-    $r = Resolve-Path (Join-Path $Repo $p) -ErrorAction SilentlyContinue
-    if (-not $r) { $r = Resolve-Path $p }
-    $r.Path
-}
-
 $query = New-Object System.Collections.Generic.List[string]
-$bmp = New-Object System.Drawing.Bitmap (Repo-Path $Shot)
-try {
-    $box = [CardCrop]::Opaque($bmp)
-    $crop = $bmp.Clone($box, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $dest = Join-Path $Scratch 'shot.png'
-    $crop.Save($dest, [System.Drawing.Imaging.ImageFormat]::Png)
-    $crop.Dispose()
-    $ratio = [Math]::Round($box.Width / $box.Height, 4).ToString([Globalization.CultureInfo]::InvariantCulture)
-    $query.Add('shot=' + [Uri]::EscapeDataString((To-FileUrl $dest)))
-    $query.Add("ratio=$ratio")
+$i = 0
+foreach ($s in $Shot) {
+    $src = (Resolve-Path (Join-Path $Repo $s) -ErrorAction SilentlyContinue)
+    if (-not $src) { $src = Resolve-Path $s }
+    $bmp = New-Object System.Drawing.Bitmap $src.Path
+    try {
+        $box = [CardCrop]::Opaque($bmp)
+        $crop = $bmp.Clone($box, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $dest = Join-Path $Scratch ("shot-$i.png")
+        $crop.Save($dest, [System.Drawing.Imaging.ImageFormat]::Png)
+        $crop.Dispose()
+        $ratio = [Math]::Round($box.Width / $box.Height, 4).ToString([Globalization.CultureInfo]::InvariantCulture)
+        $query.Add('shot=' + [Uri]::EscapeDataString((To-FileUrl $dest)))
+        $query.Add("ratio=$ratio")
+    }
+    finally { $bmp.Dispose() }
+    $i++
 }
-finally { $bmp.Dispose() }
-$query.Add('base=' + [Uri]::EscapeDataString((To-FileUrl (Repo-Path $Base))))
-$query.Add("layout=$Layout")
 foreach ($p in $Pill) { $query.Add('pill=' + [Uri]::EscapeDataString($p)) }
+$query.Add('licence=' + [Uri]::EscapeDataString($Licence))
+$query.Add("radius=$Radius")
+$query.Add('mark=' + [Uri]::EscapeDataString((To-FileUrl (Join-Path $Repo 'assets\mark.svg'))))
 
 $url = (To-FileUrl $Template) + '?' + ($query -join '&')
 # Relative to the repo, like -Shot, wherever this is run from.
