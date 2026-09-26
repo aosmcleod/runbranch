@@ -12,6 +12,9 @@
 package ports
 
 import (
+	"net"
+	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -22,5 +25,31 @@ func TestParseLsof(t *testing.T) {
 	want := Snapshot{{Port: 5173, PID: 501}, {Port: 8080, PID: 77}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseLsof = %+v, want %+v", got, want)
+	}
+}
+
+// The live case, which the canned one above cannot speak for. CI's first
+// macOS run found the engine seeing no listener at all while a server was
+// plainly on its port, so this opens one and requires the snapshot to show it,
+// and says what lsof actually printed when it does not.
+func TestListenersSeesALiveSocket(t *testing.T) {
+	for _, network := range []string{"tcp4", "tcp6"} {
+		l, err := net.Listen(network, "localhost:0")
+		if err != nil {
+			t.Logf("%s: cannot listen here: %v", network, err)
+			continue
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		snap, err := Listeners()
+		l.Close()
+		if err != nil {
+			t.Fatalf("%s: Listeners: %v", network, err)
+		}
+		if snap.Holder(port) != os.Getpid() {
+			raw, rawErr := exec.Command("lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn").CombinedOutput()
+			path, _ := exec.LookPath("lsof")
+			t.Errorf("%s: port %d held by this process (pid %d) is not in the snapshot (%d listeners); lsof at %q said (err %v):\n%s",
+				network, port, os.Getpid(), len(snap), path, rawErr, raw)
+		}
 	}
 }
