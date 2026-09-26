@@ -26,6 +26,10 @@ const foldCase = true
 // longName expands 8.3 components with GetLongPathName. That call fails on a
 // path that does not exist, so it is applied to the deepest ancestor that
 // does and the remainder is re-attached as written.
+// resolved is the path a comparison sees. Long already did the work that
+// matters on Windows (8.3 names); junctions are left as they are.
+func resolved(p string) string { return p }
+
 func longName(p string) string {
 	rest := ""
 	cur := p
