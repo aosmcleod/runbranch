@@ -1,0 +1,146 @@
+name: release
+
+# Attaches the Windows download to a GitHub release (spec F18). Publishing a
+# release builds Runbranch-<version>-windows-x64.zip from the tagged commit and
+# uploads it; the Mac disk image stays a local step. See docs/VERSIONING.md.
+#
+# Run by hand to rebuild or backfill one release's downloads: pick the tag and
+# which platforms. "windows" is the default because it is the only one this
+# workflow can build.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to, e.g. v1.6.0
+        required: true
+        type: string
+      platforms:
+        description: Which downloads to attach
+        required: true
+        default: windows
+        type: choice
+        options:
+          - windows
+          - mac
+          - both
+
+permissions:
+  contents: write
+
+# One upload per tag at a time. Two runs racing on --clobber would leave
+# whichever finished last, which is harmless but not worth the confusion.
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  windows:
+    if: github.event_name == 'release' || inputs.platforms != 'mac'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # The tagged commit, not the default branch: the zip has to be the
+      # release the tag names, not whatever landed after it.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      # Before building, because a mismatch is the mistake this is here to
+      # catch: a tag pushed before the version bump in make-app.sh would build
+      # a zip named for the old version, which the updater would never find,
+      # and attach it to the new release. Read the way make-app.ps1 reads it.
+      - name: the tag matches the version in make-app.sh
+        run: |
+          $m = [regex]::Match((Get-Content -Raw make-app.sh), 'CFBundleShortVersionString</key>\s*<string>([^<]+)</string>')
+          if (-not $m.Success) { Write-Error "could not read the version from make-app.sh"; exit 1 }
+          $version = $m.Groups[1].Value
+          if ($env:TAG -ne "v$version") {
+            Write-Error "the tag is $env:TAG but make-app.sh at that commit declares $version. Bump make-app.sh, or tag v$version."
+            exit 1
+          }
+          "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "tag $env:TAG, version $version"
+
+      # By hand, the release has to exist already: this attaches, it does not
+      # publish. Said here rather than as a confusing gh error at the end.
+      - name: the release exists
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Error "there is no release for $env:TAG; publish it first"; exit 1 }
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: build the Windows release
+        run: ./windows/make-app.ps1 -Release
+
+      # Checked by name, which is what the updater looks for, so a build that
+      # quietly produced something else fails here rather than on every
+      # Windows machine that checks for updates.
+      - name: upload the zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "dist/windows/Runbranch-$env:VERSION-windows-x64.zip"
+          if (-not (Test-Path $zip)) { Write-Error "make-app.ps1 did not produce $zip"; exit 1 }
+          gh release upload $env:TAG $zip --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "attached $zip to $env:TAG"
+
+  mac:
+    # Not built here, on purpose. make-dmg.sh would accept a CI build: it
+    # refuses only a development build, and an ad-hoc signature verifies. But
+    # the image that ships is signed with the "Runbranch Local Signing"
+    # identity, which lives in one Mac's keychain (tools/make-signing-identity.sh)
+    # and is not something to export into repository secrets. A CI image would
+    # be signed ad-hoc: a different signature from every release before it,
+    # passing every check while not being the documented build. So this job
+    # says how to do it and succeeds, rather than failing a run that did
+    # everything it was asked that it can do.
+    #
+    # ubuntu-latest rather than macos-26, since nothing here needs a Mac.
+    if: github.event_name == 'workflow_dispatch' && inputs.platforms != 'windows'
+    runs-on: ubuntu-latest
+    steps:
+      - name: the Mac image is built locally
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null \
+               | grep -qxF "Runbranch-$version.dmg"; then
+            state="$TAG already has Runbranch-$version.dmg attached."
+          else
+            state="$TAG has no Mac download yet."
+          fi
+          msg="The Mac disk image is built on the Mac that holds the signing identity, not in CI. $state"
+          echo "::notice title=Mac image not built in CI::$msg"
+          {
+            echo "## Mac"
+            echo
+            echo "$msg On that Mac, at the tagged commit:"
+            echo
+            echo '```'
+            echo "git checkout $TAG"
+            echo "./make-app.sh --release"
+            echo "./make-dmg.sh"
+            echo "gh release upload $TAG dist/Runbranch-$version.dmg --clobber"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
