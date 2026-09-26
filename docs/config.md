@@ -3,14 +3,26 @@
 One `<name>.conf` per project, plus an optional `.runbranch` committed to the
 repo itself.
 
-They are plain bash, sourced by the engine.
+They look like shell assignments, and they are read, not run. The engine
+understands exactly this much:
+
+- `KEY=value`, `KEY="value"` or `KEY='value'`, optionally after `export`
+- double-quoted values may span lines, and may contain `\"`, `\\` and `\$`
+- `$HOME`, `${HOME}` and a leading `~` expand; nothing else does
+- `#` starts a comment, on its own line or after a value, and comments survive
+  every edit the app makes
+
+Anything else — `$(...)`, another variable, an `if` — is an error that names
+the file and the line, and `runbranch doctor` reports it. Before 1.6.0 configs
+were sourced by bash, so a hand-written one that leaned on that needs the
+shell parts taken out.
 
 ## Where they live
 
 | you are running | `.conf` files are read from |
 |---|---|
-| `runbranch.sh` from a checkout | `projects/`, beside the script |
-| Runbranch.app | `~/.runbranch/projects/` |
+| the engine from a checkout (`runbranch.sh`, or `engine/bin/runbranch`) | `projects/`, in that checkout |
+| Runbranch.app, or Runbranch.exe on Windows | `~/.runbranch/projects/` (`%USERPROFILE%\.runbranch\projects\`) |
 | anything, with `RB_PROJECTS_DIR` set | that directory, which wins over both |
 
 The app does not keep them inside its own bundle. Installing a new version
@@ -160,10 +172,14 @@ distribute your secrets, and nothing here pretends otherwise.
 
 ## A note on trust
 
-A config is sourced as shell, so it can run arbitrary code. That is the price
-of an engine you can read, and it is the same trust you already extend to a
-repo's `postinstall` scripts. Treat a config from a repo you do not trust the
-way you would treat that repo.
+Reading a config runs nothing, but a config says which commands to run —
+`INSTALL`, `MIGRATE`, `SEED`, every target — and running a project runs them.
+That is the same trust you already extend to a repo's `postinstall` scripts.
+Treat a config from a repo you do not trust the way you would treat that repo.
+
+Those commands run through `/bin/bash -c` on macOS and `cmd /c` on Windows.
+Most dev-server commands (`pnpm dev`, `npm run dev -- --port {port}`) read the
+same in both; a config shared across both platforms should stick to that kind.
 
 ## Worktree runs and in-place runs
 

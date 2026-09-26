@@ -2,13 +2,19 @@
 
 ## What is tested, and why those things
 
-`tests/engine.sh` — 112 assertions against a throwaway fixture repo and a
-throwaway state directory. Never against real projects.
+`tests/engine.sh` — assertions against a throwaway fixture repo and a
+throwaway state directory. Never against real projects. It runs against either
+engine: the Go binary in `engine/bin/` when it has been built, `runbranch.sh`
+otherwise, or whichever `RB_TEST_ENGINE` names. The first line it prints says
+which. A few assertions pin bugs the Go engine fixes and `runbranch.sh` still
+has (spec §4.7); they run against the Go engine only, and say SKIP otherwise.
+On Windows it runs in Git Bash, against the Go engine.
 
 `tests/ui.sh` — 8 assertions against the real app, launched over the demo data.
 
 ```bash
-./tests/engine.sh        # the engine
+./tests/engine.sh        # the engine (Go binary if built, else runbranch.sh)
+RB_TEST_ENGINE=runbranch.sh ./tests/engine.sh    # one engine in particular
 ./tests/ui.sh            # the app
 ./tests/engine.sh -v     # show every assertion
 ./tools/lint.sh          # bash syntax, and the mistakes this file has made
@@ -57,11 +63,22 @@ bugs live, and this project has better evidence than guesses. Examples:
 ## Before committing
 
 ```bash
-./tools/lint.sh && ./tests/engine.sh && swiftc -parse-as-library -O app/*.swift -o /tmp/rb
+(cd engine && go vet ./... && go test ./... && go build -o bin/runbranch ./cmd/runbranch)
+./tools/lint.sh
+RB_TEST_ENGINE=runbranch.sh ./tests/engine.sh && ./tests/engine.sh
+swiftc -parse-as-library -O app/*.swift -o /tmp/rb
 ```
 
-Roughly 40 seconds, most of it the lifecycle test starting and stopping a
-real server.
+Roughly 40 seconds per engine, most of it the lifecycle test starting and
+stopping a real server. Until `runbranch.sh` is retired, both engines have to
+pass.
+
+`.github/workflows/test.yml` runs the same on every push: on macOS, the Go
+tests, lint, the suite against both engines and a compile of the app; on
+Windows, the Go tests and the suite against `runbranch.exe` in Git Bash; and a
+Windows app build once `windows/` exists. CI compiles the app but does not run
+it — `tests/ui.sh` needs a display and a Screen Recording grant, so it stays a
+local check.
 
 ## Adding a test
 

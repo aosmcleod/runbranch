@@ -9,11 +9,17 @@ is to keep it inside that job.
 ```bash
 git clone https://github.com/aosmcleod/runbranch
 cd runbranch
-./make-app.sh          # needs only the Xcode command line tools
-./tests/engine.sh      # 34 assertions, ~40s
+./make-app.sh          # the Xcode command line tools, and Go for the engine
+./tests/engine.sh      # ~40s
 ```
 
-No package manager, no project file, no dependencies to install.
+On Windows, with Go and the .NET 10 SDK:
+
+```powershell
+.\windows\make-app.ps1   # engine + app into dist\windows\Runbranch\
+```
+
+No package manager beyond Go's and NuGet's, and nothing to install by hand.
 
 That gives you a **development build**: the mark with its colours inverted, a
 badge in About, and no update check — because an update would replace the build
@@ -27,17 +33,22 @@ reach a disk image or the documentation by accident.
 ## The shape of the thing
 
 ```
-runbranch.sh          the engine. bash 3.2, no UI of its own
-app/                  the front end. A window over the engine, one file per area
+engine/               the engine, in Go. One binary for macOS and Windows, no UI
+runbranch.sh          the previous engine, kept as the Mac fallback until retired
+app/                  the Mac front end. A window over the engine, one file per area
+windows/              the Windows front end. The same window, in WinUI 3
 projects/*.conf       one file per project
 tools/                trim/centre, crop, demo data, screenshots, lint
 tests/engine.sh       engine tests
 ```
 
-**The engine is the contract.** The app only ever calls subcommands —
-`projects`, `branches`, `state`, `get`, `set`, `run`, `stop`, `paths`. If you
-find the app reaching around the engine to do something itself, that is a bug
-even if it works.
+**The engine is the contract.** Both apps only ever call subcommands —
+`projects`, `branches`, `state`, `get`, `set`, `run`, `stop`, `paths` — and
+parse what they print, as pinned in
+[docs/specs/windows-port-engine-contract.md](docs/specs/windows-port-engine-contract.md).
+If you find an app reaching around the engine to do something itself, that is
+a bug even if it works. A change to what the engine prints is a change to both
+apps.
 
 ## Principles a change should respect
 
@@ -47,13 +58,15 @@ even if it works.
   a run the user deliberately started.
 - **Fail loudly, with the fix.** Every error names the command that resolves
   it. `die "what happened" "the command that fixes it"`.
-- **The engine stays readable.** bash 3.2, no associative arrays, no `mapfile`,
-  no here-documents inside `$( )`. `python3` is fair for parsing; a new
-  runtime dependency is not.
+- **The engine stays readable.** The standard library plus `golang.org/x/sys`
+  and `x/term`, and nothing else. Per-OS code lives in `engine/internal/proc`
+  and in `_windows.go` / `_darwin.go` files beside what needs it; everything
+  else is written once.
 
 ## Before you open a pull request
 
 ```bash
+(cd engine && go vet ./... && go test ./...)
 ./tools/lint.sh && ./tests/engine.sh
 ```
 
@@ -82,6 +95,6 @@ so — the next person will find it surprising too.
 
 ## Reporting a bug
 
-Include `./runbranch.sh doctor` output and the relevant project's `.conf`
+Include `runbranch doctor` output and the relevant project's `.conf`
 (with secrets removed — `COPY_FILES` names files that may contain them, though
 the config itself should not).
