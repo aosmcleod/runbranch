@@ -13,13 +13,11 @@
   browser you have open.
 
 .EXAMPLE
-  # The Windows card
-  ./tools/make-social-card.ps1 -Shot docs/img/windows/screenshot-wide.png -Pill 'Windows 11' `
+  # The Windows card; the Mac one is docs/img/social-card.png
+  & ./tools/make-social-card.ps1 -Shot docs/img/windows/screenshot-wide.png -Pill 'Windows 11' `
       -Out docs/img/social-card-windows.png
 
-  # Both platforms: the Mac window behind, the Windows one in front
-  & ./tools/make-social-card.ps1 -Shot docs/img/screenshot.png, docs/img/windows/screenshot-wide.png `
-      -Pill 'macOS 26+', 'Windows 11' -Out docs/img/social-card-cross-platform.png
+  # Two -Shot values put two windows on one card, the first behind
 
   # The Mac card, to check the template against docs/img/social-card.png
   & ./tools/make-social-card.ps1 -Shot docs/img/screenshot.png -Pill 'macOS 26+' -Radius 14 -Out mac-check.png
