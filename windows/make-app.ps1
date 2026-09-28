@@ -24,12 +24,14 @@ act, so it is the one that needs a word:
   .\windows\make-app.ps1            a development build
   .\windows\make-app.ps1 -Release   the shipping build, plus
                                     dist\windows\Runbranch-<version>-windows-x64.zip,
-                                    the asset the updater looks for (spec F10)
+                                    the asset the updater looks for (spec F10), and
+                                    Runbranch-<version>-windows-x64-setup.exe, the
+                                    per-user installer people download (F16)
 
 The version comes from make-app.sh, where docs/VERSIONING.md says it lives,
 so the zip's name, About and the Mac cannot disagree.
 
-Needs the .NET 10 SDK. Go builds the engine; without it (or while the engine
+Needs the .NET 10 SDK, and for -Release, Inno Setup 6. Go builds the engine; without it (or while the engine
 does not compile) a development build still produces the app, with no engine,
 and says so. A release refuses: an app with nothing to run is not a release.
 #>
@@ -159,6 +161,20 @@ if ($Release) {
     finally { $archive.Dispose() }
     $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
     Write-Host "    packaged $zip"
+    Write-Host "    sha256 $hash"
+
+    # The installer, from the same folder: what people download. The zip
+    # stays, because it is what the updater fetches (spec F16).
+    $iscc = Find-Tool 'iscc' (@(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1)
+    if (-not $iscc) { throw "Inno Setup is not installed, and a release needs the installer: winget install JRSoftware.InnoSetup --scope user" }
+    & $iscc /Q "/DAppVersion=$version" "/DSourceDir=$out" "/DOutputDir=$dist" (Join-Path $PSScriptRoot 'installer\Runbranch.iss')
+    if ($LASTEXITCODE -ne 0) { throw "the installer did not build; see the ISCC output above" }
+    $setup = Join-Path $dist "Runbranch-$version-windows-x64-setup.exe"
+    $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+    Write-Host "    packaged $setup"
     Write-Host "    sha256 $hash"
 }
 

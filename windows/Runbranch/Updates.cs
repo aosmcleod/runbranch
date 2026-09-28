@@ -213,6 +213,7 @@ public sealed class Updater
     static readonly Lazy<Updater> shared = new(() =>
     {
         _ = Task.Run(() => SweepLeftovers());
+        if (!Build.IsDevelopment) _ = Task.Run(() => RecordInstalledVersion(AppVersion.Installed, AppContext.BaseDirectory));
         return new Updater(AppVersion.Installed, Build.IsDevelopment, Settings.Shared, AppContext.BaseDirectory);
     });
 
@@ -605,6 +606,33 @@ public sealed class Updater
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
             TryDelete(dir);
         }
+    }
+
+    /// <summary>
+    /// The installer's entry in Settings > Apps, which Inno Setup names after
+    /// the AppId in windows/installer/Runbranch.iss.
+    /// </summary>
+    const string InstalledEntry = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Runbranch_is1";
+
+    /// <summary>
+    /// Keeps Settings > Apps showing the version that is running. The
+    /// installer writes it once; an in-app update swaps the folder without
+    /// the installer, so after one the entry would name the version first
+    /// installed. Only the entry for this folder: a copy extracted from the
+    /// zip, or a development build, leaves an installed one alone.
+    /// </summary>
+    public static void RecordInstalledVersion(AppVersion version, string installDir)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(InstalledEntry, writable: true);
+            if (key?.GetValue("InstallLocation") is not string location) return;
+            if (!string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(location)),
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(installDir)), StringComparison.OrdinalIgnoreCase)) return;
+            if (key.GetValue("DisplayVersion") as string == version.Description) return;
+            key.SetValue("DisplayVersion", version.Description);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException) { }
     }
 
     // --- preferences and state ---------------------------------------------

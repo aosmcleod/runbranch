@@ -1,8 +1,9 @@
 name: release
 
-# Attaches the Windows download to a GitHub release (spec F18). Publishing a
-# release builds Runbranch-<version>-windows-x64.zip from the tagged commit and
-# uploads it; the Mac disk image stays a local step. See docs/VERSIONING.md.
+# Attaches the Windows downloads to a GitHub release (spec F18). Publishing a
+# release builds Runbranch-<version>-windows-x64-setup.exe and the zip the
+# updater fetches from the tagged commit, and uploads both; the Mac disk
+# image stays a local step. See docs/VERSIONING.md.
 #
 # Run by hand to rebuild or backfill one release's downloads: pick the tag and
 # which platforms. "windows" is the default because it is the only one this
@@ -88,21 +89,32 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # The runner images have carried Inno Setup 6, but it is not promised;
+      # installed if it is missing, so the installer never quietly drops out.
+      - name: Inno Setup
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+
       - name: build the Windows release
         run: ./windows/make-app.ps1 -Release
 
       # Checked by name, which is what the updater looks for, so a build that
       # quietly produced something else fails here rather than on every
       # Windows machine that checks for updates.
-      - name: upload the zip
+      # The installer is what people download; the zip is what the updater
+      # fetches. Both, or neither.
+      - name: upload the installer and the zip
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = "dist/windows/Runbranch-$env:VERSION-windows-x64.zip"
-          if (-not (Test-Path $zip)) { Write-Error "make-app.ps1 did not produce $zip"; exit 1 }
-          gh release upload $env:TAG $zip --clobber --repo $env:GITHUB_REPOSITORY
+          $files = "dist/windows/Runbranch-$env:VERSION-windows-x64-setup.exe", "dist/windows/Runbranch-$env:VERSION-windows-x64.zip"
+          foreach ($f in $files) { if (-not (Test-Path $f)) { Write-Error "make-app.ps1 did not produce $f"; exit 1 } }
+          gh release upload $env:TAG @files --clobber --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          Write-Host "attached $zip to $env:TAG"
+          Write-Host "attached $($files -join ', ') to $env:TAG"
 
   mac:
     # Not built here, on purpose. make-dmg.sh would accept a CI build: it

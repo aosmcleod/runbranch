@@ -109,11 +109,16 @@ right-click on first launch.
 
 ### Windows
 
-Download `Runbranch-<version>-windows-x64.zip` from the [latest
-release](https://github.com/aosmcleod/runbranch/releases/latest), extract it
-anywhere you like — `%LOCALAPPDATA%\Programs\Runbranch` is a good home — and
-run `Runbranch.exe`. No installer, no administrator prompt, nothing written
-outside your user folder. Pin it to Start or the taskbar from there.
+Download `Runbranch-<version>-windows-x64-setup.exe` from the [latest
+release](https://github.com/aosmcleod/runbranch/releases/latest) and run it.
+It installs for you alone, into `%LOCALAPPDATA%\Programs\Runbranch`, adds
+Runbranch to Start, and opens it: no choices to make, no administrator prompt,
+nothing written outside your user folder. Uninstall it from **Settings → Apps**
+like anything else; your projects and settings stay.
+
+Rather not install anything? The same release has
+`Runbranch-<version>-windows-x64.zip`: extract it anywhere and run
+`Runbranch.exe`. It updates itself the same way.
 
 > [!IMPORTANT]
 > The first launch may be stopped by SmartScreen with *Windows protected your
@@ -126,7 +131,9 @@ any Windows setting. Runbranch passes git what it needs on every call and
 deletes through long-path names itself.
 
 To build it, you need [Go](https://go.dev/dl/) and the [.NET 10
-SDK](https://dotnet.microsoft.com/download):
+SDK](https://dotnet.microsoft.com/download), and for `-Release`, [Inno
+Setup](https://jrsoftware.org/isinfo.php) (`winget install
+JRSoftware.InnoSetup --scope user`):
 
 ```powershell
 git clone https://github.com/aosmcleod/runbranch
@@ -414,7 +421,8 @@ tests/ui.sh           Mac app smoke test; the last two checks read the screen
 make-app.sh           builds Runbranch.app, engine included
 make-dmg.sh           packages it as dist/Runbranch-<version>.dmg
 windows/make-app.ps1  builds the Windows app into dist\windows\, and with
-                      -Release the zip a release carries
+                      -Release the installer and zip a release carries
+windows/installer/    the Inno Setup script for the per-user installer
 make-icons.sh         the Mac graphic set, rendered from assets/mark.svg
 windows/make-icons.ps1  the Windows icon set, from the same mark
 assets/mark.svg       the mark. Every raster asset is rendered from it
