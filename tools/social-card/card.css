@@ -4,7 +4,7 @@
   --ink: #120c10;
   --text: #ffffff;
   --pill-text: rgba(255, 255, 255, 0.86);
-  --pill-edge: rgba(255, 255, 255, 0.20);
+  --pill-edge: rgba(255, 255, 255, 0.12);
   --pill-fill: rgba(255, 255, 255, 0.075);
   --display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --body: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
@@ -49,7 +49,7 @@ html, body {
   mix-blend-mode: screen;
 }
 
-/* The original's wordmark: the mark about 82 wide from x 421, the word bold
+/* The original's wordmark: the mark about 82 wide from x 421, the word semibold
    and about 250 wide from x 528, its cap height centred on the mark. */
 .brand {
   position: absolute;
@@ -65,7 +65,7 @@ html, body {
 .brand span {
   font-family: var(--display);
   font-size: 53px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.8px;
   line-height: 1;
   padding-bottom: 6px;
@@ -105,7 +105,7 @@ html, body {
   height: 52px;
   padding: 0 19px;
   border-radius: 26px;
-  border: 1.5px solid var(--pill-edge);
+  border: 1px solid var(--pill-edge);
   background: var(--pill-fill);
   -webkit-backdrop-filter: blur(10px);
           backdrop-filter: blur(10px);
