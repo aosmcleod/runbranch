@@ -3,6 +3,20 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.6.1
+
+**An installer for Windows**
+
+- `Runbranch-1.6.1-windows-x64-setup.exe`: run it, and Runbranch is installed
+  for you, in Start, and open. Nothing to choose and no administrator prompt.
+  It is in Settings → Apps, uninstalls from there, and leaves your projects and
+  settings when it does
+- The zip is still there for anyone who would rather not install, and is still
+  what the app downloads to update itself. After an update, Settings → Apps
+  shows the new version
+
+Nothing changes on the Mac.
+
 ## 1.6.0
 
 > **On the Mac, check your projects once after updating:** run

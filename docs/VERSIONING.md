@@ -32,9 +32,10 @@ a minor release.
 ## Releasing
 
 A release is one version, one tag and one GitHub release, carrying a download
-for each platform it ships on: `Runbranch-X.Y.Z.dmg` for the Mac and
-`Runbranch-X.Y.Z-windows-x64.zip` for Windows. Each app's updater looks for its
-own file by exactly that name, and treats a release without one as nothing to
+for each platform it ships on: `Runbranch-X.Y.Z.dmg` for the Mac, and for
+Windows `Runbranch-X.Y.Z-windows-x64-setup.exe`, the installer people
+download, beside `Runbranch-X.Y.Z-windows-x64.zip`, which is what the updater
+fetches. Each app's updater looks for its own file by exactly that name, and treats a release without one as nothing to
 offer — so the names are the contract, not a convention.
 
 1. Bump both version keys in `make-app.sh`. That is the only place; the
@@ -55,8 +56,8 @@ offer — so the names are the contract, not a convention.
    Both apps bundle it for "What's new", so it is written once for both
 6. Commit as `Release vX.Y.Z`, tag `vX.Y.Z`, push both
 7. `gh release create vX.Y.Z --title "Runbranch X.Y.Z" --notes-file …`.
-   Publishing starts the `release` workflow, which builds the Windows zip from
-   the tagged commit and attaches it. It fails, loudly and before building,
+   Publishing starts the `release` workflow, which builds the Windows
+   installer and zip from the tagged commit and attaches both. It fails, loudly and before building,
    if the tag and the version in `make-app.sh` disagree — the mistake of
    tagging before bumping, which would otherwise attach a zip no updater looks
    for
@@ -89,7 +90,8 @@ out for Windows"), rather than reported as a failure.
   release and say why in the notes
 - **Rebuilding or backfilling a download:** run the `release` workflow by hand
   (Actions → release → Run workflow) with the tag and `windows`. It replaces
-  the zip on that release. `mac` and `both` do not build a disk image; the
+  the installer and the zip on that release, built from that tag — so a
+  release made before the installer existed cannot be given one this way. `mac` and `both` do not build a disk image; the
   `mac` part prints the local commands for that tag and whether the image is
   already attached
 
