@@ -57,5 +57,19 @@ for name, lines in sorted(dupes.items()):
 sys.exit(1 if dupes else 0)
 DUP
 
+# The Claude Code plugin's version is the app's. Claude Code updates an
+# installed plugin only when that number moves, and the marketplace serves
+# main, so the number is what holds plugin changes back until a release.
+# A mismatch is caught here rather than by the release workflow after the tag.
+echo "==> one version"
+APP_VERSION="$(sed -n 's/.*CFBundleShortVersionString<\/key> *<string>\([^<]*\)<.*/\1/p' "$REPO/make-app.sh")"
+for f in claude-code/.claude-plugin/plugin.json .claude-plugin/marketplace.json; do
+  v="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$REPO/$f" | head -1)"
+  if [ "$v" != "$APP_VERSION" ]; then
+    echo "  $f says $v, make-app.sh says $APP_VERSION"
+    FAIL=1
+  fi
+done
+
 [ "$FAIL" = 0 ] && echo "==> clean"
 exit "$FAIL"

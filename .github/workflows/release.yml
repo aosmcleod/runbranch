@@ -3,10 +3,11 @@ name: release
 # Attaches the Windows downloads to a GitHub release (spec F18). Publishing a
 # release builds Runbranch-<version>-windows-x64-setup.exe and the zip the
 # updater fetches from the tagged commit, and uploads both; the Mac disk
-# image stays a local step. See docs/VERSIONING.md.
+# image stays a local step. It also attaches the Claude Code plugin as
+# Runbranch-<version>-claude-code-plugin.zip. See docs/VERSIONING.md.
 #
 # Run by hand to rebuild or backfill one release's downloads: pick the tag and
-# which platforms. "windows" is the default because it is the only one this
+# which platforms. "windows" is the default because it is the only app this
 # workflow can build.
 
 on:
@@ -27,6 +28,7 @@ on:
           - windows
           - mac
           - both
+          - claude-code
 
 permissions:
   contents: write
@@ -42,7 +44,7 @@ env:
 
 jobs:
   windows:
-    if: github.event_name == 'release' || inputs.platforms != 'mac'
+    if: github.event_name == 'release' || inputs.platforms == 'windows' || inputs.platforms == 'both'
     runs-on: windows-latest
     defaults:
       run:
@@ -116,6 +118,50 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "attached $($files -join ', ') to $env:TAG"
 
+  # The Claude Code plugin, as a download beside the apps. Most people install
+  # it from the marketplace (this repository), which serves main; the zip is
+  # the plugin exactly as tagged, for `claude --plugin-dir` or an offline copy.
+  claude-code:
+    if: github.event_name == 'release' || inputs.platforms == 'claude-code'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      # The plugin's version is the app's (tools/lint.sh checks it on every
+      # push). Checked again at the tag, because an installed plugin updates
+      # only when that number moves.
+      - name: the tag, the app and the plugin agree on the version
+        run: |
+          version="$(sed -n 's/.*CFBundleShortVersionString<\/key> *<string>\([^<]*\)<.*/\1/p' make-app.sh)"
+          plugin="$(jq -r .version claude-code/.claude-plugin/plugin.json)"
+          listed="$(jq -r '.plugins[] | select(.name == "runbranch") | .version' .claude-plugin/marketplace.json)"
+          if [ "$TAG" != "v$version" ] || [ "$plugin" != "$version" ] || [ "$listed" != "$version" ]; then
+            echo "::error::tag $TAG, make-app.sh $version, plugin.json $plugin, marketplace.json $listed: all four must name one version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: the release exists
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null || { echo "::error::there is no release for $TAG; publish it first"; exit 1; }
+
+      # The folder as committed: git archive leaves out what .gitignore keeps
+      # out (the type declarations Claude Code writes beside the plugin).
+      - name: package and attach the plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip="Runbranch-$VERSION-claude-code-plugin.zip"
+          git archive --format=zip --prefix=runbranch/ -o "$zip" HEAD:claude-code
+          unzip -l "$zip"
+          unzip -l "$zip" | grep -q 'runbranch/.claude-plugin/plugin.json' || { echo "::error::$zip has no plugin.json"; exit 1; }
+          gh release upload "$TAG" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
+          echo "attached $zip to $TAG"
+
   mac:
     # Not built here, on purpose. make-dmg.sh would accept a CI build: it
     # refuses only a development build, and an ad-hoc signature verifies. But
@@ -128,7 +174,7 @@ jobs:
     # everything it was asked that it can do.
     #
     # ubuntu-latest rather than macos-26, since nothing here needs a Mac.
-    if: github.event_name == 'workflow_dispatch' && inputs.platforms != 'windows'
+    if: github.event_name == 'workflow_dispatch' && (inputs.platforms == 'mac' || inputs.platforms == 'both')
     runs-on: ubuntu-latest
     steps:
       - name: the Mac image is built locally
