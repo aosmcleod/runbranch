@@ -22,3 +22,6 @@ dist/
 engine/bin/
 windows/**/bin/
 windows/**/obj/
+
+# Type declarations Claude Code writes beside the plugin each time it loads it.
+claude-code/.claude-plugin/types/

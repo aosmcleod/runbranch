@@ -59,6 +59,13 @@ bugs live, and this project has better evidence than guesses. Examples:
   while the shared one kept its 173, which is the whole point of the feature.
 - **`gh` interaction.** The PR cache is seeded directly in tests and in the
   demo, so nothing here needs a GitHub token.
+- **The Claude Code plugin's band.** `claude-code/` is type-checked and passes
+  `claude plugin validate`, and the engine half (`claude-code install` and
+  friends) is in the suite and in Go tests, but the band itself is checked by
+  hand in a Claude Code session. The check that matters: press Start in a
+  session on a project's checkout and confirm the band reaches the running row
+  rather than staying on "Starting…" — a reply lost with the press it came
+  from did exactly that once, which is why a press now only queues the work.
 
 ## Before committing
 
