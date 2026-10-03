@@ -3,6 +3,33 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## 1.8.0
+
+**In-place runs bring up what the servers need**
+
+- A run in place now starts the project's `COMPOSE_SERVICES`, as a run in a
+  worktree always has. Before, it skipped them, so a project whose servers
+  need a database — Start in the Claude Code band, say — came up with nothing
+  behind it. Starting containers writes nothing in your checkout, and
+  `COMPOSE_PROJECT` makes them the ones it already uses. Install, migrations,
+  seed and the per-run database are still worktree-only
+- When Docker Desktop is installed but not running, a run starts it and waits
+  for it (up to two minutes) instead of stopping to tell you to
+- On Windows, Docker Desktop killed rather than quit (sleep, shutdown, a
+  process cleanup) leaves socket files behind that stop it starting again. A
+  run now recognises that from Docker's own log, stops waiting at once, and
+  names the folders. `runbranch docker-repair` is the fix, run when you choose:
+  it quits Docker, runs `wsl --shutdown` (which stops every WSL distro, so a run
+  never does it for you), renames both socket folders aside — including
+  `%LOCALAPPDATA%\docker-secrets-engine`, outside Docker's own folder — and
+  starts Docker again. Nothing is deleted
+- A run checks that every command it is about to run is installed before it
+  starts or stops anything, and names the one that is missing, rather than
+  starting a server that dies with the reason in its log
+
+Nothing to change in your configs. If a project's compose file has services
+its config does not list, add them to `COMPOSE_SERVICES` to have them started.
+
 ## 1.7.0
 
 **Runbranch in Claude Code**
