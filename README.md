@@ -375,9 +375,12 @@ Install it from the app — **Claude Code Plugin…** in the File menu on the Ma
 ```
 
 Either way, start a new session or run `/reload-plugins` in one that is open.
-It needs Runbranch installed, and finds the engine where the app puts it (or
-on `PATH`). It watches the folder only: it does not read your prompts, the
-model's turns or its tool calls, and it never starts anything by itself.
+It needs Runbranch 1.7 or later installed, and finds the engine where the app
+puts it (or on `PATH`). It watches the folder only: it does not read your
+prompts, the model's turns or its tool calls, and it never starts anything by
+itself. It carries the app's version and updates when Runbranch does; each
+[release](https://github.com/aosmcleod/runbranch/releases/latest) also has it
+as `Runbranch-X.Y.Z-claude-code-plugin.zip`, for `claude --plugin-dir`.
 
 A session opened in one of Claude's own worktrees cannot run in place, since
 in place means the project's checkout. Start runs that branch in a Runbranch

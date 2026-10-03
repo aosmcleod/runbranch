@@ -9,7 +9,7 @@
       "name": "runbranch",
       "source": "./claude-code",
       "description": "Shows whether the session's folder and branch are running under Runbranch, above the prompt, with start, stop and open controls",
-      "version": "0.1.2",
+      "version": "1.7.0",
       "license": "GPL-3.0",
       "homepage": "https://github.com/aosmcleod/runbranch#claude-code"
     }
