@@ -243,6 +243,16 @@ enum Engine {
         failure(["favourite", project, on ? "on" : "off"])
     }
 
+    /// The Claude Code plugin: "installed", "disabled" or "absent".
+    static func claudeCodeStatus() -> String {
+        capture(["claude-code", "status"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Installs or removes the Claude Code plugin; what went wrong, or nil.
+    static func claudeCode(install: Bool) -> String? {
+        failure(["claude-code", install ? "install" : "remove"])
+    }
+
     /// Runs a subcommand and returns what it complained about, or nil if it
     /// worked.
     ///

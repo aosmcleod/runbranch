@@ -238,6 +238,42 @@ final class MenuBridge: ObservableObject {
     var hasSelection: () -> Bool = { false }
 }
 
+/// The status band above Claude Code's prompt (claude-code/). One menu item
+/// that says where things stand and offers the opposite, because a command
+/// label cannot be kept current without asking the engine on every redraw.
+@MainActor
+enum ClaudeCodePlugin {
+    static func show() {
+        let installed = Engine.claudeCodeStatus() == "installed"
+        let ask = NSAlert()
+        if installed {
+            ask.messageText = "The Claude Code plugin is installed"
+            ask.informativeText = "Claude Code shows the run of the folder you are working in above its prompt. Removing it takes it out of ~/.claude/settings.json."
+            ask.addButton(withTitle: "Remove")
+        } else {
+            ask.messageText = "Install the Claude Code plugin?"
+            ask.informativeText = "Claude Code will show whether the folder you are working in is running, on which port and branch, above its prompt, with Start and Stop beside it. Runbranch adds it to ~/.claude/settings.json, and Claude Code fetches it from GitHub when a session starts."
+            ask.addButton(withTitle: "Install")
+        }
+        ask.addButton(withTitle: "Cancel")
+        guard ask.runModal() == .alertFirstButtonReturn else { return }
+
+        let done = NSAlert()
+        if let failed = Engine.claudeCode(install: !installed) {
+            done.alertStyle = .warning
+            done.messageText = "Could not change the Claude Code plugin"
+            done.informativeText = failed
+        } else if installed {
+            done.messageText = "Claude Code plugin removed"
+            done.informativeText = "Open sessions keep it until they restart, or until you run /reload-plugins in them."
+        } else {
+            done.messageText = "Claude Code plugin installed"
+            done.informativeText = "Start a new Claude Code session, or run /reload-plugins in one that is open."
+        }
+        done.runModal()
+    }
+}
+
 /// Owns the About panel. One instance, built on first use.
 @MainActor
 final class AboutPanel {
@@ -394,6 +430,7 @@ struct RunBranchApp: App {
                     NSWorkspace.shared.selectFile(
                         nil, inFileViewerRootedAtPath: Engine.projectsDir)
                 }
+                Button("Claude Code Plugin…") { ClaudeCodePlugin.show() }
                 Divider()
                 Button("Refresh") { MenuBridge.shared.refresh?() }
                     .keyboardShortcut("r")

@@ -264,6 +264,15 @@ public sealed partial class MainWindow
         }
         m.Add(MenuItem("Open projects folder", OpenProjectsFolder));
 
+        // The status band above Claude Code's prompt (claude-code/). The
+        // engine reads one small file, so asking each time the menu opens
+        // keeps the label true without caching it.
+        m.Add(new MenuFlyoutSeparator());
+        var hasPlugin = Engine.ClaudeCodeStatus() == "installed";
+        m.Add(MenuItem(hasPlugin ? "Remove Claude Code plugin" : "Install Claude Code plugin…",
+            () => _ = Run(Engine.ClaudeCodeArgs(!hasPlugin),
+                hasPlugin ? "Removing the Claude Code plugin" : "Installing the Claude Code plugin")));
+
         m.Add(new MenuFlyoutSeparator());
         var check = new ToggleMenuFlyoutItem { Text = "Check for updates on launch", IsChecked = Settings.Shared.UpdatesCheck };
         check.Click += (_, _) => Settings.Shared.UpdatesCheck = check.IsChecked;
