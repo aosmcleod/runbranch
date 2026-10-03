@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/aosmcleod/runbranch/engine/internal/config"
 	"github.com/aosmcleod/runbranch/engine/internal/gitx"
@@ -26,15 +25,8 @@ import (
 )
 
 // CmdHead is the first word of a command that is not a VAR=value, which is
-// the thing that has to exist.
-func CmdHead(cmd string) string {
-	for _, w := range strings.Fields(cmd) {
-		if !strings.Contains(w, "=") {
-			return w
-		}
-	}
-	return ""
-}
+// the thing that has to exist. A run checks the same thing before it starts.
+func CmdHead(cmd string) string { return run.CmdHead(cmd) }
 
 // Doctor checks a project's config before you need it. Every one of these is
 // something that would otherwise surface minutes into a run, as a failure

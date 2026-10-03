@@ -507,10 +507,10 @@ Tests require the output to contain `DEFAULT_BRANCH="main"`, `REPO=`, and `REPLA
 - **Sequence (`do_run`):**
   1. Expand the preset. If it comes out empty, die `Unknown preset ...`.
   2. Print a header line `<NAME> — <ref> (<preset>)`, bold on a TTY.
-  3. Run `harden_path` and `require_cmd git`.
+  3. Run `harden_path` and `require_cmd git`. (Go engine, 1.8.0+) Then `require_cmd` the first word of each chosen target's command, and for a worktree run of `INSTALL`, `MIGRATE` and `SEED`, with the fix `runbranch doctor <project>`; skipped for a project with a `RUNTIME`, for shell words (`cd`, `export`, `echo`, `true`, …) and for relative paths. Before step 4, so a missing tool does not stop the run already up.
   4. If a run is live: `    warn <NAME> already has <S_REF> running.`, then `ask "Stop it and start this one?"` (non-TTY answer: yes), then a full `stop_run` with output. (Quirk: the `load_state` call inside `demo_running` **overwrites the requested `PORT_OFFSET` and `IN_PLACE` with the previous run's values** whenever a state file exists, even a stale one. So "Run on N" or `--in-place` while switching within a project is silently lost. Recommend Go keeps the requested values.)
   5. `ensure_ports_free` (1.20.1).
-  6. **In-place:** the ref must equal the current branch, otherwise die `<REPO> has <cur> checked out, not <ref>.`, fix `cd <REPO> && git switch <ref>      # or run it from a worktree instead` (test-pinned: `has main checked out`, `git switch`). Then print `step "In place   <REPO>"`, `info "the checkout as it stands, uncommitted work included"`, `warn "no install, no copied files, no per-run database"`, and call `start_run` with `WORKTREE=REPO`. **Install, copy, compose, per-run database, migrate and seed are all skipped.**
+  6. **In-place:** the ref must equal the current branch, otherwise die `<REPO> has <cur> checked out, not <ref>.`, fix `cd <REPO> && git switch <ref>      # or run it from a worktree instead` (test-pinned: `has main checked out`, `git switch`). Then print `step "In place   <REPO>"`, `info "the checkout as it stands, uncommitted work included"`, `warn "no install, no copied files, no per-run database"`, then (Go engine, 1.8.0+) `bring_up_infra` against the checkout, and call `start_run` with `WORKTREE=REPO`. **Install, copy, per-run database, migrate and seed are skipped.** Until 1.8.0 compose was skipped too, and `runbranch.sh` still skips it.
   7. **Worktree mode:** `prepare_worktree`, `install_deps`, `bring_up_infra`, `setup_run_database`, `handle_migrations`, `run_seed`, then `start_run`.
 - **`prepare_worktree`:**
   - Resolve the ref with `rev-parse --verify --quiet <ref>^{commit}`, otherwise die ``\`<ref>\` does not resolve to a commit in <REPO>.``.
@@ -524,7 +524,7 @@ Tests require the output to contain `DEFAULT_BRANCH="main"`, `REPO=`, and `REPLA
   - a blank line, then `ok "dependencies installed"`.
   - **Failure classification:** a log matching `ERR_PNPM_FETCH_401|401 Unauthorized|npm\.pkg\.github\.com.*(401|Unauthorized)` (case-insensitive) gets the registry-401 die with fix `gh auth refresh -h github.com -s read:packages\n    cd <wt> && <INSTALL>`. A log matching `ERR_PNPM_OUTDATED_LOCKFILE|frozen-lockfile|npm ci.*can only install` gets the lockfile die. Anything else dies `Install failed. ...`.
 - **`bring_up_infra`:** only when `COMPOSE_SERVICES` is set.
-  - `require_cmd docker`. If `docker info` fails, die with `open -a Docker`.
+  - `require_cmd docker`. If `docker info` fails, die with `open -a Docker`. (Go engine, 1.8.0+) Instead, start Docker Desktop (`%ProgramFiles%\Docker\Docker\Docker Desktop.exe`, detached and out of the caller's job, on Windows; `open -a Docker` on the Mac), print `info "starting Docker Desktop, and waiting for it to answer"`, poll `docker info` every 2s, and on an answer print `ok "Docker is up (<n>s)"`. Die after 2 minutes with `Docker Desktop was started but the daemon did not answer within 2m0s.`, or at once when Docker Desktop is not where it installs itself, both with the Docker start fix. On Windows, before launching (looking back 15 minutes) and at every poll, read the end of `%LOCALAPPDATA%\Docker\log\host\com.docker.backend.exe.log` for `reporting error to user: starting services: … listening on unix://<path>.sock: rename`; when found, die at once naming the folder(s) holding those sockets, with the fix `runbranch docker-repair` (1.27a).
   - `COMPOSE_PROJECT` defaults to the project id **here only**.
   - Print `step "Infrastructure  (compose project: P)"` and `info "docker compose up -d --wait <svcs>"`, then run `docker compose -p P -f <wt>/<COMPOSE_FILE> up -d --wait <svcs>` with output discarded, then `ok "<svcs> healthy"`.
 - **`setup_run_database`:** see 5.7.
@@ -641,6 +641,17 @@ The Claude Code plugin in `claude-code/`. Go engine only; `runbranch.sh` does no
 - **`remove`:** `step`, then `ok "removed runbranch@runbranch from <file>"` or `ok "was not installed"`, then one `info` line. Drops the plugin's entry, and the marketplace unless it is a `directory` source; an object left empty is dropped with it.
 - **Failure:** a settings file that is not a JSON object dies with `<file> is not valid JSON: <reason>` and the fix `fix the JSON in <file>, then: runbranch claude-code <sub>`, and the file is not touched.
 - **Exit:** 0, 1 on a failure, 2 for an unknown subcommand.
+
+### 1.27a `docker-repair` (shell; named by a run's failure, never run by one)
+
+Windows only, Go engine 1.8.0+. Elsewhere it dies saying so, with the Docker start fix. Clears Docker Desktop's stale-socket failure: sockets left behind when it was killed rather than quit, which Windows will not let it reuse.
+
+1. `step "Docker Desktop repair"`, `info "quitting Docker Desktop"`, then `taskkill /F /T /IM` each of `Docker Desktop.exe`, `com.docker.backend.exe`, `com.docker.build.exe` (not running is fine).
+2. `warn "wsl --shutdown — this stops every WSL distro, not only Docker's"`, then `wsl --shutdown`; a failure is warned and the repair carries on.
+3. Rename aside, to `<folder>.stale-<YYYYMMDD-HHMMSS>`, each that exists of: `%LOCALAPPDATA%\Docker\run`, `%LOCALAPPDATA%\docker-secrets-engine`, and any other folder the backend log has named in the last 24 hours. Only folders strictly inside `%LOCALAPPDATA%`, and never `%LOCALAPPDATA%\Docker` itself. Each rename is retried for up to 5 s. `ok "set aside  <new name>"` per folder, or `info "no socket folders to set aside"`. A rename that never succeeds dies naming the folder, fix `runbranch docker-repair`. Nothing is deleted.
+4. Start Docker Desktop and wait as `bring_up_infra` does, including the stale-socket check, then `info "the old folders are kept as *.stale-<time>; delete them whenever you like"` when any were moved.
+
+Never part of a run: `wsl --shutdown` stops every distro on the machine.
 
 ### 1.28 Shell-only human commands
 

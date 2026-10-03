@@ -189,8 +189,8 @@ applies to it.
 
 `--in-place` runs in the checkout instead, and is accepted only for the branch
 the checkout is on — git will not check a branch out twice. It starts the
-declared `TARGETS` and manages their ports, health and logs. It deliberately
-ignores everything that writes:
+declared `TARGETS` and manages their ports, health and logs, and brings up
+the infrastructure they need. It deliberately ignores everything that writes:
 
 | Key | In place |
 |---|---|
@@ -198,10 +198,14 @@ ignores everything that writes:
 | `COPY_FILES` | not copied — they are already there |
 | `DB_URL_VARS` | no per-run database — the mechanism rewrites `COPY_FILES`, which here would mean editing your real config |
 | `MIGRATE`, `SEED` | not run, for the same reason: they act on whatever database the checkout already points at |
-| `COMPOSE_SERVICES` | left alone — whatever the checkout is pointed at is what it gets |
+| `COMPOSE_SERVICES` | **brought up**, as for a worktree run. Starting containers writes nothing in the checkout, and `COMPOSE_PROJECT` makes them the ones the checkout already talks to. Docker Desktop is started if it is not running. (Before 1.8.0 this was skipped, and a project needing a database came up without one) |
 
-So an in-place run is the servers, and nothing else. If a project needs any of
-the above to be usable, run it from a worktree.
+So an in-place run is the servers and the services they need, and nothing
+that writes. If a project needs any of the rest to be usable, run it from a
+worktree.
+
+Either kind of run checks, before it starts or stops anything, that each
+command it is about to run is installed, and names the one that is not.
 
 ## Worktrees, and what they cost
 

@@ -86,6 +86,51 @@ func OnPath(name string) bool {
 	return err == nil
 }
 
+// CmdHead is the first word of a command that is not a VAR=value, which is
+// the thing that has to exist.
+func CmdHead(cmd string) string {
+	for _, w := range strings.Fields(cmd) {
+		if !strings.Contains(w, "=") {
+			return strings.Trim(w, `"'`)
+		}
+	}
+	return ""
+}
+
+// Words a shell understands itself, which no PATH search would find.
+var shellWords = map[string]bool{
+	"cd": true, "export": true, "set": true, "source": true, ".": true, "call": true,
+	"echo": true, "exit": true, "true": true, "false": true, "test": true, "[": true,
+}
+
+// requireTools dies, naming the command, when one a run needs is not
+// installed: each chosen target's, and for a worktree run INSTALL, MIGRATE
+// and SEED too. Without it the run starts and the server dies at once, with
+// the reason in a log nobody is looking at. What cannot be judged is left to
+// the run: a shell word, a relative path, and any project with a RUNTIME,
+// whose tools are on PATH only once it is activated inside the run.
+func requireTools(p *config.Project, targets []string) {
+	if p.Get("RUNTIME") != "" {
+		return
+	}
+	var cmds []string
+	for _, n := range targets {
+		if t, ok := p.Target(n); ok {
+			cmds = append(cmds, t.Command)
+		}
+	}
+	if !p.InPlace {
+		cmds = append(cmds, p.Get("INSTALL"), p.Get("MIGRATE"), p.Get("SEED"))
+	}
+	for _, c := range cmds {
+		head := CmdHead(c)
+		if head == "" || shellWords[head] || strings.ContainsAny(head, `/\`) {
+			continue
+		}
+		RequireCmd(head, fmt.Sprintf("%s doctor %s      # every command the project needs, and which are missing", config.Self, p.ID))
+	}
+}
+
 // A repo that pins its toolchain expects that pin to be honoured. The
 // activation has to happen INSIDE the worktree, because that is where .nvmrc
 // / .tool-versions / mise.toml live — activating in the launcher's own

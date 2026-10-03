@@ -106,6 +106,9 @@ func usage() {
   runbranch kill-port <pid>         end a port holder, if it belongs to a project
   runbranch remove <project>        delete a project's config and state, never its repo
   runbranch reclaim [<project>]     reclaim ports and clear state a crash left
+  runbranch docker-repair           Windows: unstick Docker Desktop after it was
+                                       killed (quits it, wsl --shutdown, sets its
+                                       socket folders aside, starts it again)
   runbranch claude-code [status|install|remove]
                                        the Claude Code plugin: its status band
                                        above the prompt, enabled in ~/.claude
@@ -481,6 +484,11 @@ func dispatch(args []string) {
 			usageExit()
 		}
 		ui.Out(scan.Propose(args[1]))
+
+	case "docker-repair":
+		// Only ever by hand: it stops every WSL distro. A run that finds
+		// Docker stuck on stale sockets names this rather than doing it.
+		run.DockerRepair()
 
 	case "doctor":
 		if len(args) >= 2 {

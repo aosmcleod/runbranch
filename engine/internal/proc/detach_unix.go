@@ -11,17 +11,17 @@
 
 //go:build !windows
 
-package gitx
+package proc
 
 import (
 	"os/exec"
 	"syscall"
 )
 
-// spawnDetached starts this engine again for a background job and does not
+// SpawnDetached starts a program in the background and does not
 // wait for it: its own session, so a hangup does not reach it, and the null
 // device for every standard handle, so it never holds the app's pipe open.
-func spawnDetached(exe string, args ...string) error {
+func SpawnDetached(exe string, args ...string) error {
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
