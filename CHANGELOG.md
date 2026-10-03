@@ -3,7 +3,7 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
-## Unreleased
+## 1.7.0
 
 **Runbranch in Claude Code**
 
@@ -17,6 +17,11 @@ what the numbers mean.
   `/plugin install runbranch@runbranch` in Claude Code
 - `runbranch claude-code status|install|remove` does the same from a shell. It
   changes two keys in `~/.claude/settings.json` and nothing else
+- The plugin is versioned with the app, so it updates when Runbranch does, and
+  each release carries it as `Runbranch-1.7.0-claude-code-plugin.zip` beside
+  the app downloads
+
+Nothing you have set up changes: configs, runs and the CLI work as before.
 
 ## 1.6.1
 
