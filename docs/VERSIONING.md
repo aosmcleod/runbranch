@@ -16,6 +16,15 @@ platforms. `make-dmg.sh` reads it back out of the built bundle, and
 repeating it, so the file names, the About panels and the two platforms cannot
 disagree.
 
+The Claude Code plugin carries the same number, in
+`claude-code/.claude-plugin/plugin.json` and in its entry in
+`.claude-plugin/marketplace.json`, and `tools/lint.sh` fails when either
+differs from `make-app.sh`. It is repeated there because Claude Code reads it
+there: an installed plugin is updated only when that number moves. The
+marketplace serves `main`, so plugin changes merged between releases reach
+nobody until the release that bumps it — the release is the plugin's release
+too.
+
 ## What counts as breaking
 
 The contract is the config format and the CLI, because those are what people
@@ -36,10 +45,15 @@ for each platform it ships on: `Runbranch-X.Y.Z.dmg` for the Mac, and for
 Windows `Runbranch-X.Y.Z-windows-x64-setup.exe`, the installer people
 download, beside `Runbranch-X.Y.Z-windows-x64.zip`, which is what the updater
 fetches. Each app's updater looks for its own file by exactly that name, and treats a release without one as nothing to
-offer — so the names are the contract, not a convention.
+offer — so the names are the contract, not a convention. Beside them,
+`Runbranch-X.Y.Z-claude-code-plugin.zip` is the Claude Code plugin exactly as
+tagged, for anyone loading it with `claude --plugin-dir` rather than from the
+marketplace.
 
-1. Bump both version keys in `make-app.sh`. That is the only place; the
-   Windows build reads it from there
+1. Bump both version keys in `make-app.sh`, and the plugin's `version` in
+   `claude-code/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+   to match. `make-app.sh` is the only place the apps read it from; the plugin
+   repeats it for Claude Code, and `tools/lint.sh` checks the three agree
 2. `./make-app.sh --release` — builds and signs. Without `--release` you get a
    development build, and `make-dmg.sh` will refuse it at step 8 rather than
    package it
@@ -60,11 +74,13 @@ offer — so the names are the contract, not a convention.
    installer and zip from the tagged commit and attaches both. It fails, loudly and before building,
    if the tag and the version in `make-app.sh` disagree — the mistake of
    tagging before bumping, which would otherwise attach a zip no updater looks
-   for
+   for. A second job packages `claude-code/` as the plugin zip and attaches it,
+   after the same check against the plugin's own version
 8. `./make-dmg.sh` — packages, verifies, and mounts the image to check the
    signature survived. Then `gh release upload vX.Y.Z dist/Runbranch-X.Y.Z.dmg`,
    which it prints
-9. Check the release page shows both files before telling anyone
+9. Check the release page shows every file — the disk image, the installer,
+   the Windows zip and the plugin zip — before telling anyone
 
 The Mac image is built by hand and the Windows zip is not, because of where
 the signing lives. The Mac build is signed with a self-signed identity that
@@ -93,7 +109,8 @@ out for Windows"), rather than reported as a failure.
   the installer and the zip on that release, built from that tag — so a
   release made before the installer existed cannot be given one this way. `mac` and `both` do not build a disk image; the
   `mac` part prints the local commands for that tag and whether the image is
-  already attached
+  already attached. `claude-code` repackages the plugin zip from that tag; a
+  tag from before 1.7.0 has no plugin, and fails the version check saying so
 
 A later release supersedes this one on both platforms, so a Mac user who never
 got X.Y.Z is offered X.Y.(Z+1) directly. Nothing has to be backfilled for the
