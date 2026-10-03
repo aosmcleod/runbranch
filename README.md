@@ -342,10 +342,46 @@ runbranch suggest-offset studio    # the smallest shift that frees its ports
 runbranch disk                     # worktree sizes, and what is reclaimable
 runbranch cleanup studio           # remove worktrees, interactively
 runbranch prune-gone studio        # remove the ones whose branch no longer exists
+runbranch claude-code install      # the Claude Code plugin (status, remove)
 ```
 
 On the Mac, `./runbranch.sh` from a checkout still works: it is the previous
 engine, kept as a fallback until it is retired, and it takes the same commands.
+
+---
+
+## Claude Code
+
+A Claude Code plugin puts the run of the folder you are working in above the
+prompt, in the desktop app's Code tab and in the terminal: whether it is up,
+on which port, and on which branch, with the one thing to do about it at the
+right-hand end. It asks the engine and nothing else, so what it shows is what
+the app shows.
+
+| You see | Which means |
+|---|---|
+| `○ Not running` · **Start** | Nothing is up. Start runs it in place, on the branch the session has checked out |
+| `● localhost:3000 ↗` `+2` · `in place · up 14m` **Stop** | Up on this branch. The port opens your browser; `+2` lays every target out in the same row |
+| `● Running main, not this branch` · **Restart here** **Stop** | Up, but on another branch than the session's |
+| `● :3000 is taken by node.exe` · **Free port** | Something Runbranch did not start holds a port this project declares |
+| `No Runbranch config for this folder` · **Generate config** | The folder is not a project yet. Generate runs `runbranch add` on it |
+
+Install it from the app — **Claude Code Plugin…** in the File menu on the Mac,
+**Install Claude Code plugin…** in the ⋯ menu on Windows — or from Claude Code:
+
+```
+/plugin marketplace add aosmcleod/runbranch
+/plugin install runbranch@runbranch
+```
+
+Either way, start a new session or run `/reload-plugins` in one that is open.
+It needs Runbranch installed, and finds the engine where the app puts it (or
+on `PATH`). It watches the folder only: it does not read your prompts, the
+model's turns or its tool calls, and it never starts anything by itself.
+
+A session opened in one of Claude's own worktrees cannot run in place, since
+in place means the project's checkout. Start runs that branch in a Runbranch
+worktree instead, which has its commits but not uncommitted changes.
 
 ---
 
@@ -413,6 +449,7 @@ engine/               the engine, in Go: git, install, infra, servers. No UI.
 app/                  the Mac front end. One file per area; App.swift has @main
 windows/Runbranch/    the Windows front end, in WinUI 3. The same areas as app/
 runbranch.sh          the previous engine, kept as the Mac fallback until retired
+claude-code/          the Claude Code plugin; .claude-plugin/marketplace.json lists it
 projects/*.conf       one file per project when you run the engine from here
                       (yours are gitignored). The apps read ~/.runbranch/projects
 tests/engine.sh       engine tests, against either engine; every case is a bug

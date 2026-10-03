@@ -3,6 +3,21 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## Unreleased
+
+**Runbranch in Claude Code**
+
+- A Claude Code plugin shows the run of the folder you are working in above
+  the prompt, in the desktop app's Code tab and the terminal: whether it is up,
+  on which port and branch, with Start, Stop and Open. It says when the run is
+  on another branch than yours, when something else holds the port, and when
+  the folder is not a project yet. See [Claude Code](README.md#claude-code)
+- Install it from the app (File → Claude Code Plugin… on the Mac, the More
+  menu on Windows), or with `/plugin marketplace add aosmcleod/runbranch` and
+  `/plugin install runbranch@runbranch` in Claude Code
+- `runbranch claude-code status|install|remove` does the same from a shell. It
+  changes two keys in `~/.claude/settings.json` and nothing else
+
 ## 1.6.1
 
 **An installer for Windows**

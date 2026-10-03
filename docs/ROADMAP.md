@@ -118,6 +118,13 @@ checkout you are working in, and those are different products.
 - **A ports view.** What is listening, on which port, belonging to what. Built
   because the port conflict dialogue needed the data anyway, and once the
   engine can answer the question there is no reason not to show it.
+- **A Claude Code plugin.** The first, smaller half of the stretch item *Agent
+  integration*, arrived at from the other side: rather than handing Claude a
+  run, Claude Code shows the run of the folder it is working in, above its
+  prompt, with Start and Stop. It is another front end over the engine, like
+  the apps, and asks it nothing new; the only engine addition is
+  `claude-code install`, so both apps can offer it from a menu without the
+  `claude` command being on `PATH`.
 
 Of the follow-ups these opened, the first is fixed: an in-place run now says,
 in red, when the checkout has been switched to another branch underneath it.
