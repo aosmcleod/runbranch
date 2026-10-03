@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aosmcleod/runbranch/engine/internal/claudecode"
 	"github.com/aosmcleod/runbranch/engine/internal/config"
 	"github.com/aosmcleod/runbranch/engine/internal/disk"
 	"github.com/aosmcleod/runbranch/engine/internal/gitx"
@@ -105,6 +106,9 @@ func usage() {
   runbranch kill-port <pid>         end a port holder, if it belongs to a project
   runbranch remove <project>        delete a project's config and state, never its repo
   runbranch reclaim [<project>]     reclaim ports and clear state a crash left
+  runbranch claude-code [status|install|remove]
+                                       the Claude Code plugin: its status band
+                                       above the prompt, enabled in ~/.claude
   runbranch state <project>
   runbranch remove-worktree <project> <ref>
   runbranch refresh <project>
@@ -390,6 +394,51 @@ func dispatch(args []string) {
 		if !any {
 			ui.Out("\nNothing running.\n\n")
 			ui.ExitWith(1)
+		}
+
+	case "claude-code":
+		// The Claude Code plugin (claude-code/). status prints one word the
+		// apps build their menu item from: installed, disabled or absent.
+		sub := "status"
+		if len(args) > 1 {
+			sub = args[1]
+		}
+		file := claudecode.SettingsFile()
+		fix := "fix the JSON in " + file + ", then: " + config.Self + " claude-code " + sub
+		switch sub {
+		case "status":
+			s, err := claudecode.Status()
+			if err != nil {
+				ui.Die(err.Error(), fix)
+			}
+			ui.Out(s + "\n")
+		case "install":
+			ui.Step("Claude Code plugin")
+			changed, err := claudecode.Install()
+			if err != nil {
+				ui.Die(err.Error(), fix)
+			}
+			if changed {
+				ui.OK("enabled " + claudecode.Plugin + " in " + file)
+			} else {
+				ui.OK("already enabled in " + file)
+			}
+			ui.Info("Claude Code fetches it from GitHub when a session starts.")
+			ui.Info("Start a new session, or run /reload-plugins in one that is open.")
+		case "remove":
+			ui.Step("Claude Code plugin")
+			changed, err := claudecode.Remove()
+			if err != nil {
+				ui.Die(err.Error(), fix)
+			}
+			if changed {
+				ui.OK("removed " + claudecode.Plugin + " from " + file)
+			} else {
+				ui.OK("was not installed")
+			}
+			ui.Info("Open sessions keep it until they restart or run /reload-plugins.")
+		default:
+			usageExit()
 		}
 
 	case "cleanup":
