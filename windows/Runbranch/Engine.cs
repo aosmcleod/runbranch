@@ -269,6 +269,10 @@ public static class Engine
     public static string[] RemoveWorktreeArgs(string project, string @ref) => ["remove-worktree", project, @ref];
     public static string[] RemoveArgs(string project) => ["remove", project];
 
+    /// <summary>The Claude Code plugin: installed, disabled or absent.</summary>
+    public static string ClaudeCodeStatus() => Capture("claude-code", "status").Out.Trim();
+    public static string[] ClaudeCodeArgs(bool install) => ["claude-code", install ? "install" : "remove"];
+
     static readonly ConcurrentDictionary<string, bool> commandCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
