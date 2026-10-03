@@ -55,6 +55,9 @@ func DoRun(p *config.Project, ref, preset string) {
 	if msg := RuntimeUnsupported(p.Get("RUNTIME")); msg != "" {
 		ui.Die(msg, fmt.Sprintf("%s set %s RUNTIME mise      # or fnm", config.Self, p.ID))
 	}
+	// Before anything is stopped: a missing tool should not cost the run that
+	// is already up.
+	requireTools(p, targets)
 
 	// Kept for parity: reading the old run's state here restores ITS offset
 	// and mode over the ones just asked for, whenever a state file exists.
@@ -74,14 +77,19 @@ func DoRun(p *config.Project, ref, preset string) {
 		// point, and it is the one mode where hot reload sees what you are
 		// typing.
 		//
-		// Deliberately nothing else. No install, because that writes into a
-		// directory being worked in and can move a lockfile. No copied files,
-		// because they are already there. No per-run database, because that
-		// works by rewriting COPY_FILES, which here would mean editing a real
-		// .env.local — and never modifying the checkout is the promise the
-		// rest of the tool is built on. Infrastructure is left alone for the
-		// same reason: whatever the checkout is already pointed at is what it
-		// gets.
+		// No install, because that writes into a directory being worked in
+		// and can move a lockfile. No copied files, because they are already
+		// there. No per-run database, migrations or seed, because the database
+		// is work too, and a per-run one works by rewriting COPY_FILES, which
+		// here would mean editing a real .env.local — and never modifying the
+		// checkout is the promise the rest of the tool is built on.
+		//
+		// Infrastructure, though: the servers cannot start without it, and
+		// starting containers writes nothing in the checkout. COMPOSE_PROJECT
+		// pins the same compose project a worktree run uses, so these are the
+		// containers the checkout already talks to, started if they were not.
+		// Until 1.8.0 this was skipped too, and an in-place Studio run came up
+		// with no Postgres behind it.
 		cur := gitx.CurrentBranch(p)
 		if ref != cur {
 			ui.Die(fmt.Sprintf("%s has %s checked out, not %s.", p.Repo(), cur, ref),
@@ -90,6 +98,7 @@ func DoRun(p *config.Project, ref, preset string) {
 		ui.Step("In place   " + p.Repo())
 		ui.Info("the checkout as it stands, uncommitted work included")
 		ui.Warn("no install, no copied files, no per-run database")
+		bringUpInfra(p, p.Repo())
 		startRun(p, p.Repo(), ref, preset, targets)
 		return
 	}
@@ -168,10 +177,7 @@ func bringUpInfra(p *config.Project, wt string) {
 	if len(svcs) == 0 {
 		return
 	}
-	RequireCmd("docker", "Install Docker Desktop: https://www.docker.com/products/docker-desktop/")
-	if err := quietCmd("docker", "info"); err != nil {
-		ui.Die("Docker is installed but the daemon is not responding.", ui.DockerStartFix())
-	}
+	ensureDocker()
 	// Here only, as it always was; dropRunDatabase now defaults it too.
 	if p.Get("COMPOSE_PROJECT") == "" {
 		p.Set("COMPOSE_PROJECT", p.ID)

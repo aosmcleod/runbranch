@@ -343,6 +343,7 @@ runbranch disk                     # worktree sizes, and what is reclaimable
 runbranch cleanup studio           # remove worktrees, interactively
 runbranch prune-gone studio        # remove the ones whose branch no longer exists
 runbranch claude-code install      # the Claude Code plugin (status, remove)
+runbranch docker-repair            # Windows: unstick Docker Desktop after it was killed
 ```
 
 On the Mac, `./runbranch.sh` from a checkout still works: it is the previous

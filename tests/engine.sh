@@ -455,6 +455,58 @@ is "stop really stops it"     "$?" "7"
 is "the checkout is intact"   "$([ -f "$FIX/public/scratch.txt" ] && echo yes || echo no)" "yes"
 is "and still on its branch"  "$(git -C "$FIX" rev-parse --abbrev-ref HEAD)" "main"
 
+echo "==> an in-place run brings up its compose services too"
+# Until 1.8.0 an in-place run skipped infrastructure, so a project whose
+# servers need Postgres came up with nothing behind them. A stand-in docker
+# answers `docker info` and records what it was asked, because CI cannot be
+# relied on to have a daemon.
+if [ "$ENGINE_KIND" = go ]; then
+FAKEBIN="$TMP/fakebin"
+mkdir -p "$FAKEBIN"
+DOCKER_LOG="$(native "$TMP/docker.log")"
+export DOCKER_LOG
+: > "$TMP/docker.log"
+printf '#!/bin/sh\necho "$*" >> "$DOCKER_LOG"\nexit 0\n' > "$FAKEBIN/docker"
+chmod +x "$FAKEBIN/docker"
+printf '@echo %%*>>"%%DOCKER_LOG%%"\r\n@exit /b 0\r\n' > "$FAKEBIN/docker.cmd"
+cat > "$RB_PROJECTS_DIR/infra.conf" <<CONF
+NAME="Infra"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+COMPOSE_SERVICES="postgres valkey"
+COMPOSE_PROJECT="rbtest"
+TARGETS="web:4982:/:$PY $SERVE {port} public"
+CONF
+# PATH wants the POSIX spelling: TMP is C:/... on Windows, and the colon in
+# it would split the entry in two, leaving the real docker first.
+FAKEPATH="$FAKEBIN"
+[ "$WIN" = 1 ] && FAKEPATH="$(cygpath -u "$FAKEBIN")"
+PATH="$FAKEPATH:$PATH" "$ENGINE" run infra main web --in-place >/dev/null 2>&1
+is "starts"                      "$?" "0"
+has "asks compose for the services" "$(cat "$TMP/docker.log")" "up -d --wait postgres valkey"
+has "under the pinned project"   "$(cat "$TMP/docker.log")" "-p rbtest"
+"$ENGINE" stop infra >/dev/null 2>&1
+unset DOCKER_LOG
+else
+  skip "in-place compose" "the Go engine only; runbranch.sh still skips infrastructure in place"
+fi
+
+echo "==> a run names a missing tool before starting anything"
+if [ "$ENGINE_KIND" = go ]; then
+cat > "$RB_PROJECTS_DIR/notool.conf" <<CONF
+NAME="No Tool"
+REPO="$FIX"
+DEFAULT_BRANCH="main"
+TARGETS="web:4983:/:rb-no-such-tool-xyz --port {port}"
+CONF
+out="$("$ENGINE" run notool main web --in-place 2>&1)"
+is "refuses"                     "$?" "1"
+has "names the tool"             "$out" "rb-no-such-tool-xyz"
+has "and points at doctor"       "$out" "doctor notool"
+else
+  skip "missing tool" "the Go engine only; runbranch.sh starts the server and lets it fail"
+fi
+
 echo "==> in-place refuses a branch the checkout is not on"
 OFFBR="$("$ENGINE" run inplace feature/one web --in-place 2>&1)" || true
 has "says what is checked out" "$OFFBR" "has main checked out"

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/aosmcleod/runbranch/engine/internal/config"
+	"github.com/aosmcleod/runbranch/engine/internal/proc"
 )
 
 // PR is one pull request from the cache.
@@ -78,7 +79,7 @@ func EnsurePRCache(p *config.Project) {
 		ttl = v
 	}
 	if time.Since(fi.ModTime()) > time.Duration(ttl)*time.Second && config.Self != "" {
-		_ = spawnDetached(config.Self, "refresh-pr-cache", p.ID)
+		_ = proc.SpawnDetached(config.Self, "refresh-pr-cache", p.ID)
 	}
 }
 

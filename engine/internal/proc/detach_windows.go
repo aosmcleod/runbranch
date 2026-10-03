@@ -9,7 +9,7 @@
 // See the GNU General Public License for more details:
 // <https://www.gnu.org/licenses/>.
 
-package gitx
+package proc
 
 import (
 	"os/exec"
@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// spawnDetached starts this engine again for a background job and does not
+// SpawnDetached starts a program in the background and does not
 // wait for it. Its standard handles are the null device, never ours: a child
 // holding the app's pipe open would make the app wait for it.
 //
@@ -31,7 +31,7 @@ import (
 // Out of the caller's job too, when the job allows it, so an app that kills
 // its job on exit does not take a half-written refresh with it. A job that
 // forbids breakaway refuses the whole CreateProcess, hence the retry.
-func spawnDetached(exe string, args ...string) error {
+func SpawnDetached(exe string, args ...string) error {
 	flags := uint32(windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP)
 	start := func(f uint32) (*exec.Cmd, error) {
 		cmd := exec.Command(exe, args...)
