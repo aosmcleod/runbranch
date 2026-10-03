@@ -628,7 +628,21 @@ Tests pin these substrings: `running holder here`, `stop holder`, `started outsi
 - **With no arg:** every loadable project, then `        Nothing to reclaim.` if nothing happened.
 - **Exit:** 0 in both forms. Internally the return status carries a count.
 
-### 1.27 Shell-only human commands
+### 1.27 `claude-code [status|install|remove]` (app: `status` via `capture`, the others streamed)
+
+The Claude Code plugin in `claude-code/`. Go engine only; `runbranch.sh` does not have it.
+
+- **File:** `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`: the user's Claude Code settings. Only two keys are touched, `extraKnownMarketplaces.runbranch` and `enabledPlugins["runbranch@runbranch"]`, which are what Claude Code's own `/plugin marketplace add` and `/plugin install` write. Every other key and its order is kept; output is two-space indented. Before the first change a copy is left at `settings.json.runbranch-backup` (never overwritten). An unchanged file is not rewritten.
+- **`status`** (also with no argument): one word and `\n` on stdout, exit 0:
+  - `installed`: the marketplace is declared and the plugin is `true`;
+  - `disabled`: declared, and the plugin is `false`;
+  - `absent`: anything else.
+- **`install`:** `step "Claude Code plugin"`, then `ok "enabled runbranch@runbranch in <file>"` (or `ok "already enabled in <file>"`), then two `info` lines saying a new session or `/reload-plugins` picks it up. The marketplace becomes `{"source":{"source":"github","repo":"aosmcleod/runbranch"}}` unless it is already a `directory` source, which is a developer's checkout and is kept.
+- **`remove`:** `step`, then `ok "removed runbranch@runbranch from <file>"` or `ok "was not installed"`, then one `info` line. Drops the plugin's entry, and the marketplace unless it is a `directory` source; an object left empty is dropped with it.
+- **Failure:** a settings file that is not a JSON object dies with `<file> is not valid JSON: <reason>` and the fix `fix the JSON in <file>, then: runbranch claude-code <sub>`, and the file is not touched.
+- **Exit:** 0, 1 on a failure, 2 for an unknown subcommand.
+
+### 1.28 Shell-only human commands
 
 - **`status [<project>]`:**
   - When running: `\n<NAME> running\n  branch    <ref>\n  running   <preset>\n  worktree  <wt>\n  since     <started>\n`, then `  %-9s http://localhost:<port>` for each target, then `  logs      <dir>\n\n`. Exit 0.

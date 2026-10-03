@@ -273,6 +273,25 @@ is "pinning twice is idempotent" "$(grep -c fixture "$RB_HOME/favourites")" "1"
 "$ENGINE" favourite fixture off >/dev/null 2>&1
 is "unpinning sticks"          "$("$ENGINE" projects | awk -F'\t' '$1=="fixture"{print $6}')" "0"
 
+echo "==> claude-code"
+if [ "$ENGINE_KIND" = go ]; then
+  # Never the real ~/.claude: CLAUDE_CONFIG_DIR is where Claude Code reads it too.
+  CC_DIR="$TMP/claude-config"
+  mkdir -p "$CC_DIR"
+  printf '{"theme":"dark","hooks":{}}\n' > "$CC_DIR/settings.json"
+  cc() { CLAUDE_CONFIG_DIR="$(native "$CC_DIR")" "$ENGINE" claude-code "$@"; }
+  is "absent before install"          "$(cc status)" "absent"
+  cc install >/dev/null 2>&1
+  is "installed after install"        "$(cc status)" "installed"
+  has "the user's keys stay first"    "$(head -2 "$CC_DIR/settings.json")" '"theme": "dark"'
+  has "the GitHub marketplace is declared" "$(cat "$CC_DIR/settings.json")" '"repo": "aosmcleod/runbranch"'
+  cc remove >/dev/null 2>&1
+  is "absent after remove"            "$(cc status)" "absent"
+  is "remove leaves only what was there" "$(tr -d ' \n' < "$CC_DIR/settings.json")" '{"theme":"dark","hooks":{}}'
+else
+  skip "claude-code" "the Go engine only; runbranch.sh does not have it"
+fi
+
 echo "==> paths"
 is "paths reports five fields" "$("$ENGINE" paths fixture | awk -F'\t' '{print NF}')" "5"
 is "and six with a ref"        "$("$ENGINE" paths fixture main | awk -F'\t' '{print NF}')" "6"
