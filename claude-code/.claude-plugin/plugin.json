@@ -1,7 +1,7 @@
 {
   "name": "runbranch",
   "version": "1.8.0",
-  "description": "Shows whether the session's folder and branch are running under Runbranch, above the prompt, with start, stop and open controls",
+  "description": "Run, open and stop the session's folder and branch under Runbranch, from buttons below the prompt",
   "author": { "name": "Alec McLeod", "url": "https://github.com/aosmcleod" },
   "homepage": "https://github.com/aosmcleod/runbranch#claude-code",
   "repository": "https://github.com/aosmcleod/runbranch",
