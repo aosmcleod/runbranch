@@ -17,8 +17,9 @@ const OPEN: Item = { kind: 'button', label: '⛶', does: 'open' }
 const STOP: Item = { kind: 'button', label: '✕', does: 'stop' }
 
 export function footerItems(view: View | null, busy: Busy | null): Item[] {
+  // Starting or stopping: an ellipsis, no words (the label is for toasts).
   if (busy) {
-    return [{ kind: 'label', text: busy.label }]
+    return [{ kind: 'label', text: '…' }]
   }
   if (!view || view.kind === 'unavailable' || view.kind === 'none') {
     return []

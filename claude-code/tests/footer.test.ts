@@ -40,10 +40,10 @@ describe('footerItems', () => {
     expect(labels(running({ ref: 'feature', isThisBranch: false }))).toEqual(['↑', '✕'])
   })
 
-  test('while busy, the busy label replaces every button', () => {
+  test('while busy, an ellipsis replaces every button', () => {
     const busy = { label: 'Starting…', until: 0, settles: ['running' as const] }
-    expect(labels(running(), busy)).toEqual(['(Starting…)'])
-    expect(labels(null, busy)).toEqual(['(Starting…)'])
+    expect(labels(running(), busy)).toEqual(['(…)'])
+    expect(labels(null, busy)).toEqual(['(…)'])
   })
 })
 

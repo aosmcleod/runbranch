@@ -361,7 +361,7 @@ what it shows is what the app shows.
 | You see | Which means |
 |---|---|
 | **↑** | Run. Nothing is up: it starts in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
-| `Starting…` / `Stopping…` | Waiting on the engine; nothing to press |
+| `…` | Starting or stopping: waiting on the engine, nothing to press |
 | **⛶** **✕** | Open and Stop. Up on this branch; Open goes to the `web` target (else the first) in your browser |
 | **↑** **✕** | Run and Stop. Up, but on another branch than the session's; Run restarts it on this one |
 | `:3000 busy` | Something Runbranch did not start holds a port this project declares. `runbranch kill-port <pid>` frees it |

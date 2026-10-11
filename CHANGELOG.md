@@ -9,8 +9,8 @@ what the numbers mean.
 
 - The plugin is now buttons in the footer below the prompt, beside other
   plugins' (Next Up's, say), instead of a band above it: **↑** to run, then
-  **⛶** to open and **✕** to stop once the app is up, with `Starting…`,
-  `Stopping…` and `:N busy` as plain labels. Symbols, because the desktop app
+  **⛶** to open and **✕** to stop once the app is up, with `…` while it
+  starts or stops and `:N busy` as plain labels. Symbols, because the desktop app
   gives every plugin's footer buttons one short width between them. A folder
   with no config shows nothing. See [Claude Code](README.md#claude-code)
 - Generate config, Free port and the expandable target list are gone from
