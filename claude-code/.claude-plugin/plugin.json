@@ -1,6 +1,6 @@
 {
   "name": "runbranch",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Run, open and stop the session's folder and branch under Runbranch, from buttons below the prompt",
   "author": { "name": "Alec McLeod", "url": "https://github.com/aosmcleod" },
   "homepage": "https://github.com/aosmcleod/runbranch#claude-code",

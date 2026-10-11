@@ -9,7 +9,7 @@
       "name": "runbranch",
       "source": "./claude-code",
       "description": "Run, open and stop the session's folder and branch under Runbranch, from buttons below the prompt",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "license": "GPL-3.0",
       "homepage": "https://github.com/aosmcleod/runbranch#claude-code"
     }

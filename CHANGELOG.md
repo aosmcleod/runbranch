@@ -3,7 +3,7 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
-## Unreleased
+## 1.9.0
 
 **The Claude Code plugin moves below the prompt**
 
