@@ -13,6 +13,9 @@ export type Item =
   | { kind: 'button'; label: string; does: Does }
 
 const RUN: Item = { kind: 'button', label: '↑', does: 'start' }
+// With nothing of the project's running, Run is alone in the footer and
+// there is room to say what it does: a bare arrow there reads as ambiguous.
+const RUN_ALONE: Item = { kind: 'button', label: 'Run ↑', does: 'start' }
 const OPEN: Item = { kind: 'button', label: '⛶', does: 'open' }
 const STOP: Item = { kind: 'button', label: '✕', does: 'stop' }
 
@@ -25,7 +28,7 @@ export function footerItems(view: View | null, busy: Busy | null): Item[] {
     return []
   }
   if (view.kind === 'stopped') {
-    return [RUN]
+    return [RUN_ALONE]
   }
   if (view.kind === 'blocked') {
     return [{ kind: 'label', text: `:${view.port} busy` }]

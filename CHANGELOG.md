@@ -8,7 +8,7 @@ what the numbers mean.
 **The Claude Code plugin moves below the prompt**
 
 - The plugin is now buttons in the footer below the prompt, beside other
-  plugins' (Next Up's, say), instead of a band above it: **↑** to run, then
+  plugins' (Next Up's, say), instead of a band above it: **Run ↑** when nothing is up, then
   **⛶** to open and **✕** to stop once the app is up, with `…` while it
   starts or stops and `:N busy` as plain labels. Symbols, because the desktop app
   gives every plugin's footer buttons one short width between them. A folder

@@ -360,7 +360,7 @@ what it shows is what the app shows.
 
 | You see | Which means |
 |---|---|
-| **↑** | Run. Nothing is up: it starts in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
+| **Run ↑** | Nothing of the project's is up. Run starts it in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
 | `…` | Starting or stopping: waiting on the engine, nothing to press |
 | **⛶** **✕** | Open and Stop. Up on this branch; Open goes to the `web` target (else the first) in your browser |
 | **↑** **✕** | Run and Stop. Up, but on another branch than the session's; Run restarts it on this one |

@@ -24,7 +24,7 @@ describe('footerItems', () => {
   })
 
   test('stopped offers Run', () => {
-    expect(labels({ kind: 'stopped', project: 'studio', branch: 'main' })).toEqual(['↑'])
+    expect(labels({ kind: 'stopped', project: 'studio', branch: 'main' })).toEqual(['Run ↑'])
   })
 
   test('a taken port is a label only', () => {
