@@ -2,15 +2,17 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Action, Busy, Target, View } from '../types'
+import { footerItems, primaryTarget } from './footer'
+import type { Does } from './footer'
 
-// Shows whether the session's folder and branch are running under Runbranch,
-// and starts, stops or opens it. Reads the session's folder and nothing else:
-// no prompt, turn or tool hooks. Every fact comes from the runbranch engine.
+// Starts, opens and stops the session's folder and branch under Runbranch,
+// from buttons in the footer below the prompt. Reads the session's folder and
+// nothing else: no prompt, turn or tool hooks. Every fact comes from the
+// runbranch engine, which also opens the browser once a run is ready.
 
 const view = atom({ plugin: 'runbranch', key: 'view' } as const, null)
 const busy = atom({ plugin: 'runbranch', key: 'busy' } as const, null)
 const pending = atom({ plugin: 'runbranch', key: 'pending' } as const, null)
-const isExpanded = atom({ plugin: 'runbranch', key: 'isExpanded' } as const, false)
 
 const POLL_MS = 5000
 const DRAIN_MS = 500
@@ -184,7 +186,7 @@ function isSettled(waiting: Busy, next: View | null) {
   return next.kind !== 'running' || (next.isThisBranch && next.targets.every(t => t.isAlive))
 }
 
-// Runs one engine command with the band showing `label` meanwhile, then
+// Runs one engine command with the footer showing `label` meanwhile, then
 // re-reads the state. The engine says what went wrong on its last line.
 async function act(
   $: EngineInterface,
@@ -236,12 +238,8 @@ async function perform($: EngineInterface, action: Action) {
   const rb = ctx?.rb ?? 'runbranch'
   if (action.kind === 'start') {
     await start($)
-  } else if (action.kind === 'stop') {
-    await act($, 'Stopping…', [rb, 'stop', action.project], ['stopped', 'blocked', 'none'])
-  } else if (action.kind === 'free') {
-    await act($, 'Freeing port…', [rb, 'kill-port', String(action.pid)], ['stopped', 'running', 'none'])
   } else {
-    await act($, 'Generating config…', [rb, 'add', action.root], ['stopped', 'running', 'blocked'], 120000)
+    await act($, 'Stopping…', [rb, 'stop', action.project], ['stopped', 'blocked', 'none'])
   }
 }
 
@@ -280,96 +278,42 @@ export const register: Register = on => {
     return started
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+  // The footer below the prompt. Other mods draw here too (Next Up's buttons),
+  // so what comes after this hook is kept, to the right of these buttons.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const rest = await next(e)
     const current = await read($, view)
-    if (e.props.hasSurvey || current === null) {
-      return next(e)
+    const items = footerItems(current, await read($, busy))
+    if (items.length === 0) {
+      return rest
     }
-    const working = await read($, busy)
-    const expanded = await read($, isExpanded)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const queue = (action: Action) => void update($, pending, () => action)
+    const press = (does: Does) => {
+      if (does === 'open') {
+        const target = current?.kind === 'running' ? primaryTarget(current.targets) : undefined
+        if (target) {
+          open($, target.port)
+        }
+      } else if (does === 'stop') {
+        if (current && current.kind !== 'unavailable' && current.kind !== 'none') {
+          void update($, pending, (): Action => ({ kind: 'stop', project: current.project }))
+        }
+      } else {
+        void update($, pending, (): Action => ({ kind: 'start' }))
+      }
+    }
 
-    // One row in every state: what is going on at the left, the one thing to
-    // do about it pinned to the right edge.
-    const row = (left: JSX.Element[], right: JSX.Element[]) => (
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" width="100%">
-        <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1}>
-          {left}
-        </Box>
-        <Box flexDirection="row" alignItems="center" gap={1}>
-          {right}
-        </Box>
+    return (
+      <Box key="runbranch-footer" flexDirection="row" alignItems="center" gap={1}>
+        {items.map(item =>
+          item.kind === 'label' ? (
+            <Text key={`runbranch-${item.text}`} dimColor>{item.text}</Text>
+          ) : (
+            <Button key={`runbranch-${item.does}`} label={item.label} onPress={() => press(item.does)} />
+          ),
+        )}
+        {rest}
       </Box>
     )
-    const dot = (color: string, key: string) => <Text key={key} color={color}>●</Text>
-
-    if (working) {
-      return row([<Text key="busy" dimColor>{working.label}</Text>], [])
-    }
-
-    if (current.kind === 'unavailable') {
-      return row([<Text key="why" dimColor>{current.reason}</Text>], [])
-    }
-
-    if (current.kind === 'none') {
-      return row(
-        [<Text key="why" dimColor>No Runbranch config for this folder</Text>],
-        [<Button key="generate" label="Generate config" onPress={() => queue({ kind: 'generate', root: current.root })} />],
-      )
-    }
-
-    if (current.kind === 'stopped') {
-      return row(
-        [<Text key="dot" dimColor>○</Text>, <Text key="why" dimColor>Not running</Text>],
-        [<Button key="start" label="Start" variant="primary" onPress={() => queue({ kind: 'start' })} />],
-      )
-    }
-
-    if (current.kind === 'blocked') {
-      return row(
-        [dot('red', 'dot'), <Text key="why" dimColor wrap="truncate-end">:{current.port} is taken by {current.what}</Text>],
-        [<Button key="free" label="Free port" onPress={() => queue({ kind: 'free', pid: current.pid })} />],
-      )
-    }
-
-    const stop = <Button key="stop" label="Stop" onPress={() => queue({ kind: 'stop', project: current.project })} />
-
-    if (!current.isThisBranch) {
-      return row(
-        [dot('yellow', 'dot'), <Text key="why" dimColor wrap="truncate-end">Running {current.ref}, not this branch</Text>],
-        [<Button key="restart" label="Restart here" variant="primary" onPress={() => queue({ kind: 'start' })} />, stop],
-      )
-    }
-
-    const primary = current.targets.find(t => t.name === 'web') ?? current.targets[0]
-    const others = current.targets.length - 1
-    const detail = [current.isInPlace ? 'in place' : 'worktree', current.upFor && `up ${current.upFor}`]
-      .filter(Boolean)
-      .join(' · ')
-    const toggle = (label: string) => (
-      <Button key="toggle" label={label} dimColor onPress={() => void update($, isExpanded, value => !value)} />
-    )
-
-    // Collapsed: the main target and how many more. Expanded: every target
-    // inline, in the same row, so the band never grows taller.
-    const left = expanded && others > 0
-      ? [
-          ...current.targets.flatMap(t => [
-            dot(t.isAlive ? 'green' : 'yellow', `dot-${t.name}`),
-            <Text key={`name-${t.name}`} dimColor>{t.name}</Text>,
-            <Button key={`open-${t.name}`} label={`:${t.port} ↗`} onPress={() => open($, t.port)} />,
-          ]),
-          toggle('‹'),
-        ]
-      : [
-          dot(current.targets.every(t => t.isAlive) ? 'green' : 'yellow', 'dot'),
-          ...(primary
-            ? [<Button key="open" label={`localhost:${primary.port} ↗`} onPress={() => open($, primary.port)} />]
-            : []),
-          ...(others > 0 ? [toggle(`+${others}`)] : []),
-        ]
-
-    return row(left, [<Text key="detail" dimColor>{detail}</Text>, stop])
   })
 }

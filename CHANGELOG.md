@@ -3,6 +3,19 @@
 Notable changes, newest first. See [docs/VERSIONING.md](docs/VERSIONING.md) for
 what the numbers mean.
 
+## Unreleased
+
+**The Claude Code plugin moves below the prompt**
+
+- The plugin is now buttons in the footer below the prompt, beside other
+  plugins' (Next Up's, say), instead of a band above it: **Run ↑** when nothing is up, then
+  **⛶** to open and **✕** to stop once the app is up, with `…` while it
+  starts or stops and `:N busy` as plain labels. Symbols, because the desktop app
+  gives every plugin's footer buttons one short width between them. A folder
+  with no config shows nothing. See [Claude Code](README.md#claude-code)
+- Generate config, Free port and the expandable target list are gone from
+  it; `runbranch add` and `runbranch kill-port` do the first two from a shell
+
 ## 1.8.0
 
 **In-place runs bring up what the servers need**

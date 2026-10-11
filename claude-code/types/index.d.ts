@@ -17,7 +17,7 @@ export type View =
       targets: Target[]
     }
 
-// What the band is waiting on. The poll clears it once the engine reports one
+// What the footer is waiting on. The poll clears it once the engine reports one
 // of `settles` (or `until` passes), so a lost reply can never leave it stuck.
 export type Busy = { label: string; until: number; settles: View['kind'][] }
 
@@ -26,8 +26,6 @@ export type Busy = { label: string; until: number; settles: View['kind'][] }
 export type Action =
   | { kind: 'start' }
   | { kind: 'stop'; project: string }
-  | { kind: 'free'; pid: number }
-  | { kind: 'generate'; root: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -35,7 +33,6 @@ declare module 'claude-code' {
       view: View | null
       busy: Busy | null
       pending: Action | null
-      isExpanded: boolean
     }
   }
 }

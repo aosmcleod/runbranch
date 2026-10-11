@@ -353,19 +353,25 @@ engine, kept as a fallback until it is retired, and it takes the same commands.
 
 ## Claude Code
 
-A Claude Code plugin puts the run of the folder you are working in above the
-prompt, in the desktop app's Code tab and in the terminal: whether it is up,
-on which port, and on which branch, with the one thing to do about it at the
-right-hand end. It asks the engine and nothing else, so what it shows is what
-the app shows.
+A Claude Code plugin puts buttons for the run of the folder you are working in
+in the footer below the prompt, in the desktop app's Code tab and in the
+terminal, beside any other plugin's. It asks the engine and nothing else, so
+what it shows is what the app shows.
 
 | You see | Which means |
 |---|---|
-| `○ Not running` · **Start** | Nothing is up. Start runs it in place, on the branch the session has checked out |
-| `● localhost:3000 ↗` `+2` · `in place · up 14m` **Stop** | Up on this branch. The port opens your browser; `+2` lays every target out in the same row |
-| `● Running main, not this branch` · **Restart here** **Stop** | Up, but on another branch than the session's |
-| `● :3000 is taken by node.exe` · **Free port** | Something Runbranch did not start holds a port this project declares |
-| `No Runbranch config for this folder` · **Generate config** | The folder is not a project yet. Generate runs `runbranch add` on it |
+| **Run ↑** | Nothing of the project's is up. Run starts it in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
+| `…` | Starting or stopping: waiting on the engine, nothing to press |
+| **⛶** **✕** | Open and Stop. Up on this branch; Open goes to the `web` target (else the first) in your browser |
+| **↑** **✕** | Run and Stop. Up, but on another branch than the session's; Run restarts it on this one |
+| `:3000 busy` | Something Runbranch did not start holds a port this project declares. `runbranch kill-port <pid>` frees it |
+
+The buttons are symbols because the desktop app gives every plugin's footer
+buttons one short width between them
+([anthropics/claude-code#100116](https://github.com/anthropics/claude-code/issues/100116)).
+Nothing shows outside a git folder, where Runbranch is not installed, or in a
+folder that is not a project yet: `runbranch add <folder>` (or **Add
+project…** in the app) makes it one.
 
 Install it from the app — **Claude Code Plugin…** in the File menu on the Mac,
 **Install Claude Code plugin…** in the ⋯ menu on Windows — or from Claude Code:
@@ -384,7 +390,7 @@ itself. It carries the app's version and updates when Runbranch does; each
 as `Runbranch-X.Y.Z-claude-code-plugin.zip`, for `claude --plugin-dir`.
 
 A session opened in one of Claude's own worktrees cannot run in place, since
-in place means the project's checkout. Start runs that branch in a Runbranch
+in place means the project's checkout. Run starts that branch in a Runbranch
 worktree instead, which has its commits but not uncommitted changes.
 
 ---
