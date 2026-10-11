@@ -1,8 +1,10 @@
 import type { Busy, Target, View } from '../types'
 
 // What the footer below the prompt shows, as plain data so it can be tested
-// without drawing. At most two items: a dim label while there is nothing to
-// press, otherwise the one or two things worth doing.
+// without drawing. At most two items, as symbols: the desktop app gives every
+// mod's footer buttons one short width between them (anthropics/claude-code
+// #100116), and Next Up's sit there too. Nothing shows where there is nothing
+// to do, so a folder with no config shows nothing.
 
 export type Does = 'start' | 'stop' | 'open'
 
@@ -10,25 +12,22 @@ export type Item =
   | { kind: 'label'; text: string }
   | { kind: 'button'; label: string; does: Does }
 
-const RUN: Item = { kind: 'button', label: 'Run ↑', does: 'start' }
-const OPEN: Item = { kind: 'button', label: 'Open ⛶', does: 'open' }
-const STOP: Item = { kind: 'button', label: 'Stop ✕', does: 'stop' }
+const RUN: Item = { kind: 'button', label: '↑', does: 'start' }
+const OPEN: Item = { kind: 'button', label: '⛶', does: 'open' }
+const STOP: Item = { kind: 'button', label: '✕', does: 'stop' }
 
 export function footerItems(view: View | null, busy: Busy | null): Item[] {
   if (busy) {
     return [{ kind: 'label', text: busy.label }]
   }
-  if (!view || view.kind === 'unavailable') {
+  if (!view || view.kind === 'unavailable' || view.kind === 'none') {
     return []
-  }
-  if (view.kind === 'none') {
-    return [{ kind: 'label', text: 'No config' }]
   }
   if (view.kind === 'stopped') {
     return [RUN]
   }
   if (view.kind === 'blocked') {
-    return [{ kind: 'label', text: `Port ${view.port} busy` }]
+    return [{ kind: 'label', text: `:${view.port} busy` }]
   }
   // Running another branch: Run restarts it on this one.
   return view.isThisBranch ? [OPEN, STOP] : [RUN, STOP]

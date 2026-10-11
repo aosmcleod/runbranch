@@ -17,7 +17,7 @@ function probed(on: On, view: View) {
   on('state.get', { plugin: 'runbranch', key: 'view' }, async () => ({ value: { value: view, version: 1 } }))
   on('ui.render', { component: 'SessionMode' }, async ($, e) => {
     const { Text } = $.ui.resolve(e)
-    return <Text>Next Up ↗</Text>
+    return <Text>◇ 5</Text>
   })
 }
 
@@ -28,15 +28,15 @@ describe('the footer', () => {
       const ui = await $.ui.mount({ plugin: 'runbranch', surface, ...FOOTER })
       expect(await ui.find({ key: 'runbranch-open' })).toBeDefined()
       expect(await ui.find({ key: 'runbranch-stop' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: 'Next Up ↗' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '◇ 5' })).toBeDefined()
       await ui.unmount()
     }
   })
 
-  test('a folder with no config shows the label and no buttons', async ($, on) => {
+  test('a folder with no config leaves the footer to the others', async ($, on) => {
     probed(on, { kind: 'none', root: 'C:/dev/x' })
     const ui = await $.ui.mount({ plugin: 'runbranch', surface: 'desktop', ...FOOTER })
-    expect(await ui.find({ type: 'Text', text: 'No config' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '◇ 5' })).toBeDefined()
     expect(await ui.find({ key: 'runbranch-start' })).toBeUndefined()
     await ui.unmount()
   })

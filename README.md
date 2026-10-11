@@ -360,14 +360,18 @@ what it shows is what the app shows.
 
 | You see | Which means |
 |---|---|
-| **Run ↑** | Nothing is up. Run starts it in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
+| **↑** | Run. Nothing is up: it starts in place, on the branch the session has checked out, with the widest preset. Once it is ready the engine opens it in your browser |
 | `Starting…` / `Stopping…` | Waiting on the engine; nothing to press |
-| **Open ⛶** **Stop ✕** | Up on this branch. Open goes to the `web` target (else the first) in your browser |
-| **Run ↑** **Stop ✕** | Up, but on another branch than the session's. Run restarts it on this one |
-| `Port 3000 busy` | Something Runbranch did not start holds a port this project declares. `runbranch kill-port <pid>` frees it |
-| `No config` | The folder is not a project yet. `runbranch add <folder>` (or **Add project…** in the app) makes it one |
+| **⛶** **✕** | Open and Stop. Up on this branch; Open goes to the `web` target (else the first) in your browser |
+| **↑** **✕** | Run and Stop. Up, but on another branch than the session's; Run restarts it on this one |
+| `:3000 busy` | Something Runbranch did not start holds a port this project declares. `runbranch kill-port <pid>` frees it |
 
-Nothing shows outside a git folder, or where Runbranch is not installed.
+The buttons are symbols because the desktop app gives every plugin's footer
+buttons one short width between them
+([anthropics/claude-code#100116](https://github.com/anthropics/claude-code/issues/100116)).
+Nothing shows outside a git folder, where Runbranch is not installed, or in a
+folder that is not a project yet: `runbranch add <folder>` (or **Add
+project…** in the app) makes it one.
 
 Install it from the app — **Claude Code Plugin…** in the File menu on the Mac,
 **Install Claude Code plugin…** in the ⋯ menu on Windows — or from Claude Code:

@@ -17,30 +17,27 @@ const labels = (view: View | null, busy: Parameters<typeof footerItems>[1] = nul
   footerItems(view, busy).map(item => (item.kind === 'label' ? `(${item.text})` : item.label))
 
 describe('footerItems', () => {
-  test('shows nothing until probed, outside git or without Runbranch', () => {
+  test('shows nothing until probed, outside git, without Runbranch or without a config', () => {
     expect(labels(null)).toEqual([])
     expect(labels({ kind: 'unavailable', reason: 'Runbranch not installed' })).toEqual([])
-  })
-
-  test('a folder with no config says so, with nothing to press', () => {
-    expect(labels({ kind: 'none', root: 'C:/dev/x' })).toEqual(['(No config)'])
+    expect(labels({ kind: 'none', root: 'C:/dev/x' })).toEqual([])
   })
 
   test('stopped offers Run', () => {
-    expect(labels({ kind: 'stopped', project: 'studio', branch: 'main' })).toEqual(['Run ↑'])
+    expect(labels({ kind: 'stopped', project: 'studio', branch: 'main' })).toEqual(['↑'])
   })
 
   test('a taken port is a label only', () => {
     const blocked: View = { kind: 'blocked', project: 'studio', branch: 'main', port: 3000, pid: 9, what: 'node.exe' }
-    expect(labels(blocked)).toEqual(['(Port 3000 busy)'])
+    expect(labels(blocked)).toEqual(['(:3000 busy)'])
   })
 
   test('running here offers Open and Stop', () => {
-    expect(labels(running())).toEqual(['Open ⛶', 'Stop ✕'])
+    expect(labels(running())).toEqual(['⛶', '✕'])
   })
 
   test('running another branch offers Run (to restart here) and Stop', () => {
-    expect(labels(running({ ref: 'feature', isThisBranch: false }))).toEqual(['Run ↑', 'Stop ✕'])
+    expect(labels(running({ ref: 'feature', isThisBranch: false }))).toEqual(['↑', '✕'])
   })
 
   test('while busy, the busy label replaces every button', () => {
